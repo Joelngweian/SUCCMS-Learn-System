@@ -101,7 +101,7 @@ export function Login() {
       <div className="absolute inset-0 z-0 bg-white/50" />
 
       {/* 4. LOGIN CARD LAYER */}
-      <Card className="w-full max-w-md shadow-2xl border-0 bg-white/95 backdrop-blur-md relative z-10 animate-in fade-in zoom-in-95 duration-500">
+      <Card className="w-full max-w-md shadow-2xl border-0 bg-white/30 backdrop-blur-md relative z-10 animate-in fade-in zoom-in-95 duration-500">
         <CardHeader className="space-y-1 text-center pb-2">
           <div className="flex justify-center mb-4">
             <div className="p-3 bg-blue-600 rounded-full shadow-lg shadow-blue-600/20">
