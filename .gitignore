@@ -1,0 +1,30 @@
+# Dependencies and generated output
+node_modules/
+build/
+dist/
+.vite/
+coverage/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Local editor and tool state
+.idea/
+.docx_qa/
+supabase/.temp/
+
+# Runtime logs
+*.log
+
+# Local code-change history
+admin_announcements_history.txt
+admin_dashboard_all_edits*.txt
+admin_dashboard_announcements.txt
+admin_history.txt
+coursepage_history.txt
+body.txt
+extracted_text.txt
+temp.txt
+

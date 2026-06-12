@@ -1,11 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase";
 import { 
   Brain, 
-  Play, 
   ExternalLink, 
   BookOpen, 
   Video, 
@@ -18,7 +26,10 @@ import {
   Zap,
   ThumbsUp,
   ThumbsDown,
-  Bookmark
+  Bookmark,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 
 interface AIRecommendationsProps {
@@ -27,128 +38,158 @@ interface AIRecommendationsProps {
   performanceData?: any;
 }
 
-export function AIRecommendations({ userRole, currentCourses = [], performanceData }: AIRecommendationsProps) {
-  const [bookmarkedItems, setBookmarkedItems] = useState<Set<string>>(new Set());
+interface Recommendation {
+  id: string;
+  type: "video" | "article" | "course" | "practice" | "tool";
+  title: string;
+  platform: string;
+  duration: string;
+  qualityScore: number;
+  relevance: number;
+  reason: string;
+  url: string;
+  difficulty: "beginner" | "intermediate" | "advanced" | "mixed" | "academic" | "tool";
+  tags: string[];
+  impact: string;
+}
 
-  const studentRecommendations = [
-    {
-      id: "1",
-      type: "video",
-      title: "Advanced SQL Joins Explained",
-      platform: "Khan Academy",
-      duration: "12 min",
-      rating: 4.8,
-      views: "2.3M",
-      relevance: 95,
-      reason: "Based on your struggles with complex queries in CS301",
-      url: "https://khanacademy.org/sql-joins",
-      difficulty: "intermediate",
-      tags: ["SQL", "Database", "Joins"]
-    },
-    {
-      id: "2", 
-      type: "article",
-      title: "Database Normalization Best Practices",
-      platform: "GeeksforGeeks",
-      duration: "8 min read",
-      rating: 4.6,
-      views: "890K",
-      relevance: 88,
-      reason: "Recommended for upcoming Database Design assignment",
-      url: "https://geeksforgeeks.org/normalization",
-      difficulty: "beginner",
-      tags: ["Database", "Normalization", "Design"]
-    },
-    {
-      id: "3",
-      type: "video",
-      title: "Dynamic Programming Patterns",
-      platform: "YouTube - Abdul Bari",
-      duration: "45 min",
-      rating: 4.9,
-      views: "1.8M", 
-      relevance: 92,
-      reason: "Your algorithm performance could improve with DP concepts",
-      url: "https://youtube.com/watch?v=dp123",
-      difficulty: "advanced",
-      tags: ["Algorithms", "Dynamic Programming", "Problem Solving"]
-    },
-    {
-      id: "4",
-      type: "practice",
-      title: "LeetCode SQL Practice Problems",
-      platform: "LeetCode",
-      duration: "30 problems",
-      rating: 4.7,
-      views: "500K",
-      relevance: 85,
-      reason: "Practice problems matching your current skill level",
-      url: "https://leetcode.com/studyplan/sql",
-      difficulty: "mixed",
-      tags: ["SQL", "Practice", "Problem Solving"]
-    },
-    {
-      id: "5",
-      type: "course",
-      title: "Software Design Patterns Masterclass",
-      platform: "Coursera",
-      duration: "6 weeks",
-      rating: 4.8,
-      views: "125K",
-      relevance: 78,
-      reason: "Perfect preparation for your Software Engineering course",
-      url: "https://coursera.org/design-patterns",
-      difficulty: "intermediate",
-      tags: ["Software Engineering", "Design Patterns", "Architecture"]
+interface RecommendationPreference {
+  isBookmarked: boolean;
+  feedback: "up" | "down" | null;
+}
+
+const emptyPreference: RecommendationPreference = {
+  isBookmarked: false,
+  feedback: null,
+};
+
+export function AIRecommendations({
+  userRole,
+  currentCourses = [],
+  performanceData,
+}: AIRecommendationsProps) {
+  const { user } = useAuth();
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [preferences, setPreferences] = useState<Record<string, RecommendationPreference>>({});
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [interactionError, setInteractionError] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [recommendationPage, setRecommendationPage] = useState(0);
+
+  const recommendationContext = JSON.stringify({
+    courses: performanceData?.courses || [],
+    overview: performanceData?.overview || {},
+    currentCourses,
+  });
+
+  useEffect(() => {
+    if (!user?.id || userRole !== "lecturer") return;
+    loadPreferences();
+    loadRecommendations();
+  }, [user?.id, userRole, recommendationContext]);
+
+  const loadPreferences = async () => {
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from("ai_recommendation_preferences")
+      .select("recommendation_id, is_bookmarked, feedback")
+      .eq("user_id", user.id);
+
+    if (error) {
+      console.warn("Could not load AI recommendation preferences:", error);
+      return;
     }
-  ];
 
-  const lecturerRecommendations = [
-    {
-      id: "l1",
-      type: "tool",
-      title: "SQLiteOnline - Interactive Database Tool",
-      platform: "SQLiteOnline",
-      duration: "Free tool",
-      rating: 4.7,
-      views: "1.2M",
-      relevance: 95,
-      reason: "Perfect for live database demonstrations in CS301",
-      url: "https://sqliteonline.com",
-      difficulty: "tool",
-      tags: ["Database", "Teaching", "Interactive"]
-    },
-    {
-      id: "l2",
-      type: "article",
-      title: "Effective Methods for Teaching Algorithms",
-      platform: "ACM Digital Library",
-      duration: "15 min read",
-      rating: 4.6,
-      views: "45K",
-      relevance: 88,
-      reason: "Research-backed strategies for your CS205 course",
-      url: "https://dl.acm.org/teaching-algorithms",
-      difficulty: "academic",
-      tags: ["Teaching", "Algorithms", "Pedagogy"]
-    },
-    {
-      id: "l3",
-      type: "video",
-      title: "Creating Engaging Programming Assignments",
-      platform: "EdTech Hub",
-      duration: "25 min",
-      rating: 4.8,
-      views: "78K",
-      relevance: 82,
-      reason: "Based on student engagement patterns in your courses",
-      url: "https://edtechhub.org/programming-assignments",
-      difficulty: "intermediate",
-      tags: ["Assignment Design", "Engagement", "Programming"]
+    const nextPreferences: Record<string, RecommendationPreference> = {};
+    (data || []).forEach((row: any) => {
+      nextPreferences[row.recommendation_id] = {
+        isBookmarked: Boolean(row.is_bookmarked),
+        feedback: row.feedback === "up" || row.feedback === "down" ? row.feedback : null,
+      };
+    });
+    setPreferences(nextPreferences);
+  };
+
+  const loadRecommendations = async (forceRefresh = false) => {
+    if (!user || userRole !== "lecturer") return;
+
+    const courses = performanceData?.courses || [];
+    if (courses.length === 0) {
+      setRecommendations([]);
+      setLoadError("");
+      return;
     }
-  ];
 
-  const recommendations = userRole === 'student' ? studentRecommendations : lecturerRecommendations;
+    setIsLoading(true);
+    setLoadError("");
+
+    try {
+      const cacheKey = `lecturer-ai-recommendations:v3:${user.id}`;
+      if (!forceRefresh) {
+        try {
+          const cachedValue = sessionStorage.getItem(cacheKey);
+          if (cachedValue) {
+            const cached = JSON.parse(cachedValue);
+            const isCurrent =
+              cached.context === recommendationContext &&
+              Date.now() - Number(cached.createdAt || 0) < 30 * 60 * 1000;
+
+            if (isCurrent && Array.isArray(cached.recommendations)) {
+              setRecommendations(cached.recommendations);
+              return;
+            }
+          }
+        } catch {
+          // Continue without cache when browser storage is unavailable or invalid.
+        }
+      }
+
+      const { data, error } = await supabase.functions.invoke(
+        "gemini-lecturer-recommendations",
+        {
+          body: {
+            courses,
+            overview: performanceData?.overview || {},
+          },
+        },
+      );
+
+      if (error) {
+        let message = error.message;
+        try {
+          const details = await (error as any)?.context?.json?.();
+          if (details?.error) message = details.error;
+        } catch {
+          // The standard function error message is used when no JSON body exists.
+        }
+        throw new Error(message);
+      }
+
+      const generated = Array.isArray(data?.recommendations)
+        ? data.recommendations
+        : [];
+      setRecommendations(generated);
+      try {
+        sessionStorage.setItem(
+          cacheKey,
+          JSON.stringify({
+            context: recommendationContext,
+            createdAt: Date.now(),
+            recommendations: generated,
+          }),
+        );
+      } catch {
+        // Recommendations still work when browser storage is unavailable.
+      }
+    } catch (error: any) {
+      console.error("Could not load lecturer AI recommendations:", error);
+      setLoadError(error?.message || "AI recommendations could not be loaded.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -184,14 +225,191 @@ export function AIRecommendations({ userRole, currentCourses = [], performanceDa
     }
   };
 
-  const toggleBookmark = (id: string) => {
-    const newBookmarks = new Set(bookmarkedItems);
-    if (newBookmarks.has(id)) {
-      newBookmarks.delete(id);
-    } else {
-      newBookmarks.add(id);
+  const savePreference = async (
+    item: Recommendation,
+    nextPreference: RecommendationPreference,
+  ) => {
+    if (!user) return;
+
+    const previousPreference = preferences[item.id] || emptyPreference;
+    setInteractionError("");
+    setPreferences((current) => ({
+      ...current,
+      [item.id]: nextPreference,
+    }));
+
+    const { error } = await supabase
+      .from("ai_recommendation_preferences")
+      .upsert(
+        {
+          user_id: user.id,
+          recommendation_id: item.id,
+          title: item.title,
+          url: item.url,
+          is_bookmarked: nextPreference.isBookmarked,
+          feedback: nextPreference.feedback,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,recommendation_id" },
+      );
+
+    if (error) {
+      setPreferences((current) => ({
+        ...current,
+        [item.id]: previousPreference,
+      }));
+      setInteractionError("Could not save this recommendation preference.");
     }
-    setBookmarkedItems(newBookmarks);
+  };
+
+  const toggleBookmark = (item: Recommendation) => {
+    const current = preferences[item.id] || emptyPreference;
+    savePreference(item, {
+      ...current,
+      isBookmarked: !current.isBookmarked,
+    });
+  };
+
+  const toggleFeedback = (item: Recommendation, feedback: "up" | "down") => {
+    const current = preferences[item.id] || emptyPreference;
+    savePreference(item, {
+      ...current,
+      feedback: current.feedback === feedback ? null : feedback,
+    });
+  };
+
+  const openResource = (url: string) => {
+    const resourceWindow = window.open(url, "_blank", "noopener,noreferrer");
+    if (resourceWindow) resourceWindow.opener = null;
+  };
+
+  const openAllRecommendations = () => {
+    setRecommendationPage(0);
+    setShowAll(true);
+  };
+
+  const changeRecommendationPage = (nextPage: number) => {
+    const lastPage = Math.max(recommendations.length - 1, 0);
+    setRecommendationPage(Math.min(Math.max(nextPage, 0), lastPage));
+  };
+
+  const renderRecommendation = (item: Recommendation) => {
+    const TypeIcon = getTypeIcon(item.type);
+    const preference = preferences[item.id] || emptyPreference;
+
+    return (
+      <div
+        key={item.id}
+        className="p-4 border rounded-lg space-y-3 hover:shadow-md transition-shadow"
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            <div className="p-2 bg-muted rounded-lg shrink-0">
+              <TypeIcon className="h-4 w-4" />
+            </div>
+            <div className="flex-1 min-w-0 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <h4 className="font-medium text-sm leading-tight break-words">
+                  {item.title}
+                </h4>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => toggleBookmark(item)}
+                  className="ml-2 shrink-0"
+                  title={preference.isBookmarked ? "Remove bookmark" : "Bookmark resource"}
+                >
+                  <Bookmark
+                    className={`h-4 w-4 ${
+                      preference.isBookmarked
+                        ? "fill-blue-500 text-blue-500"
+                        : "text-muted-foreground"
+                    }`}
+                  />
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge className={getTypeColor(item.type)} variant="secondary">
+                  {item.type}
+                </Badge>
+                <Badge className={getDifficultyColor(item.difficulty)} variant="secondary">
+                  {item.difficulty}
+                </Badge>
+                <span className="text-xs text-muted-foreground">{item.platform}</span>
+              </div>
+
+              <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+                <div className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  {item.duration}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                  {Number(item.qualityScore || 0).toFixed(1)}
+                </div>
+                <div className="flex items-center gap-1">
+                  <TrendingUp className="h-3 w-3" />
+                  {item.impact}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">Relevance Match</span>
+                  <span className="text-green-600 font-medium">{item.relevance}%</span>
+                </div>
+                <Progress value={item.relevance} className="h-1" />
+              </div>
+
+              <p className="text-xs text-blue-600 bg-blue-50 p-2 rounded break-words">
+                <Brain className="h-3 w-3 inline mr-1" />
+                {item.reason}
+              </p>
+
+              <div className="flex flex-wrap gap-1">
+                {(item.tags || []).map((tag) => (
+                  <Badge key={tag} variant="outline" className="text-xs">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button className="flex-1" size="sm" onClick={() => openResource(item.url)}>
+            <ExternalLink className="h-3 w-3 mr-1" />
+            Open Resource
+          </Button>
+          <Button
+            variant={preference.feedback === "up" ? "secondary" : "outline"}
+            size="sm"
+            onClick={() => toggleFeedback(item, "up")}
+            title="Helpful"
+          >
+            <ThumbsUp
+              className={`h-3 w-3 ${
+                preference.feedback === "up" ? "fill-blue-500 text-blue-600" : ""
+              }`}
+            />
+          </Button>
+          <Button
+            variant={preference.feedback === "down" ? "secondary" : "outline"}
+            size="sm"
+            onClick={() => toggleFeedback(item, "down")}
+            title="Not helpful"
+          >
+            <ThumbsDown
+              className={`h-3 w-3 ${
+                preference.feedback === "down" ? "fill-red-500 text-red-600" : ""
+              }`}
+            />
+          </Button>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -214,102 +432,109 @@ export function AIRecommendations({ userRole, currentCourses = [], performanceDa
           }
         </div>
 
-        {recommendations.slice(0, 3).map((item) => {
-          const TypeIcon = getTypeIcon(item.type);
-          const isBookmarked = bookmarkedItems.has(item.id);
-          
-          return (
-            <div key={item.id} className="p-4 border rounded-lg space-y-3 hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between">
-                <div className="flex items-start gap-3 flex-1">
-                  <div className="p-2 bg-muted rounded-lg">
-                    <TypeIcon className="h-4 w-4" />
-                  </div>
-                  <div className="flex-1 space-y-2">
-                    <div className="flex items-start justify-between">
-                      <h4 className="font-medium text-sm leading-tight">{item.title}</h4>
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        onClick={() => toggleBookmark(item.id)}
-                        className="ml-2"
-                      >
-                        <Bookmark 
-                          className={`h-4 w-4 ${isBookmarked ? 'fill-blue-500 text-blue-500' : 'text-muted-foreground'}`} 
-                        />
-                      </Button>
-                    </div>
-                    
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge className={getTypeColor(item.type)} variant="secondary">
-                        {item.type}
-                      </Badge>
-                      <Badge className={getDifficultyColor(item.difficulty)} variant="secondary">
-                        {item.difficulty}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">{item.platform}</span>
-                    </div>
-
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <div className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {item.duration}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-                        {item.rating}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <TrendingUp className="h-3 w-3" />
-                        {item.views}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">Relevance Match</span>
-                        <span className="text-green-600 font-medium">{item.relevance}%</span>
-                      </div>
-                      <Progress value={item.relevance} className="h-1" />
-                    </div>
-
-                    <p className="text-xs text-blue-600 bg-blue-50 p-2 rounded">
-                      <Brain className="h-3 w-3 inline mr-1" />
-                      {item.reason}
-                    </p>
-
-                    <div className="flex flex-wrap gap-1">
-                      {item.tags.map((tag, index) => (
-                        <Badge key={index} variant="outline" className="text-xs">
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button className="flex-1" size="sm">
-                  <ExternalLink className="h-3 w-3 mr-1" />
-                  Open Resource
-                </Button>
-                <Button variant="outline" size="sm">
-                  <ThumbsUp className="h-3 w-3" />
-                </Button>
-                <Button variant="outline" size="sm">
-                  <ThumbsDown className="h-3 w-3" />
-                </Button>
-              </div>
+        {isLoading ? (
+          <div className="flex min-h-44 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+            <Loader2 className="h-6 w-6 animate-spin text-purple-600" />
+            Gemini is finding teaching resources for your courses...
+          </div>
+        ) : loadError ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>{loadError}</span>
             </div>
-          );
-        })}
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={() => loadRecommendations(true)}
+            >
+              <RefreshCw className="h-3 w-3 mr-1" />
+              Try Again
+            </Button>
+          </div>
+        ) : recommendations.length > 0 ? (
+          recommendations.slice(0, 3).map(renderRecommendation)
+        ) : (
+          <div className="rounded-lg border p-5 text-center text-sm text-muted-foreground">
+            Add a course to receive personalized teaching resources.
+          </div>
+        )}
 
-        <Button variant="outline" className="w-full">
-          <Brain className="h-4 w-4 mr-2" />
-          View All AI Recommendations ({recommendations.length})
-        </Button>
+        {interactionError && (
+          <p className="text-xs text-red-600">{interactionError}</p>
+        )}
+
+        {recommendations.length > 3 && (
+          <Button variant="outline" className="w-full" onClick={openAllRecommendations}>
+            <Brain className="h-4 w-4 mr-2" />
+            View All AI Recommendations ({recommendations.length})
+          </Button>
+        )}
       </CardContent>
+
+      <Dialog
+        open={showAll}
+        onOpenChange={(open) => {
+          setShowAll(open);
+          if (!open) setRecommendationPage(0);
+        }}
+      >
+        <DialogContent className="sm:max-w-xl" hideCloseButton={false}>
+          <DialogHeader className="pr-12">
+            <DialogTitle className="flex items-center gap-2">
+              <Brain className="h-5 w-5 text-purple-600" />
+              All AI Recommendations
+            </DialogTitle>
+            <DialogDescription>
+              Teaching resources selected for your current courses and course performance.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="min-h-[390px]">
+            {recommendations[recommendationPage] &&
+              renderRecommendation(recommendations[recommendationPage])}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 border-t pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={recommendationPage === 0}
+              onClick={() => changeRecommendationPage(recommendationPage - 1)}
+            >
+              Previous
+            </Button>
+
+            <div className="flex items-center gap-1">
+              {recommendations.map((item, index) => (
+                <Button
+                  key={item.id}
+                  type="button"
+                  variant={recommendationPage === index ? "default" : "ghost"}
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => changeRecommendationPage(index)}
+                  aria-label={`Show recommendation ${index + 1}`}
+                >
+                  {index + 1}
+                </Button>
+              ))}
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={recommendationPage >= recommendations.length - 1}
+              onClick={() => changeRecommendationPage(recommendationPage + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

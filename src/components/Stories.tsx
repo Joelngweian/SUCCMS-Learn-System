@@ -1,20 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext.tsx";
 import { supabase } from "@/lib/supabase.ts";
+import { REPORT_REASON_OPTIONS } from "@/lib/reporting";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Button } from "./ui/button";
-import { X, Plus, ChevronLeft, ChevronRight, Flag, Loader2, Heart, Pause, Play } from "lucide-react";
+import { Label } from "./ui/label";
+import { Textarea } from "./ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { X, Plus, ChevronLeft, ChevronRight, Flag, Loader2, Heart, Pause, Play, Trash2 } from "lucide-react";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "./ui/alert-dialog";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./ui/dialog";
 
 interface Story {
   id: string;
@@ -26,6 +28,7 @@ interface Story {
   timestamp: string;
   viewed: boolean;
   created_at: string;
+  expires_at: string;
 }
 
 interface StoryUser {
@@ -53,7 +56,11 @@ export function Stories({
   const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
   const [storyUsers, setStoryUsers] = useState<StoryUser[]>([]);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  const [reportDetails, setReportDetails] = useState("");
+  const [isReporting, setIsReporting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   const [progress, setProgress] = useState(0);
@@ -67,10 +74,6 @@ export function Stories({
     const saved = localStorage.getItem("viewed_story_ids");
     return new Set(saved ? JSON.parse(saved) : []);
   });
-
-  useEffect(() => {
-    fetchStories();
-  }, []); 
 
   const fetchStories = async () => {
     const currentUserId = user?.id;
@@ -88,12 +91,13 @@ export function Stories({
     };
 
     try {
-      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const now = new Date().toISOString();
 
       const { data, error } = await supabase
         .from('stories')
-        .select('id, user_id, image_url, created_at')
-        .gt('created_at', yesterday)
+        .select('id, user_id, image_url, created_at, expires_at')
+        .eq('is_active', true)
+        .gt('expires_at', now)
         .order('created_at', { ascending: true });
 
       if (error) {
@@ -120,7 +124,7 @@ export function Stories({
 
       const groups: Record<string, StoryUser> = {};
 
-      data?.forEach((s: any) => {
+      data?.filter((s: any) => Boolean(s.image_url)).forEach((s: any) => {
         const uId = s.user_id;
         const isMe = uId === currentUserId;
         
@@ -135,6 +139,7 @@ export function Stories({
             type: "image",
             timestamp: new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             created_at: s.created_at,
+            expires_at: s.expires_at,
             viewed: viewedStoryIds.has(s.id)
           });
           yourStory.hasActiveStories = true;
@@ -163,6 +168,7 @@ export function Stories({
             type: "image",
             timestamp: new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             created_at: s.created_at,
+            expires_at: s.expires_at,
             viewed: viewedStoryIds.has(s.id)
           });
         }
@@ -191,33 +197,66 @@ export function Stories({
     }
   };
 
+  useEffect(() => {
+    fetchStories();
+  }, [user?.id, currentUserAvatar, currentUserInitials]);
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || isUploading || !user) return;
 
+    if (!file.type.startsWith('image/')) {
+      alert("Please select an image file.");
+      e.target.value = "";
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert("Story images must be 10 MB or smaller.");
+      e.target.value = "";
+      return;
+    }
+
     setIsUploading(true);
+    let uploadedFileName: string | null = null;
+
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+      const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const fileName = `${user.id}/${Date.now()}-${crypto.randomUUID()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage.from('stories').upload(fileName, file);
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        throw new Error(`Story image upload failed: ${uploadError.message}`);
+      }
+
+      uploadedFileName = fileName;
 
       const { data: { publicUrl } } = supabase.storage.from('stories').getPublicUrl(fileName);
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
       
       const { error: insertError } = await supabase.from('stories').insert({ 
         user_id: user.id, 
-        image_url: publicUrl 
+        image_url: publicUrl,
+        expires_at: expiresAt,
+        is_active: true
       });
       
-      if (insertError) throw insertError;
+      if (insertError) {
+        await supabase.storage.from('stories').remove([fileName]);
+        uploadedFileName = null;
+        throw new Error(`Story record creation failed: ${insertError.message}`);
+      }
 
-      fetchStories(); 
+      await fetchStories();
     } catch (err: any) {
       console.error("Upload error:", err);
-      alert(err?.message || "Upload failed. Ensure 'stories' bucket exists and table has correct columns.");
+      if (uploadedFileName) {
+        await supabase.storage.from('stories').remove([uploadedFileName]);
+      }
+      alert(err?.message || "Story upload failed. Please try again.");
     } finally {
       setIsUploading(false);
+      e.target.value = "";
     }
   };
 
@@ -316,7 +355,7 @@ export function Stories({
 
   // Handle keyboard navigation
   useEffect(() => {
-    if (!selectedUser) return;
+    if (!selectedUser || reportDialogOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       switch (e.key) {
@@ -330,6 +369,7 @@ export function Stories({
           nextStory();
           break;
         case ' ':
+          if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
           e.preventDefault();
           setIsPaused(prev => !prev);
           break;
@@ -338,7 +378,7 @@ export function Stories({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedUser, closeStoryViewer, previousStory, nextStory]);
+  }, [selectedUser, closeStoryViewer, previousStory, nextStory, reportDialogOpen]);
 
   // Progress timer
   useEffect(() => {
@@ -376,6 +416,83 @@ export function Stories({
   }, [progress, nextStory]);
 
   const currentStory = selectedUser?.stories[currentStoryIndex];
+
+  const handleReportStory = async () => {
+    if (
+      !user ||
+      !selectedUser ||
+      !currentStory ||
+      !reportReason ||
+      isReporting ||
+      selectedUser.id === user.id
+    ) {
+      return;
+    }
+
+    setIsReporting(true);
+    try {
+      const { error } = await supabase.from("reports").insert({
+        reporter_id: user.id,
+        reported_user_id: selectedUser.id,
+        report_type: "story",
+        story_id: currentStory.id,
+        reason: reportReason,
+        details: reportDetails.trim() || null,
+      });
+
+      if (error) throw error;
+
+      setReportDialogOpen(false);
+      setReportReason("");
+      setReportDetails("");
+      alert("Story report submitted for administrator review.");
+    } catch (error: any) {
+      console.error("Failed to report story:", error);
+      alert(
+        error?.code === "23505"
+          ? "You already have a pending report for this story."
+          : `Failed to report story: ${error?.message || "Please try again."}`
+      );
+    } finally {
+      setIsReporting(false);
+    }
+  };
+
+  const handleDeleteStory = async () => {
+    if (!currentStory || !user || selectedUser?.id !== user.id || isDeleting) return;
+    
+    if (!confirm("Are you sure you want to delete this story?")) return;
+
+    setIsDeleting(true);
+    try {
+      // 1. Hard delete from DB
+      const { error: dbError } = await supabase
+        .from('stories')
+        .delete()
+        .eq('id', currentStory.id);
+        
+      if (dbError) throw dbError;
+
+      // 2. Remove from Storage
+      try {
+        const urlParts = currentStory.contentUrl.split('/stories/');
+        if (urlParts.length === 2) {
+            const fileName = urlParts[1];
+            await supabase.storage.from('stories').remove([fileName]);
+        }
+      } catch (storageErr) {
+        console.error("Storage delete failed, but DB record hidden:", storageErr);
+      }
+      
+      closeStoryViewer();
+      await fetchStories();
+    } catch (error: any) {
+      console.error("Failed to delete story:", error);
+      alert("Failed to delete story. Please try again.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <div className="w-full">
@@ -432,13 +549,13 @@ export function Stories({
       {selectedUser && currentStory && (
         <div 
           className="fixed inset-0 bg-black"
-          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 2147483647 }}
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999 }}
         >
           {/* Full screen container */}
           <div className="relative w-full h-full flex flex-col">
             
             {/* Header with progress bars - fixed at top */}
-            <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 via-black/40 to-transparent" style={{ zIndex: 2147483647 }}>
+            <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 via-black/40 to-transparent" style={{ zIndex: 9999 }}>
               {/* Progress bars */}
               <div className="flex gap-1 mb-4 w-full max-w-[1100px] mx-auto px-2">
                 {selectedUser.stories.map((_, index) => (
@@ -467,7 +584,7 @@ export function Stories({
                   </Avatar>
                   <div>
                     <p className="text-white text-sm font-semibold drop-shadow-md">{selectedUser.name}</p>
-                    <p className="text-white/70 text-xs">{currentStory.timestamp}</p>
+                    <p className="text-xs drop-shadow-md" style={{ color: 'rgba(255, 255, 255, 0.7)' }}>{currentStory.timestamp}</p>
                   </div>
                 </div>
 
@@ -491,23 +608,100 @@ export function Stories({
                     <Heart className="h-5 w-5" />
                   </Button>
 
-                  <AlertDialog open={reportDialogOpen} onOpenChange={setReportDialogOpen}>
-                    <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 rounded-full h-11 w-11 p-0">
-                        <Flag className="h-5 w-5" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent className="z-[10000]">
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Report Story</AlertDialogTitle>
-                        <AlertDialogDescription>Flag this content for moderation?</AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => { alert("Reported."); setReportDialogOpen(false); }}>Report</AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
+                  {selectedUser.id === user?.id && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-white hover:bg-red-500/80 rounded-full h-11 w-11 p-0"
+                      onClick={handleDeleteStory}
+                      disabled={isDeleting}
+                      title="Delete story"
+                    >
+                      {isDeleting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Trash2 className="h-5 w-5 text-red-400 hover:text-white" />}
+                    </Button>
+                  )}
+
+                  {selectedUser.id !== user?.id && selectedUser.role !== "admin" && (
+                    <Dialog
+                      open={reportDialogOpen}
+                      onOpenChange={(open) => {
+                        if (isReporting) return;
+                        setReportDialogOpen(open);
+                        if (!open) {
+                          setReportReason("");
+                          setReportDetails("");
+                        }
+                      }}
+                    >
+                      <DialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-white hover:bg-white/20 rounded-full h-11 w-11 p-0"
+                          title="Report story"
+                        >
+                          <Flag className="h-5 w-5" />
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="z-[10000]" style={{ zIndex: 100000 }}>
+                        <DialogHeader>
+                          <DialogTitle>Report Story</DialogTitle>
+                          <DialogDescription>
+                            Tell administrators why this story should be reviewed.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-2">
+                          <Label>Reason</Label>
+                          <Select value={reportReason} onValueChange={setReportReason}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select a reason" />
+                            </SelectTrigger>
+                            <SelectContent className="z-[10001]" style={{ zIndex: 100001 }}>
+                              {REPORT_REASON_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="report-story-details">
+                            Details (Optional)
+                          </Label>
+                          <Textarea
+                            id="report-story-details"
+                            value={reportDetails}
+                            onChange={(event) => setReportDetails(event.target.value)}
+                            placeholder="Add any useful context..."
+                            maxLength={1000}
+                            className="min-h-24"
+                          />
+                          <p className="text-right text-xs text-muted-foreground">
+                            {reportDetails.length}/1000
+                          </p>
+                        </div>
+                        <DialogFooter>
+                          <Button
+                            variant="outline"
+                            onClick={() => setReportDialogOpen(false)}
+                            disabled={isReporting}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            onClick={handleReportStory}
+                            disabled={!reportReason || isReporting}
+                          >
+                            {isReporting && (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            )}
+                            Submit Report
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  )}
 
                   <Button 
                     variant="ghost" 

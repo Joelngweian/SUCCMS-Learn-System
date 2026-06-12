@@ -2,6 +2,10 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext"; // Fixed path
 import { supabase } from "@/lib/supabase"; // Fixed path
+import {
+  COURSE_OFFERING_SELECT,
+  normalizeCourseOffering,
+} from "@/lib/courseOfferings";
 import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
@@ -40,17 +44,30 @@ export function Assignments() {
     try {
       setLoading(true);
 
-      // DEMO MODE: Fetch ALL assignments (removed enrollment filter)
+      const { data: enrollments, error: enrollmentError } = await supabase
+        .from('course_enrollments')
+        .select('course_id')
+        .eq('student_id', user?.id);
+
+      if (enrollmentError) throw enrollmentError;
+
+      const courseIds = Array.from(new Set((enrollments || []).map((row: any) => row.course_id).filter(Boolean)));
+
+      if (courseIds.length === 0) {
+        setUpcoming([]);
+        setPastDue([]);
+        setCompleted([]);
+        setCrucialCount(0);
+        return;
+      }
+
       const { data: allAssignments, error } = await supabase
-        .from('course_assignments')
+        .from('assignments')
         .select(`
           *,
-          courses (
-            id,
-            name,
-            course_code
-          )
+          course_offerings(${COURSE_OFFERING_SELECT})
         `)
+        .in('course_id', courseIds)
         .order('due_date', { ascending: true });
 
       if (error) throw error;
@@ -69,7 +86,11 @@ export function Assignments() {
       const completedTemp: any[] = [];
       let crucial = 0;
 
-      allAssignments?.forEach(assign => {
+      allAssignments?.forEach((assignment: any) => {
+        const assign = {
+          ...assignment,
+          courses: normalizeCourseOffering(assignment.course_offerings),
+        };
         const submission = mySubmissions?.find(s => s.assignment_id === assign.id);
         const fullAssign = { ...assign, submission };
         const dueDate = new Date(assign.due_date);
@@ -88,7 +109,7 @@ export function Assignments() {
 
       setUpcoming(upcomingTemp);
       setPastDue(pastDueTemp);
-      setCompleted(completedTemp.sort((a, b) => new Date(b.submission.submitted_at).getTime() - new Date(a.submission.submitted_at).getTime()));
+      setCompleted(completedTemp.sort((a, b) => new Date(b.submission?.submitted_at || 0).getTime() - new Date(a.submission?.submitted_at || 0).getTime()));
       setCrucialCount(crucial);
 
     } catch (error) {
@@ -102,10 +123,27 @@ export function Assignments() {
     try {
       setLoading(true);
 
-      // DEMO MODE: Fetch ALL assignments (removed instructor filter)
+      const lecturerId = profile?.id || user?.id;
+      const { data: teachingRows, error: teachingError } = await supabase
+        .from('course_instructors')
+        .select('course_id')
+        .eq('user_id', lecturerId);
+
+      if (teachingError) throw teachingError;
+
+      const courseIds = Array.from(new Set((teachingRows || []).map((row: any) => row.course_id).filter(Boolean)));
+
+      if (courseIds.length === 0) {
+        setLecturerAll([]);
+        setNeedsGrading([]);
+        setGradedAssignments([]);
+        return;
+      }
+
       const { data: allAssign, error } = await supabase
-        .from('course_assignments')
-        .select(`*, courses ( id, name, course_code )`)
+        .from('assignments')
+        .select(`*, course_offerings(${COURSE_OFFERING_SELECT})`)
+        .in('course_id', courseIds)
         .order('due_date', { ascending: true });
 
       if (error) {
@@ -133,10 +171,14 @@ export function Assignments() {
         byAssignment[s.assignment_id].push(s);
       });
 
-      const withMetrics = (allAssign || []).map((a: any) => {
+      const withMetrics = (allAssign || []).map((assignment: any) => {
+        const a = {
+          ...assignment,
+          courses: normalizeCourseOffering(assignment.course_offerings),
+        };
         const list = byAssignment[a.id] || [];
         const total = list.length;
-        const ungraded = list.filter((x: any) => !x.grade && x.submitted_at).length;
+        const ungraded = list.filter((x: any) => x.grade == null && x.submitted_at).length;
         const graded = list.filter((x: any) => x.grade != null).length;
         return { ...a, metrics: { totalSubmissions: total, ungradedCount: ungraded, gradedCount: graded } };
       });
@@ -167,6 +209,8 @@ export function Assignments() {
     const dueDate = new Date(item.due_date);
     const dateString = dueDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     const isCrucial = (type === 'upcoming' || type === 'needsGrading') && dueDate <= new Date(new Date().setDate(new Date().getDate() + 2));
+    const maxScore = item.max_score || item.points || 100;
+    const courseCode = item.courses?.course_code || item.courses?.code || "N/A";
 
     return (
       <Card 
@@ -194,13 +238,13 @@ export function Assignments() {
                     <BookOpen className="h-4 w-4 text-muted-foreground" /> 
                     {/* Defensive check in case course relation is missing */}
                     <span className="truncate max-w-[180px] sm:max-w-[260px]">{item.courses?.name || "Unknown Course"}</span>
-                    <Badge variant="outline" className="text-xs font-normal text-muted-foreground">{item.courses?.course_code || "N/A"}</Badge>
+                    <Badge variant="outline" className="text-xs font-normal text-muted-foreground">{courseCode}</Badge>
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                    {item.submission?.grade && (
+                    {item.submission?.grade != null && (
                         <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 hover:bg-green-200 font-bold">
-                            {item.submission.grade} / {item.points}
+                            {item.submission.grade} / {maxScore}
                         </Badge>
                     )}
                     {isCrucial && <Badge variant="destructive" className="bg-orange-500 hover:bg-orange-600">Due Soon</Badge>}
@@ -223,7 +267,7 @@ export function Assignments() {
                     <Calendar className="h-4 w-4"/>
                 {type === 'completed' && item.submission?.submitted_at ? `Submitted ${new Date(item.submission.submitted_at).toLocaleDateString()}` : `Due ${dateString}`}
                 </span>
-              {item.points && <span className="text-muted-foreground">• {item.points} Points</span>}
+              <span className="text-muted-foreground">| {maxScore} Points</span>
             </div>
           </div>
           <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors ml-1" />

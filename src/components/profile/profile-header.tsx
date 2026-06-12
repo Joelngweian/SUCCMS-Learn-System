@@ -2,7 +2,6 @@
 
 import { useState } from "react"
 import { Button } from "../ui/button"
-import { Input } from "../ui/input"
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar"
 import { Pencil, Camera, Trash2 } from "lucide-react"
 
@@ -70,12 +69,14 @@ export function ProfileHeader({ name, role, profileImage, backgroundImage, bio, 
           <div className="h-full w-full bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100" />
         )}
         
-        {isEditing && isHoveringBg && (
+        {isEditing && isHoveringBg && (onCoverChange || onCoverRemove) && (
           <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/50 transition-all">
-            <Button variant="secondary" size="sm" onClick={handleCoverClick}>
-              <Camera className="mr-2 h-4 w-4" />
-              Change Cover
-            </Button>
+            {onCoverChange && (
+              <Button variant="secondary" size="sm" onClick={handleCoverClick}>
+                <Camera className="mr-2 h-4 w-4" />
+                Change Cover
+              </Button>
+            )}
             {backgroundImage && backgroundImage !== '/placeholder.svg' && onCoverRemove && (
               <Button variant="destructive" size="sm" onClick={onCoverRemove}>
                 <Trash2 className="mr-2 h-4 w-4" />
@@ -106,13 +107,11 @@ export function ProfileHeader({ name, role, profileImage, backgroundImage, bio, 
               <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/60">
                 <div className="flex flex-col items-center gap-1">
                   <button onClick={handleAvatarClick} className="text-white hover:scale-110 transition-transform">
-                    <Camera className="h-6 w-6" />
+                    <Camera className="h-8 w-8" />
                   </button>
-                  {profileImage && profileImage !== '/placeholder.svg' && onAvatarRemove && (
-                    <button onClick={onAvatarRemove} className="text-red-400 hover:scale-110 transition-transform">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  )}
+                  <button onClick={onAvatarRemove} className="text-red-500 hover:scale-110 transition-transform mt-2 bg-white rounded-full p-1 z-50">
+                    <Trash2 className="h-6 w-6" />
+                  </button>
                 </div>
               </div>
             )}

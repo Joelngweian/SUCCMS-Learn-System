@@ -1,292 +1,479 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Progress } from "./ui/progress";
 import { Badge } from "./ui/badge";
-import { Avatar, AvatarFallback } from "./ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Button } from "./ui/button";
-import { OnlineActivity } from "./SocialWidgets";
 import { AIRecommendations } from "./AIRecommendations";
 import { Stories } from "./Stories";
 import { useAuth } from "@/contexts/AuthContext";
-import { 
-  BookOpen, 
-  Users, 
-  FileText, 
-  MessageSquare, 
-  Clock, 
+import { supabase } from "@/lib/supabase";
+import {
+  COURSE_OFFERING_SELECT,
+  normalizeCourseOffering,
+} from "@/lib/courseOfferings";
+import {
+  BookOpen,
+  Users,
+  FileText,
+  MessageSquare,
+  Clock,
   TrendingUp,
   AlertCircle,
-  CheckCircle2,
   Calendar,
   BarChart3,
-  GraduationCap,
-  Plus,
-  Brain,
-  Zap,
-  Target,
-  ThumbsUp,
-  ThumbsDown,
-  Eye
+  Eye,
+  Loader2,
+  ChevronRight,
 } from "lucide-react";
 
+interface LecturerCourse {
+  id: string;
+  code: string;
+  name: string;
+  semester: string;
+  enrolledStudents: number;
+  totalStudents: number;
+  assignmentCount: number;
+  materialCount: number;
+  completionRate: number;
+  pendingGrades: number;
+  recentActivity: string;
+  averageGrade: string | null;
+  engagement: number;
+}
+
+interface PendingTask {
+  id: string;
+  assignmentId: string;
+  courseId: string;
+  title: string;
+  course: string;
+  count: number;
+  dueDate: string;
+  priority: "high" | "medium" | "low";
+  timeEstimate: string;
+}
+
+interface RecentActivity {
+  id: string;
+  student: string;
+  avatarUrl?: string;
+  action: string;
+  item: string;
+  course: string;
+  time: string;
+  needsGrading: boolean;
+  grade: number | null;
+}
+
+interface UpcomingDeadline {
+  id: string;
+  courseId: string;
+  course: string;
+  title: string;
+  dueDate: string;
+  submissionCount: number;
+  enrolledStudents: number;
+}
+
+const getCourseCode = (course: any) => course?.course_code || course?.code || "N/A";
+
+const percentageToGrade = (percentage: number | null) => {
+  if (percentage == null) return null;
+  if (percentage >= 80) return "A";
+  if (percentage >= 75) return "A-";
+  if (percentage >= 70) return "B+";
+  if (percentage >= 65) return "B";
+  if (percentage >= 60) return "B-";
+  if (percentage >= 55) return "C+";
+  if (percentage >= 50) return "C";
+  if (percentage >= 40) return "D";
+  return "F";
+};
+
+const formatDateTime = (value: string) =>
+  new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
 export function LecturerDashboard() {
-  const { profile } = useAuth();
-  const myCourses = [
-    {
-      id: 1,
-      code: "CS301",
-      name: "Database Systems",
-      semester: "Spring 2024",
-      enrolledStudents: 45,
-      totalStudents: 50,
-      completionRate: 78,
-      nextClass: "Today, 2:00 PM",
-      room: "Lab 204",
-      pendingGrades: 8,
-      recentActivity: "3 new submissions",
-      averageGrade: "B+",
-      engagement: 85
-    },
-    {
-      id: 2,
-      code: "CS410",
-      name: "Software Engineering",
-      semester: "Spring 2024",
-      enrolledStudents: 38,
-      totalStudents: 40,
-      completionRate: 65,
-      nextClass: "Wed, 9:00 AM",
-      room: "Room 105",
-      pendingGrades: 12,
-      recentActivity: "5 forum posts",
-      averageGrade: "B",
-      engagement: 72
-    },
-    {
-      id: 3,
-      code: "CS550",
-      name: "Advanced Databases",
-      semester: "Spring 2024",
-      enrolledStudents: 25,
-      totalStudents: 30,
-      completionRate: 82,
-      nextClass: "Thu, 11:00 AM",
-      room: "Lab 301",
-      pendingGrades: 3,
-      recentActivity: "1 new submission",
-      averageGrade: "A-",
-      engagement: 92
-    }
-  ];
+  const { user, profile } = useAuth();
+  const navigate = useNavigate();
+  const [myCourses, setMyCourses] = useState<LecturerCourse[]>([]);
+  const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
+  const [upcomingDeadlines, setUpcomingDeadlines] = useState<UpcomingDeadline[]>([]);
+  const [stats, setStats] = useState({
+    totalStudents: 0,
+    pendingGrades: 0,
+    forumPostsToday: 0,
+    averageEngagement: 0,
+  });
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
-  const pendingTasks = [
-    {
-      id: 1,
-      type: "grading",
-      title: "Grade Database Design Projects",
-      course: "CS301",
-      count: 8,
-      dueDate: "2024-03-20",
-      priority: "high",
-      timeEstimate: "2 hours",
-      aiSuggestion: "AI-assisted rubric available"
-    },
-    {
-      id: 2,
-      type: "grading",
-      title: "Review System Requirements Documents",
-      course: "CS410",
-      count: 12,
-      dueDate: "2024-03-22",
-      priority: "medium",
-      timeEstimate: "3 hours",
-      aiSuggestion: "Similar patterns detected in submissions"
-    },
-    {
-      id: 3,
-      type: "forum",
-      title: "Respond to Student Questions",
-      course: "CS301",
-      count: 5,
-      dueDate: "Today",
-      priority: "high",
-      timeEstimate: "30 minutes",
-      aiSuggestion: "Draft responses generated"
-    },
-    {
-      id: 4,
-      type: "preparation",
-      title: "Prepare Advanced SQL Lecture",
-      course: "CS550",
-      count: 1,
-      dueDate: "2024-03-21",
-      priority: "medium",
-      timeEstimate: "1 hour",
-      aiSuggestion: "Interactive examples recommended"
-    }
-  ];
+  useEffect(() => {
+    if (user) loadDashboardData();
+  }, [user?.id]);
 
-  const recentActivity = [
-    {
-      student: "Alex Johnson",
-      action: "submitted",
-      item: "Database Design Project",
-      course: "CS301",
-      time: "2 hours ago",
-      needsGrading: true,
-      grade: null,
-      quality: "high"
-    },
-    {
-      student: "Sarah Kim",
-      action: "posted question in",
-      item: "Software Architecture Forum",
-      course: "CS410",
-      time: "4 hours ago",
-      needsGrading: false,
-      grade: null,
-      quality: "medium"
-    },
-    {
-      student: "Mike Chen",
-      action: "submitted",
-      item: "Algorithm Analysis Report",
-      course: "CS410",
-      time: "1 day ago",
-      needsGrading: true,
-      grade: null,
-      quality: "high"
-    },
-    {
-      student: "Elena Rodriguez",
-      action: "completed",
-      item: "Advanced Query Lab",
-      course: "CS550",
-      time: "1 day ago",
-      needsGrading: false,
-      grade: "A",
-      quality: "excellent"
-    }
-  ];
+  const loadDashboardData = async () => {
+    if (!user) return;
 
-  const upcomingClasses = [
-    {
-      course: "CS301 - Database Systems",
-      time: "Today, 2:00 PM",
-      room: "Lab 204",
-      topic: "Advanced SQL Queries",
-      studentsExpected: 42,
-      materialsReady: true,
-      aiInsights: "Students struggling with joins - prepare extra examples"
-    },
-    {
-      course: "CS410 - Software Engineering",
-      time: "Wed, 9:00 AM",
-      room: "Room 105",
-      topic: "Design Patterns",
-      studentsExpected: 35,
-      materialsReady: false,
-      aiInsights: "High engagement expected - interactive session recommended"
-    },
-    {
-      course: "CS550 - Advanced Databases",
-      time: "Thu, 11:00 AM",
-      room: "Lab 301",
-      topic: "Database Optimization",
-      studentsExpected: 23,
-      materialsReady: true,
-      aiInsights: "Advanced topic - consider splitting into two sessions"
-    }
-  ];
+    setIsLoading(true);
+    setLoadError("");
 
-  const studentEngagementMetrics = {
-    totalStudents: 108,
-    activeToday: 89,
-    avgSessionTime: "45 min",
-    forumPosts: 23,
-    assignmentSubmissions: 15,
-    officeHoursVisits: 7
+    try {
+      const teachingResult = await supabase
+        .from("course_instructors")
+        .select("course_id")
+        .eq("user_id", user.id);
+
+      if (teachingResult.error) throw teachingResult.error;
+
+      const courseIds = Array.from(
+        new Set((teachingResult.data || []).map((row: any) => row.course_id).filter(Boolean))
+      );
+
+      if (courseIds.length === 0) {
+        setMyCourses([]);
+        setPendingTasks([]);
+        setRecentActivity([]);
+        setUpcomingDeadlines([]);
+        setStats({
+          totalStudents: 0,
+          pendingGrades: 0,
+          forumPostsToday: 0,
+          averageEngagement: 0,
+        });
+        return;
+      }
+
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+
+      const [
+        courseResult,
+        enrollmentResult,
+        assignmentResult,
+        materialResult,
+        forumResult,
+      ] = await Promise.all([
+        supabase
+          .from("course_offerings")
+          .select(COURSE_OFFERING_SELECT)
+          .in("id", courseIds),
+        supabase
+          .from("course_enrollments")
+          .select("course_id, student_id, enrolled_at")
+          .in("course_id", courseIds),
+        supabase
+          .from("assignments")
+          .select("id, course_id, title, due_date, max_score, created_at")
+          .in("course_id", courseIds)
+          .order("due_date", { ascending: true }),
+        supabase
+          .from("course_materials")
+          .select("id, course_id")
+          .in("course_id", courseIds),
+        supabase
+          .from("forum_threads")
+          .select("id, course_id, created_at")
+          .in("course_id", courseIds)
+          .gte("created_at", startOfToday.toISOString()),
+      ]);
+
+      if (courseResult.error) throw courseResult.error;
+      if (enrollmentResult.error) throw enrollmentResult.error;
+      if (assignmentResult.error) throw assignmentResult.error;
+
+      const courseRows = (courseResult.data || []).map(normalizeCourseOffering);
+      const enrollmentRows = enrollmentResult.data || [];
+      const assignmentRows = assignmentResult.data || [];
+      const materialRows = materialResult.data || [];
+      const assignmentIds = assignmentRows.map((assignment: any) => assignment.id);
+
+      let submissionRows: any[] = [];
+      if (assignmentIds.length > 0) {
+        const submissionResult = await supabase
+          .from("assignment_submissions")
+          .select("id, assignment_id, student_id, submitted_at, grade, is_late")
+          .in("assignment_id", assignmentIds)
+          .order("submitted_at", { ascending: false });
+
+        if (submissionResult.error) throw submissionResult.error;
+        submissionRows = submissionResult.data || [];
+      }
+
+      const studentIds = Array.from(
+        new Set(submissionRows.map((submission: any) => submission.student_id).filter(Boolean))
+      );
+      let profileRows: any[] = [];
+
+      if (studentIds.length > 0) {
+        const profileResult = await supabase
+          .from("user_profiles")
+          .select("id, full_name, avatar_url")
+          .in("id", studentIds);
+
+        if (profileResult.error) throw profileResult.error;
+        profileRows = profileResult.data || [];
+      }
+
+      const profilesById = new Map(profileRows.map((row: any) => [row.id, row]));
+      const courseById = new Map(courseRows.map((course: any) => [course.id, course]));
+      const assignmentById = new Map(
+        assignmentRows.map((assignment: any) => [assignment.id, assignment])
+      );
+
+      const enrollmentsByCourse = new Map<string, any[]>();
+      enrollmentRows.forEach((enrollment: any) => {
+        const current = enrollmentsByCourse.get(enrollment.course_id) || [];
+        current.push(enrollment);
+        enrollmentsByCourse.set(enrollment.course_id, current);
+      });
+
+      const assignmentsByCourse = new Map<string, any[]>();
+      assignmentRows.forEach((assignment: any) => {
+        const current = assignmentsByCourse.get(assignment.course_id) || [];
+        current.push(assignment);
+        assignmentsByCourse.set(assignment.course_id, current);
+      });
+
+      const submissionsByAssignment = new Map<string, any[]>();
+      submissionRows.forEach((submission: any) => {
+        const current = submissionsByAssignment.get(submission.assignment_id) || [];
+        current.push(submission);
+        submissionsByAssignment.set(submission.assignment_id, current);
+      });
+
+      const materialsByCourse = new Map<string, number>();
+      materialRows.forEach((material: any) => {
+        materialsByCourse.set(
+          material.course_id,
+          (materialsByCourse.get(material.course_id) || 0) + 1
+        );
+      });
+
+      const courses: LecturerCourse[] = courseRows.map((course: any) => {
+        const courseEnrollments = enrollmentsByCourse.get(course.id) || [];
+        const courseAssignments = assignmentsByCourse.get(course.id) || [];
+        const courseSubmissions = courseAssignments.flatMap(
+          (assignment: any) => submissionsByAssignment.get(assignment.id) || []
+        );
+        const expectedSubmissions = courseEnrollments.length * courseAssignments.length;
+        const uniqueSubmitters = new Set(
+          courseSubmissions.map((submission: any) => submission.student_id)
+        ).size;
+        const ungradedCount = courseSubmissions.filter(
+          (submission: any) => submission.grade == null
+        ).length;
+        const gradedPercentages = courseSubmissions
+          .filter((submission: any) => submission.grade != null)
+          .map((submission: any) => {
+            const assignment: any = assignmentById.get(submission.assignment_id);
+            return (
+              (Number(submission.grade) / (Number(assignment?.max_score) || 100)) *
+              100
+            );
+          });
+        const averagePercentage =
+          gradedPercentages.length > 0
+            ? gradedPercentages.reduce((sum: number, value: number) => sum + value, 0) /
+              gradedPercentages.length
+            : null;
+
+        return {
+          id: course.id,
+          code: getCourseCode(course),
+          name: course.name,
+          semester: course.semester || "No semester set",
+          enrolledStudents: courseEnrollments.length,
+          totalStudents: Number(course.max_capacity ?? course.max_students ?? 0),
+          assignmentCount: courseAssignments.length,
+          materialCount: materialsByCourse.get(course.id) || 0,
+          completionRate:
+            expectedSubmissions > 0
+              ? Math.round((courseSubmissions.length / expectedSubmissions) * 100)
+              : 0,
+          pendingGrades: ungradedCount,
+          recentActivity:
+            courseSubmissions.length > 0
+              ? `${courseSubmissions.length} submissions`
+              : "No submissions",
+          averageGrade: percentageToGrade(averagePercentage),
+          engagement:
+            courseEnrollments.length > 0
+              ? Math.round((uniqueSubmitters / courseEnrollments.length) * 100)
+              : 0,
+        };
+      });
+
+      const tasks: PendingTask[] = assignmentRows
+        .map((assignment: any) => {
+          const submissions = submissionsByAssignment.get(assignment.id) || [];
+          const ungraded = submissions.filter(
+            (submission: any) => submission.grade == null
+          ).length;
+          if (ungraded === 0) return null;
+
+          const dueDate = new Date(assignment.due_date);
+          const daysUntilDue = Math.ceil((dueDate.getTime() - Date.now()) / 86400000);
+          const course: any = courseById.get(assignment.course_id);
+
+          return {
+            id: assignment.id,
+            assignmentId: assignment.id,
+            courseId: assignment.course_id,
+            title: `Grade ${assignment.title}`,
+            course: getCourseCode(course),
+            count: ungraded,
+            dueDate: assignment.due_date,
+            priority:
+              daysUntilDue <= 1 || ungraded >= 10
+                ? "high"
+                : daysUntilDue <= 4 || ungraded >= 5
+                  ? "medium"
+                  : "low",
+            timeEstimate: `${Math.max(15, ungraded * 5)} min`,
+          } as PendingTask;
+        })
+        .filter(Boolean)
+        .sort(
+          (a: PendingTask, b: PendingTask) =>
+            new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
+        );
+
+      const activity: RecentActivity[] = submissionRows.slice(0, 8).map((submission: any) => {
+        const assignment: any = assignmentById.get(submission.assignment_id);
+        const course: any = courseById.get(assignment?.course_id);
+        const student: any = profilesById.get(submission.student_id);
+
+        return {
+          id: submission.id,
+          student: student?.full_name || "Student",
+          avatarUrl: student?.avatar_url,
+          action: "submitted",
+          item: assignment?.title || "Assignment",
+          course: getCourseCode(course),
+          time: formatDateTime(submission.submitted_at),
+          needsGrading: submission.grade == null,
+          grade: submission.grade,
+        };
+      });
+
+      const deadlines: UpcomingDeadline[] = assignmentRows
+        .filter((assignment: any) => new Date(assignment.due_date) >= new Date())
+        .sort(
+          (a: any, b: any) =>
+            new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
+        )
+        .slice(0, 5)
+        .map((assignment: any) => {
+          const course: any = courseById.get(assignment.course_id);
+          return {
+            id: assignment.id,
+            courseId: assignment.course_id,
+            course: `${getCourseCode(course)} - ${course?.name || "Course"}`,
+            title: assignment.title,
+            dueDate: assignment.due_date,
+            submissionCount: (submissionsByAssignment.get(assignment.id) || []).length,
+            enrolledStudents: (enrollmentsByCourse.get(assignment.course_id) || []).length,
+          };
+        });
+
+      const uniqueStudents = new Set(
+        enrollmentRows.map((enrollment: any) => enrollment.student_id)
+      ).size;
+      const averageEngagement =
+        courses.length > 0
+          ? Math.round(
+              courses.reduce((sum, course) => sum + course.engagement, 0) /
+                courses.length
+            )
+          : 0;
+
+      setMyCourses(courses);
+      setPendingTasks(tasks);
+      setRecentActivity(activity);
+      setUpcomingDeadlines(deadlines);
+      setStats({
+        totalStudents: uniqueStudents,
+        pendingGrades: submissionRows.filter(
+          (submission: any) => submission.grade == null
+        ).length,
+        forumPostsToday: forumResult.data?.length || 0,
+        averageEngagement,
+      });
+    } catch (error: any) {
+      console.error("Failed to load lecturer dashboard:", error);
+      setLoadError(error?.message || "Could not load dashboard data.");
+    } finally {
+      setIsLoading(false);
+    }
   };
-
-  const aiInsights = [
-    {
-      type: "performance",
-      title: "CS301 Assignment Quality Declining",
-      description: "Recent submissions show 25% drop in quality. Consider review session.",
-      confidence: 88,
-      actionable: true,
-      course: "CS301"
-    },
-    {
-      type: "engagement",
-      title: "Forum Activity Peak at 8 PM",
-      description: "Students most active in evening. Consider scheduled Q&A sessions.",
-      confidence: 92,
-      actionable: true,
-      course: "All"
-    },
-    {
-      type: "prediction",
-      title: "Midterm Performance Forecast",
-      description: "CS410 students may struggle with design patterns. Early intervention recommended.",
-      confidence: 78,
-      actionable: true,
-      course: "CS410"
-    }
-  ];
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'bg-red-100 text-red-800 border-red-200';
-      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'low': return 'bg-blue-100 text-blue-800 border-blue-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
-
-  const getTaskIcon = (type: string) => {
-    switch (type) {
-      case 'grading': return FileText;
-      case 'forum': return MessageSquare;
-      case 'preparation': return BookOpen;
-      default: return Clock;
-    }
-  };
-
-  const getQualityColor = (quality: string) => {
-    switch (quality) {
-      case 'excellent': return 'text-green-600';
-      case 'high': return 'text-blue-600';
-      case 'medium': return 'text-yellow-600';
-      case 'low': return 'text-red-600';
-      default: return 'text-gray-600';
+      case "high":
+        return "bg-red-100 text-red-800 border-red-200";
+      case "medium":
+        return "bg-yellow-100 text-yellow-800 border-yellow-200";
+      default:
+        return "bg-blue-100 text-blue-800 border-blue-200";
     }
   };
 
   const getEngagementColor = (engagement: number) => {
-    if (engagement >= 85) return 'text-green-600';
-    if (engagement >= 70) return 'text-blue-600';
-    if (engagement >= 55) return 'text-yellow-600';
-    return 'text-red-600';
+    if (engagement >= 85) return "text-green-600";
+    if (engagement >= 70) return "text-blue-600";
+    if (engagement >= 55) return "text-yellow-600";
+    return "text-red-600";
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[420px] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
-      {/* Welcome Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1>Welcome, {profile?.full_name || 'Lecturer'}</h1>
-          <p className="text-muted-foreground">Manage your courses and track student progress</p>
+          <h1>Welcome, {profile?.full_name || "Lecturer"}</h1>
+          <p className="text-muted-foreground">
+            Manage your courses and track student progress
+          </p>
         </div>
       </div>
 
-      {/* Stories Feature */}
+      {loadError && (
+        <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {loadError}
+        </div>
+      )}
+
       <Card>
         <CardContent className="p-6">
-          <Stories />
+          <Stories
+            currentUserName={profile?.full_name || "Your Story"}
+            currentUserInitials={(profile?.full_name || "YS")
+              .split(" ")
+              .map((part) => part[0])
+              .join("")}
+            currentUserAvatar={profile?.avatar_url}
+          />
         </CardContent>
       </Card>
 
-      {/* Quick Stats */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
         <Card>
           <CardContent className="p-6">
@@ -310,8 +497,7 @@ export function LecturerDashboard() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Total Students</p>
-                <p className="text-2xl font-semibold">{studentEngagementMetrics.totalStudents}</p>
-                <p className="text-xs text-green-600">{studentEngagementMetrics.activeToday} active today</p>
+                <p className="text-2xl font-semibold">{stats.totalStudents}</p>
               </div>
             </div>
           </CardContent>
@@ -325,9 +511,7 @@ export function LecturerDashboard() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Pending Grades</p>
-                <p className="text-2xl font-semibold">
-                  {myCourses.reduce((acc, course) => acc + course.pendingGrades, 0)}
-                </p>
+                <p className="text-2xl font-semibold">{stats.pendingGrades}</p>
               </div>
             </div>
           </CardContent>
@@ -341,7 +525,7 @@ export function LecturerDashboard() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Forum Posts</p>
-                <p className="text-2xl font-semibold">{studentEngagementMetrics.forumPosts}</p>
+                <p className="text-2xl font-semibold">{stats.forumPostsToday}</p>
                 <p className="text-xs text-muted-foreground">Today</p>
               </div>
             </div>
@@ -356,9 +540,7 @@ export function LecturerDashboard() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Avg. Engagement</p>
-                <p className="text-2xl font-semibold">
-                  {Math.round(myCourses.reduce((acc, course) => acc + course.engagement, 0) / myCourses.length)}%
-                </p>
+                <p className="text-2xl font-semibold">{stats.averageEngagement}%</p>
               </div>
             </div>
           </CardContent>
@@ -366,111 +548,138 @@ export function LecturerDashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* My Courses */}
         <div className="lg:col-span-2 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>My Courses</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {myCourses.map((course) => (
-                <div key={course.id} className="p-4 border rounded-lg space-y-4">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline">{course.code}</Badge>
-                        <h4>{course.name}</h4>
+              {myCourses.length > 0 ? (
+                myCourses.map((course) => (
+                  <div key={course.id} className="p-4 border rounded-lg space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">{course.code}</Badge>
+                          <h4>{course.name}</h4>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {course.semester}
+                        </p>
                       </div>
-                      <p className="text-sm text-muted-foreground">{course.semester}</p>
-                    </div>
-                    <div className="text-right space-y-1">
-                      <p className="text-sm font-medium">{course.enrolledStudents}/{course.totalStudents} students</p>
-                      <div className="flex items-center gap-2">
-                        <Badge className="text-xs">Avg: {course.averageGrade}</Badge>
-                        <span className={`text-xs ${getEngagementColor(course.engagement)}`}>
-                          {course.engagement}% engaged
-                        </span>
+                      <div className="text-right space-y-1">
+                        <p className="text-sm font-medium">
+                          {course.enrolledStudents}
+                          {course.totalStudents > 0 ? `/${course.totalStudents}` : ""} students
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <Badge className="text-xs">
+                            Avg: {course.averageGrade || "Not graded"}
+                          </Badge>
+                          <span className={`text-xs ${getEngagementColor(course.engagement)}`}>
+                            {course.engagement}% engaged
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>Course Completion</span>
-                      <span>{course.completionRate}%</span>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span>Assignment Submission Rate</span>
+                        <span>{course.completionRate}%</span>
+                      </div>
+                      <Progress value={course.completionRate} />
                     </div>
-                    <Progress value={course.completionRate} />
-                  </div>
 
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-1">
-                        <Clock className="h-4 w-4" />
-                        <span>{course.nextClass}</span>
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                      <div className="flex items-center gap-4 text-muted-foreground">
+                        <div className="flex items-center gap-1">
+                          <FileText className="h-4 w-4" />
+                          <span>{course.assignmentCount} assignments</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <BookOpen className="h-4 w-4" />
+                          <span>{course.materialCount} materials</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Calendar className="h-4 w-4" />
-                        <span>{course.room}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {course.pendingGrades > 0 && (
-                        <Badge variant="destructive">
-                          {course.pendingGrades} to grade
+                      <div className="flex items-center gap-2">
+                        {course.pendingGrades > 0 && (
+                          <Badge variant="destructive">
+                            {course.pendingGrades} to grade
+                          </Badge>
+                        )}
+                        <Badge variant="secondary" className="text-xs">
+                          {course.recentActivity}
                         </Badge>
-                      )}
-                      <Badge variant="secondary" className="text-xs">
-                        {course.recentActivity}
-                      </Badge>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigate(`/courses?courseId=${course.id}`)}
+                      >
+                        <Eye className="h-3 w-3 mr-1" />
+                        View Course
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigate("/assignments")}
+                      >
+                        <FileText className="h-3 w-3 mr-1" />
+                        Grade Assignments
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigate(`/analytics?course=${course.code}`)}
+                      >
+                        <BarChart3 className="h-3 w-3 mr-1" />
+                        Analytics
+                      </Button>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline">
-                      <Eye className="h-3 w-3 mr-1" />
-                      View Course
-                    </Button>
-                    <Button size="sm" variant="outline">
-                      <FileText className="h-3 w-3 mr-1" />
-                      Grade Assignments
-                    </Button>
-                    <Button size="sm" variant="outline">
-                      <BarChart3 className="h-3 w-3 mr-1" />
-                      Analytics
-                    </Button>
-                  </div>
+                ))
+              ) : (
+                <div className="py-10 text-center">
+                  <BookOpen className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    You have not added any courses yet.
+                  </p>
+                  <Button className="mt-4" onClick={() => navigate("/courses")}>
+                    Open Course Catalog
+                  </Button>
                 </div>
-              ))}
+              )}
             </CardContent>
           </Card>
 
-          {/* AI Teaching Recommendations */}
-          <AIRecommendations 
-            userRole="lecturer" 
-            currentCourses={myCourses.map(c => c.code)}
+          <AIRecommendations
+            userRole="lecturer"
+            currentCourses={myCourses.map((course) => course.code)}
+            performanceData={{
+              courses: myCourses,
+              overview: stats,
+            }}
           />
 
-          {/* Pending Tasks with AI Assistance */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <AlertCircle className="h-5 w-5" />
-                Pending Tasks
-                <Badge className="bg-purple-100 text-purple-800 ml-auto">
-                  <Zap className="h-3 w-3 mr-1" />
-                  AI Assisted
-                </Badge>
+                Pending Grading
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {pendingTasks.map((task) => {
-                const Icon = getTaskIcon(task.type);
-                return (
+              {pendingTasks.length > 0 ? (
+                pendingTasks.map((task) => (
                   <div key={task.id} className="p-4 border rounded-lg">
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-start gap-3">
                         <div className="p-2 bg-muted rounded-lg">
-                          <Icon className="h-4 w-4" />
+                          <FileText className="h-4 w-4" />
                         </div>
                         <div>
                           <h4 className="font-medium">{task.title}</h4>
@@ -481,130 +690,135 @@ export function LecturerDashboard() {
                         {task.priority}
                       </Badge>
                     </div>
-                    
-                    {task.aiSuggestion && (
-                      <div className="mb-3 p-2 bg-purple-50 border border-purple-200 rounded text-sm">
-                        <Brain className="h-3 w-3 inline mr-1 text-purple-600" />
-                        <span className="text-purple-700">{task.aiSuggestion}</span>
-                      </div>
-                    )}
 
-                    <div className="flex items-center justify-between text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                       <div className="flex items-center gap-4">
-                        <span>{task.count} {task.type === 'grading' ? 'submissions' : 'items'}</span>
-                        <span className="text-muted-foreground">Est. {task.timeEstimate}</span>
+                        <span>{task.count} submissions</span>
+                        <span className="text-muted-foreground">
+                          Est. {task.timeEstimate}
+                        </span>
                       </div>
-                      <span className="text-muted-foreground">Due: {task.dueDate}</span>
+                      <span className="text-muted-foreground">
+                        Due: {new Date(task.dueDate).toLocaleDateString()}
+                      </span>
                     </div>
-                    
-                    <div className="flex items-center gap-2 mt-3">
-                      <Button size="sm" className="flex-1">
-                        Start Task
-                      </Button>
-                      {task.aiSuggestion && (
-                        <Button size="sm" variant="outline">
-                          <Brain className="h-3 w-3 mr-1" />
-                          AI Assist
-                        </Button>
-                      )}
-                    </div>
+
+                    <Button
+                      size="sm"
+                      className="mt-3 w-full"
+                      onClick={() =>
+                        navigate(
+                          `/courses?courseId=${task.courseId}&assignmentId=${task.assignmentId}`
+                        )
+                      }
+                    >
+                      Start Grading
+                    </Button>
                   </div>
-                );
-              })}
+                ))
+              ) : (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  No submissions are waiting for grading.
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Sidebar */}
         <div className="space-y-6">
-          {/* Online Activity */}
-          <OnlineActivity userRole="lecturer" />
-
-          {/* Upcoming Classes */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Calendar className="h-5 w-5" />
-                Upcoming Classes
+                Upcoming Deadlines
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {upcomingClasses.map((class_, index) => (
-                <div key={index} className="space-y-3 p-3 border rounded-lg">
-                  <div>
-                    <h4 className="text-sm font-medium">{class_.course}</h4>
-                    <p className="text-xs text-muted-foreground">{class_.time} • {class_.room}</p>
-                  </div>
-                  <p className="text-sm">{class_.topic}</p>
-                  
-                  {class_.aiInsights && (
-                    <div className="p-2 bg-blue-50 border border-blue-200 rounded text-xs">
-                      <Brain className="h-3 w-3 inline mr-1 text-blue-600" />
-                      <span className="text-blue-700">{class_.aiInsights}</span>
+              {upcomingDeadlines.length > 0 ? (
+                upcomingDeadlines.map((deadline) => (
+                  <button
+                    type="button"
+                    key={deadline.id}
+                    onClick={() =>
+                      navigate(
+                        `/courses?courseId=${deadline.courseId}&assignmentId=${deadline.id}`
+                      )
+                    }
+                    className="w-full space-y-2 rounded-lg border p-3 text-left hover:bg-muted/40 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h4 className="text-sm font-medium">{deadline.title}</h4>
+                        <p className="text-xs text-muted-foreground">
+                          {deadline.course}
+                        </p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                     </div>
-                  )}
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">{class_.studentsExpected} students expected</span>
-                    <div className="flex items-center gap-1">
-                      {class_.materialsReady ? (
-                        <CheckCircle2 className="h-3 w-3 text-green-600" />
-                      ) : (
-                        <AlertCircle className="h-3 w-3 text-orange-600" />
-                      )}
-                      <span className={class_.materialsReady ? 'text-green-600' : 'text-orange-600'}>
-                        {class_.materialsReady ? 'Ready' : 'Prep needed'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                    <p className="text-xs text-orange-600">
+                      Due {formatDateTime(deadline.dueDate)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {deadline.submissionCount}/{deadline.enrolledStudents} submitted
+                    </p>
+                  </button>
+                ))
+              ) : (
+                <p className="py-5 text-center text-sm text-muted-foreground">
+                  No upcoming assignment deadlines.
+                </p>
+              )}
             </CardContent>
           </Card>
 
-          {/* Recent Student Activity */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users className="h-5 w-5" />
-                Recent Activity
+                Recent Student Activity
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {recentActivity.map((activity, index) => (
-                <div key={index} className="flex items-start gap-3">
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback>
-                      {activity.student.split(' ').map(n => n[0]).join('')}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 space-y-1">
-                    <p className="text-sm">
-                      <span className="font-medium">{activity.student}</span>{' '}
-                      <span className="text-muted-foreground">{activity.action}</span>{' '}
-                      <span>{activity.item}</span>
-                    </p>
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-muted-foreground">{activity.course} • {activity.time}</p>
-                      <div className="flex items-center gap-2">
-                        {activity.grade && (
+              {recentActivity.length > 0 ? (
+                recentActivity.map((activity) => (
+                  <div key={activity.id} className="flex items-start gap-3">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={activity.avatarUrl} />
+                      <AvatarFallback>
+                        {activity.student
+                          .split(" ")
+                          .map((name) => name[0])
+                          .join("")}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 space-y-1">
+                      <p className="text-sm">
+                        <span className="font-medium">{activity.student}</span>{" "}
+                        <span className="text-muted-foreground">{activity.action}</span>{" "}
+                        <span>{activity.item}</span>
+                      </p>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs text-muted-foreground">
+                          {activity.course} · {activity.time}
+                        </p>
+                        {activity.grade != null ? (
                           <Badge variant="secondary" className="text-xs">
                             {activity.grade}
                           </Badge>
-                        )}
-                        <span className={`text-xs ${getQualityColor(activity.quality)}`}>
-                          {activity.quality}
-                        </span>
-                        {activity.needsGrading && (
+                        ) : activity.needsGrading ? (
                           <Badge variant="destructive" className="text-xs">
                             Needs grading
                           </Badge>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p className="py-5 text-center text-sm text-muted-foreground">
+                  No student submissions yet.
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>

@@ -2,13 +2,18 @@ import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase.ts";
 import { useAuth } from "@/contexts/AuthContext.tsx";
+import {
+  COURSE_OFFERING_SELECT,
+  normalizeCourseOffering,
+  removeCourseOfferingFiles,
+} from "@/lib/courseOfferings";
 import { CoursePage } from "./CoursePage"; 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { Search, Plus, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Plus, Loader2, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 
 export function CourseManagement() {
   const { profile } = useAuth();
@@ -19,6 +24,7 @@ export function CourseManagement() {
   const [myCourses, setMyCourses] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [droppingCourseId, setDroppingCourseId] = useState<string | null>(null);
   
   // View Switching
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
@@ -52,27 +58,64 @@ export function CourseManagement() {
     const { data: allData } = await supabase.from('courses').select('*');
     setCourses(allData || []);
 
-    // 2. Fetch "My" Claimed Courses
+    // 2. Fetch the lecturer's course instances
     const { data: myData } = await supabase
       .from('course_instructors')
-      .select('course_id, courses(*)')
+      .select(`course_id, course_offerings(${COURSE_OFFERING_SELECT})`)
       .eq('user_id', profile?.id);
     
-    setMyCourses(myData?.map((x: any) => x.courses) || []);
+    setMyCourses(
+      myData
+        ?.map((row: any) => normalizeCourseOffering(row.course_offerings))
+        .filter((course: any) => course.id) || []
+    );
     setIsLoading(false);
   };
 
+  const getCourseCode = (course: any) => course?.course_code || course?.code || "N/A";
+
   const handleClaimCourse = async (courseId: string) => {
-    const { error } = await supabase.from('course_instructors').insert({
-      course_id: courseId,
-      user_id: profile?.id
+    const { error } = await supabase.rpc('create_course_offering', {
+      p_course_id: courseId
     });
     
     if (!error) {
       fetchData(); 
       setActiveTab("my-teaching");
     } else {
-        console.error("Error claiming course:", error);
+      console.error("Error creating course offering:", error);
+      alert(`Failed to add course: ${error.message}`);
+    }
+  };
+
+  const handleDropCourse = async (course: any) => {
+    if (!profile?.id) return;
+    const courseName = course?.name || "this course";
+    const confirmed = window.confirm(
+      `Permanently drop ${courseName}?\n\nAll enrolled students, posts, discussions, files, assignments, submissions, grades and attendance for this class will be deleted. This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setDroppingCourseId(course.id);
+    try {
+      try {
+        await removeCourseOfferingFiles(course.id);
+      } catch (storageError) {
+        console.warn("Some course files could not be removed:", storageError);
+      }
+
+      const { error } = await supabase.rpc('drop_course_offering', {
+        p_offering_id: course.id
+      });
+
+      if (!error) {
+        setMyCourses((current) => current.filter((item) => item.id !== course.id));
+      } else {
+        console.error("Error dropping course:", error);
+        alert(`Failed to drop course: ${error.message}`);
+      }
+    } finally {
+      setDroppingCourseId(null);
     }
   };
 
@@ -85,7 +128,7 @@ export function CourseManagement() {
   // Filter Logic
   const filteredAll = courses.filter(c => 
     c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    c.course_code.toLowerCase().includes(searchQuery.toLowerCase())
+    getCourseCode(c).toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   // Pagination Logic
@@ -148,7 +191,7 @@ export function CourseManagement() {
               >
                 <CardHeader>
                   <div className="flex justify-between">
-                    <Badge variant="outline">{course.course_code}</Badge>
+                    <Badge variant="outline">{getCourseCode(course)}</Badge>
                     <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 border-none">Teaching</Badge>
                   </div>
                   <CardTitle className="mt-2 line-clamp-1">{course.name}</CardTitle>
@@ -157,7 +200,28 @@ export function CourseManagement() {
                   <div className="text-sm text-muted-foreground mb-4">
                     {course.faculty}
                   </div>
-                  <Button className="w-full">Manage Course</Button>
+                  <div className="flex gap-2">
+                    <Button className="flex-1">Manage Course</Button>
+                    {course.owner_id === profile?.id && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="shrink-0 text-destructive hover:text-destructive"
+                        disabled={droppingCourseId === course.id}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleDropCourse(course);
+                        }}
+                      >
+                        {droppingCourseId === course.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                        <span className="sr-only">Drop Course</span>
+                      </Button>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             ))}
@@ -168,11 +232,11 @@ export function CourseManagement() {
         <TabsContent value="all-courses" className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
              {paginatedCourses.map(course => {
-               const isAlreadyTeaching = myCourses.some(m => m.id === course.id);
+               const isAlreadyTeaching = myCourses.some(m => m.template_id === course.id);
                return (
                 <Card key={course.id}>
                   <CardHeader>
-                    <Badge variant="outline" className="w-fit">{course.course_code}</Badge>
+                    <Badge variant="outline" className="w-fit">{getCourseCode(course)}</Badge>
                     <CardTitle className="mt-2 text-lg line-clamp-1">{course.name}</CardTitle>
                     <CardDescription className="line-clamp-1">{course.chinese_name}</CardDescription>
                   </CardHeader>

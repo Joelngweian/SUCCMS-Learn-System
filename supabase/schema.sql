@@ -16,12 +16,25 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
   full_name TEXT NOT NULL UNIQUE, -- Username must be unique for login
   role TEXT NOT NULL CHECK (role IN ('student', 'lecturer', 'admin')),
   program_or_department TEXT, -- e.g., "Computer Science" or "Faculty of Engineering"
+  faculty TEXT,
+  programme TEXT,
   avatar_url TEXT,
+  cover_url TEXT,
   bio TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   is_active BOOLEAN DEFAULT TRUE,
   last_login_at TIMESTAMPTZ
+);
+
+-- Social follows between student and lecturer profiles
+CREATE TABLE IF NOT EXISTS public.follows (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  follower_id UUID NOT NULL REFERENCES public.user_profiles(id) ON DELETE CASCADE,
+  following_id UUID NOT NULL REFERENCES public.user_profiles(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT follows_users_must_differ CHECK (follower_id <> following_id),
+  CONSTRAINT follows_follower_following_unique UNIQUE (follower_id, following_id)
 );
 
 -- ============================================================================
@@ -32,12 +45,21 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
 CREATE TABLE IF NOT EXISTS public.courses (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   code TEXT UNIQUE NOT NULL, -- e.g., "CS301"
+  course_code TEXT UNIQUE,
   name TEXT NOT NULL,
+  chinese_name TEXT,
   description TEXT,
-  lecturer_id UUID NOT NULL REFERENCES public.user_profiles(id) ON DELETE CASCADE,
+  lecturer_id UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL,
+  faculty TEXT,
+  programme TEXT,
+  course_type TEXT,
   semester TEXT, -- e.g., "Spring 2024"
   credits INTEGER DEFAULT 3,
+  credit_hours INTEGER,
   max_students INTEGER,
+  max_capacity INTEGER,
+  enrollment_key TEXT,
+  status TEXT DEFAULT 'open',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -51,15 +73,33 @@ CREATE TABLE IF NOT EXISTS public.course_enrollments (
   UNIQUE(course_id, student_id)
 );
 
+-- Course instructors (lecturers teaching courses)
+CREATE TABLE IF NOT EXISTS public.course_instructors (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  course_id UUID NOT NULL REFERENCES public.courses(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.user_profiles(id) ON DELETE CASCADE,
+  assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(course_id, user_id)
+);
+
 -- Course materials (documents, videos, etc.)
 CREATE TABLE IF NOT EXISTS public.course_materials (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   course_id UUID NOT NULL REFERENCES public.courses(id) ON DELETE CASCADE,
+  parent_id UUID REFERENCES public.course_materials(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   description TEXT,
-  file_url TEXT NOT NULL,
+  file_path TEXT,
+  file_url TEXT,
   file_type TEXT, -- e.g., "pdf", "video", "document"
-  uploaded_by UUID NOT NULL REFERENCES public.user_profiles(id) ON DELETE CASCADE,
+  size BIGINT DEFAULT 0,
+  ms_drive_id TEXT,
+  ms_drive_item_id TEXT,
+  ms_web_url TEXT,
+  ms_edit_url TEXT,
+  ms_last_synced_at TIMESTAMPTZ,
+  created_by UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL,
+  uploaded_by UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL,
   uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   downloads_count INTEGER DEFAULT 0
 );
@@ -73,6 +113,7 @@ CREATE TABLE IF NOT EXISTS public.assignments (
   created_by UUID NOT NULL REFERENCES public.user_profiles(id) ON DELETE CASCADE,
   due_date TIMESTAMPTZ NOT NULL,
   max_score INTEGER DEFAULT 100,
+  attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -147,6 +188,25 @@ CREATE TABLE IF NOT EXISTS public.posts (
   is_locked BOOLEAN DEFAULT FALSE
 );
 
+-- Course posts (course announcements and updates)
+CREATE TABLE IF NOT EXISTS public.course_posts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  course_id UUID NOT NULL REFERENCES public.courses(id) ON DELETE CASCADE,
+  author_id UUID NOT NULL REFERENCES public.user_profiles(id) ON DELETE CASCADE,
+  author_name TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '',
+  attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT course_posts_has_content CHECK (
+    LENGTH(TRIM(content)) > 0
+    OR (
+      jsonb_typeof(attachments) = 'array'
+      AND jsonb_array_length(attachments) > 0
+    )
+  )
+);
+
 -- Comments on posts
 CREATE TABLE IF NOT EXISTS public.post_comments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -196,14 +256,15 @@ CREATE TABLE IF NOT EXISTS public.post_views (
 CREATE TABLE IF NOT EXISTS public.stories (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES public.user_profiles(id) ON DELETE CASCADE,
-  content TEXT NOT NULL,
-  content_type TEXT NOT NULL CHECK (content_type IN ('image', 'video', 'text', 'assignment', 'grade', 'course')),
+  content TEXT,
+  content_type TEXT CHECK (content_type IN ('image', 'video', 'text', 'assignment', 'grade', 'course')),
   media_url TEXT,
+  image_url TEXT,
   title TEXT,
   description TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  expires_at TIMESTAMPTZ NOT NULL, -- 24 hours from creation
-  is_active BOOLEAN DEFAULT TRUE
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '24 hours'),
+  is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 -- Story views
@@ -213,6 +274,39 @@ CREATE TABLE IF NOT EXISTS public.story_views (
   viewed_by UUID NOT NULL REFERENCES public.user_profiles(id) ON DELETE CASCADE,
   viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(story_id, viewed_by)
+);
+
+-- User and story reports for administrator moderation
+CREATE TABLE IF NOT EXISTS public.reports (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  reporter_id UUID NOT NULL
+    CONSTRAINT reports_reporter_id_fkey
+    REFERENCES public.user_profiles(id) ON DELETE CASCADE,
+  reported_user_id UUID NOT NULL
+    CONSTRAINT reports_reported_user_id_fkey
+    REFERENCES public.user_profiles(id) ON DELETE CASCADE,
+  report_type TEXT NOT NULL CHECK (report_type IN ('user', 'story')),
+  story_id UUID
+    CONSTRAINT reports_story_id_fkey
+    REFERENCES public.stories(id) ON DELETE SET NULL,
+  reason TEXT NOT NULL CHECK (
+    reason IN ('harassment', 'threats', 'impersonation', 'inappropriate', 'spam', 'other')
+  ),
+  details TEXT,
+  severity TEXT NOT NULL DEFAULT 'low' CHECK (severity IN ('low', 'medium', 'high')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'resolved')),
+  resolved_by UUID
+    CONSTRAINT reports_resolved_by_fkey
+    REFERENCES public.user_profiles(id) ON DELETE SET NULL,
+  resolved_at TIMESTAMPTZ,
+  resolution_notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT reports_cannot_target_self CHECK (reporter_id <> reported_user_id),
+  CONSTRAINT reports_target_matches_type CHECK (
+    (report_type = 'user' AND story_id IS NULL)
+    OR report_type = 'story'
+  )
 );
 
 -- ============================================================================
@@ -226,6 +320,7 @@ CREATE TABLE IF NOT EXISTS public.announcements (
   title TEXT NOT NULL,
   content TEXT NOT NULL,
   priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high')) DEFAULT 'medium',
+  attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   expires_at TIMESTAMPTZ,
@@ -266,6 +361,13 @@ CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON public.user_profiles(email
 CREATE INDEX IF NOT EXISTS idx_courses_lecturer_id ON public.courses(lecturer_id);
 CREATE INDEX IF NOT EXISTS idx_course_enrollments_student_id ON public.course_enrollments(student_id);
 CREATE INDEX IF NOT EXISTS idx_course_enrollments_course_id ON public.course_enrollments(course_id);
+CREATE INDEX IF NOT EXISTS idx_follows_follower_created ON public.follows(follower_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_follows_following_created ON public.follows(following_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_course_instructors_user_id ON public.course_instructors(user_id);
+CREATE INDEX IF NOT EXISTS idx_course_instructors_course_id ON public.course_instructors(course_id);
+CREATE INDEX IF NOT EXISTS idx_course_materials_course_parent ON public.course_materials(course_id, parent_id);
+CREATE INDEX IF NOT EXISTS idx_course_materials_created_by ON public.course_materials(created_by);
+CREATE INDEX IF NOT EXISTS idx_course_materials_ms_drive_item_id ON public.course_materials(ms_drive_item_id);
 CREATE INDEX IF NOT EXISTS idx_assignments_course_id ON public.assignments(course_id);
 CREATE INDEX IF NOT EXISTS idx_assignment_submissions_student_id ON public.assignment_submissions(student_id);
 CREATE INDEX IF NOT EXISTS idx_student_grades_student_id ON public.student_grades(student_id);
@@ -273,12 +375,24 @@ CREATE INDEX IF NOT EXISTS idx_student_grades_course_id ON public.student_grades
 CREATE INDEX IF NOT EXISTS idx_attendance_student_id ON public.attendance(student_id);
 CREATE INDEX IF NOT EXISTS idx_posts_author_id ON public.posts(author_id);
 CREATE INDEX IF NOT EXISTS idx_posts_course_id ON public.posts(course_id);
+CREATE INDEX IF NOT EXISTS idx_course_posts_course_id ON public.course_posts(course_id);
+CREATE INDEX IF NOT EXISTS idx_course_posts_author_id ON public.course_posts(author_id);
 CREATE INDEX IF NOT EXISTS idx_post_comments_post_id ON public.post_comments(post_id);
 CREATE INDEX IF NOT EXISTS idx_post_likes_post_id ON public.post_likes(post_id);
 CREATE INDEX IF NOT EXISTS idx_reactions_post_id ON public.reactions(post_id);
 CREATE INDEX IF NOT EXISTS idx_stories_user_id ON public.stories(user_id);
 CREATE INDEX IF NOT EXISTS idx_stories_expires_at ON public.stories(expires_at);
 CREATE INDEX IF NOT EXISTS idx_story_views_story_id ON public.story_views(story_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_pending_user_unique
+  ON public.reports(reporter_id, reported_user_id)
+  WHERE report_type = 'user' AND status = 'pending';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_pending_story_unique
+  ON public.reports(reporter_id, story_id)
+  WHERE report_type = 'story' AND status = 'pending' AND story_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_reports_status_created
+  ON public.reports(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reports_reported_user
+  ON public.reports(reported_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_announcements_admin_id ON public.announcements(admin_id);
 CREATE INDEX IF NOT EXISTS idx_leaderboard_student_id ON public.leaderboard(student_id);
 
@@ -288,8 +402,10 @@ CREATE INDEX IF NOT EXISTS idx_leaderboard_student_id ON public.leaderboard(stud
 
 -- Enable RLS on all tables
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.follows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.courses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.course_enrollments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.course_instructors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.course_materials ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.assignment_submissions ENABLE ROW LEVEL SECURITY;
@@ -297,12 +413,14 @@ ALTER TABLE public.student_grades ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.student_gpa ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.course_posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.post_comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.post_likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.post_views ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.story_views ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.announcement_reads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.leaderboard ENABLE ROW LEVEL SECURITY;
@@ -333,6 +451,42 @@ CREATE POLICY "Allow admins to manage profiles"
       SELECT id FROM public.user_profiles WHERE role = 'admin'
     )
   );
+
+-- FOLLOWS RLS Policies
+CREATE POLICY "Authenticated users can view follows"
+  ON public.follows FOR SELECT
+  TO authenticated
+  USING (TRUE);
+
+CREATE POLICY "Users can follow active profiles"
+  ON public.follows FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    follower_id = auth.uid()
+    AND follower_id <> following_id
+    AND EXISTS (
+      SELECT 1
+      FROM public.user_profiles target
+      WHERE target.id = following_id
+        AND target.role <> 'admin'
+        AND COALESCE(target.is_active, TRUE)
+    )
+  );
+
+CREATE POLICY "Users can unfollow profiles"
+  ON public.follows FOR DELETE
+  TO authenticated
+  USING (
+    follower_id = auth.uid()
+    OR EXISTS (
+      SELECT 1
+      FROM public.user_profiles current_profile
+      WHERE current_profile.id = auth.uid()
+        AND current_profile.role = 'admin'
+    )
+  );
+
+GRANT SELECT, INSERT, DELETE ON public.follows TO authenticated;
 
 -- COURSES RLS Policies
 -- All authenticated users can view courses
@@ -371,28 +525,58 @@ CREATE POLICY "Allow students and lecturers to manage enrollments"
     auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin')
   );
 
--- COURSE_MATERIALS RLS Policies
--- All authenticated users can view course materials if enrolled
-CREATE POLICY "Allow enrolled students and lecturers to view materials"
-  ON public.course_materials FOR SELECT
+-- COURSE_INSTRUCTORS RLS Policies
+-- Authenticated users can view course lecturer assignments
+CREATE POLICY "Allow authenticated users to view course instructors"
+  ON public.course_instructors FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+-- Lecturers can add themselves to a course from the course catalog
+CREATE POLICY "Allow lecturers to add themselves to courses"
+  ON public.course_instructors FOR INSERT
+  WITH CHECK (
+    auth.uid() = user_id
+    AND auth.uid() IN (
+      SELECT id FROM public.user_profiles WHERE role IN ('lecturer', 'admin')
+    )
+  );
+
+-- Lecturers can remove their own course assignments
+CREATE POLICY "Allow lecturers to remove their own course links"
+  ON public.course_instructors FOR DELETE
   USING (
-    auth.uid() IN (
-      SELECT student_id FROM public.course_enrollments WHERE course_id = course_id
-    ) OR
-    auth.uid() IN (
-      SELECT lecturer_id FROM public.courses WHERE id = course_id
-    ) OR
+    auth.uid() = user_id OR
     auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin')
   );
 
--- Only uploaders and lecturers can insert/update materials
-CREATE POLICY "Allow lecturers to manage materials"
-  ON public.course_materials FOR ALL
+-- COURSE_MATERIALS RLS Policies
+-- Authenticated users can view course materials
+CREATE POLICY "Allow authenticated users to view course materials"
+  ON public.course_materials FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+-- Authenticated users can create materials under their own user id
+CREATE POLICY "Allow authenticated users to create course materials"
+  ON public.course_materials FOR INSERT
+  WITH CHECK (auth.uid() = created_by);
+
+-- Users can update their own materials
+CREATE POLICY "Allow users to update own course materials"
+  ON public.course_materials FOR UPDATE
   USING (
-    auth.uid() = uploaded_by OR
-    auth.uid() IN (
-      SELECT lecturer_id FROM public.courses WHERE id = course_id
-    ) OR
+    auth.uid() = created_by OR
+    auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin')
+  )
+  WITH CHECK (
+    auth.uid() = created_by OR
+    auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin')
+  );
+
+-- Users can delete their own materials
+CREATE POLICY "Allow users to delete own course materials"
+  ON public.course_materials FOR DELETE
+  USING (
+    auth.uid() = created_by OR
     auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin')
   );
 
@@ -443,16 +627,16 @@ CREATE POLICY "Allow students and lecturers to update submissions"
   USING (
     auth.uid() = student_id OR
     auth.uid() IN (
-      SELECT user_id FROM public.course_instructors 
-      WHERE course_id IN (SELECT course_id FROM public.course_assignments WHERE id = assignment_id)
+      SELECT lecturer_id FROM public.courses WHERE id IN
+        (SELECT course_id FROM public.assignments WHERE id = assignment_id)
     ) OR
     auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin')
   )
   WITH CHECK (
     auth.uid() = student_id OR
     auth.uid() IN (
-      SELECT user_id FROM public.course_instructors 
-      WHERE course_id IN (SELECT course_id FROM public.course_assignments WHERE id = assignment_id)
+      SELECT lecturer_id FROM public.courses WHERE id IN
+        (SELECT course_id FROM public.assignments WHERE id = assignment_id)
     ) OR
     auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin')
   );
@@ -518,6 +702,28 @@ CREATE POLICY "Allow users to update their own posts"
   ON public.posts FOR UPDATE
   USING (auth.uid() = author_id OR auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin'))
   WITH CHECK (auth.uid() = author_id OR auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin'));
+
+-- COURSE_POSTS RLS Policies
+-- All authenticated users can view course posts
+CREATE POLICY "Allow authenticated users to view course posts"
+  ON public.course_posts FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+-- Authenticated users can create their own course posts
+CREATE POLICY "Allow authenticated users to create course posts"
+  ON public.course_posts FOR INSERT
+  WITH CHECK (auth.uid() = author_id);
+
+-- Users can update their own course posts
+CREATE POLICY "Allow users to update own course posts"
+  ON public.course_posts FOR UPDATE
+  USING (auth.uid() = author_id OR auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin'))
+  WITH CHECK (auth.uid() = author_id OR auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin'));
+
+-- Users can delete their own course posts
+CREATE POLICY "Allow users to delete own course posts"
+  ON public.course_posts FOR DELETE
+  USING (auth.uid() = author_id OR auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin'));
 
 -- POST_COMMENTS RLS Policies
 -- All authenticated users can view comments
@@ -595,6 +801,23 @@ CREATE POLICY "Allow users to update their own stories"
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
 
+-- Users can delete their own stories
+CREATE POLICY "Allow users to delete their own stories"
+  ON public.stories FOR DELETE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Admins can delete reported stories"
+  ON public.stories FOR DELETE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.user_profiles current_profile
+      WHERE current_profile.id = auth.uid()
+        AND current_profile.role = 'admin'
+    )
+  );
+
 -- STORY_VIEWS RLS Policies
 -- Users can record their own story views
 CREATE POLICY "Allow users to record story views"
@@ -610,6 +833,82 @@ CREATE POLICY "Allow users to view their own story views"
       SELECT user_id FROM public.stories WHERE id = story_id
     )
   );
+
+-- REPORTS RLS Policies
+CREATE POLICY "Users can submit reports"
+  ON public.reports FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    reporter_id = auth.uid()
+    AND reporter_id <> reported_user_id
+    AND EXISTS (
+      SELECT 1
+      FROM public.user_profiles target
+      WHERE target.id = reported_user_id
+        AND target.role <> 'admin'
+        AND COALESCE(target.is_active, TRUE)
+    )
+    AND (
+      (report_type = 'user' AND story_id IS NULL)
+      OR (
+        report_type = 'story'
+        AND story_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM public.stories reported_story
+          WHERE reported_story.id = story_id
+            AND reported_story.user_id = reported_user_id
+        )
+      )
+    )
+  );
+
+CREATE POLICY "Users can view own reports and admins can view all"
+  ON public.reports FOR SELECT
+  TO authenticated
+  USING (
+    reporter_id = auth.uid()
+    OR EXISTS (
+      SELECT 1
+      FROM public.user_profiles current_profile
+      WHERE current_profile.id = auth.uid()
+        AND current_profile.role = 'admin'
+    )
+  );
+
+CREATE POLICY "Admins can update reports"
+  ON public.reports FOR UPDATE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.user_profiles current_profile
+      WHERE current_profile.id = auth.uid()
+        AND current_profile.role = 'admin'
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1
+      FROM public.user_profiles current_profile
+      WHERE current_profile.id = auth.uid()
+        AND current_profile.role = 'admin'
+    )
+  );
+
+CREATE POLICY "Admins can delete reports"
+  ON public.reports FOR DELETE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.user_profiles current_profile
+      WHERE current_profile.id = auth.uid()
+        AND current_profile.role = 'admin'
+    )
+  );
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.reports TO authenticated;
 
 -- ANNOUNCEMENTS RLS Policies
 -- All authenticated users can view active announcements
@@ -649,6 +948,143 @@ CREATE POLICY "Allow all authenticated users to view leaderboard"
 -- FUNCTIONS & TRIGGERS
 -- ============================================================================
 
+-- Create an in-app notification when one user follows another
+CREATE OR REPLACE FUNCTION public.notify_user_followed()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  actor_name TEXT;
+BEGIN
+  SELECT COALESCE(full_name, 'Someone')
+  INTO actor_name
+  FROM public.user_profiles
+  WHERE id = NEW.follower_id;
+
+  IF to_regclass('public.notifications') IS NOT NULL THEN
+    EXECUTE $notification$
+      INSERT INTO public.notifications (
+        recipient_id,
+        actor_id,
+        type,
+        title,
+        message,
+        entity_type,
+        entity_id,
+        action_url,
+        metadata,
+        dedupe_key
+      )
+      VALUES ($1, $2, 'new_follower', $3, $4, 'follow', $5, $6, $7, $8)
+      ON CONFLICT (dedupe_key) DO NOTHING
+    $notification$
+    USING
+      NEW.following_id,
+      NEW.follower_id,
+      actor_name || ' started following you',
+      'View their profile.',
+      NEW.id,
+      '/profile/' || NEW.follower_id,
+      jsonb_build_object('follow_id', NEW.id),
+      'follow:' || NEW.id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER notify_user_followed_insert
+  AFTER INSERT ON public.follows
+  FOR EACH ROW EXECUTE FUNCTION public.notify_user_followed();
+
+CREATE OR REPLACE FUNCTION public.set_report_severity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.severity := CASE NEW.reason
+    WHEN 'threats' THEN 'high'
+    WHEN 'impersonation' THEN 'high'
+    WHEN 'harassment' THEN 'medium'
+    WHEN 'inappropriate' THEN 'medium'
+    ELSE 'low'
+  END;
+  NEW.updated_at := NOW();
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER set_report_severity_change
+  BEFORE INSERT OR UPDATE ON public.reports
+  FOR EACH ROW EXECUTE FUNCTION public.set_report_severity();
+
+CREATE OR REPLACE FUNCTION public.notify_admins_new_report()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  reporter_name TEXT;
+  target_name TEXT;
+  admin_record RECORD;
+BEGIN
+  IF to_regclass('public.notifications') IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT COALESCE(full_name, 'A user')
+  INTO reporter_name
+  FROM public.user_profiles
+  WHERE id = NEW.reporter_id;
+
+  SELECT COALESCE(full_name, 'a user')
+  INTO target_name
+  FROM public.user_profiles
+  WHERE id = NEW.reported_user_id;
+
+  FOR admin_record IN
+    SELECT id
+    FROM public.user_profiles
+    WHERE role = 'admin'
+      AND COALESCE(is_active, TRUE)
+  LOOP
+    EXECUTE $notification$
+      INSERT INTO public.notifications (
+        recipient_id,
+        actor_id,
+        type,
+        title,
+        message,
+        entity_type,
+        entity_id,
+        action_url,
+        metadata,
+        dedupe_key
+      )
+      VALUES ($1, $2, 'moderation_report', $3, $4, 'report', $5, '/', $6, $7)
+      ON CONFLICT (dedupe_key) DO NOTHING
+    $notification$
+    USING
+      admin_record.id,
+      NEW.reporter_id,
+      'New ' || NEW.report_type || ' report',
+      reporter_name || ' reported ' || target_name || '.',
+      NEW.id,
+      jsonb_build_object('report_id', NEW.id),
+      'moderation-report:' || NEW.id || ':' || admin_record.id;
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER notify_admins_new_report_insert
+  AFTER INSERT ON public.reports
+  FOR EACH ROW EXECUTE FUNCTION public.notify_admins_new_report();
+
 -- Function to auto-update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -676,6 +1112,11 @@ CREATE TRIGGER update_assignments_updated_at
 
 CREATE TRIGGER update_posts_updated_at
   BEFORE UPDATE ON public.posts
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_course_posts_updated_at
+  BEFORE UPDATE ON public.course_posts
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
@@ -765,7 +1206,7 @@ SELECT
   COUNT(DISTINCT pl.id) as like_count,
   COUNT(DISTINCT pc.id) as comment_count,
   COUNT(DISTINCT pv.id) as view_count,
-  MAX(GREATEST(p.created_at, COALESCE(MAX(pc.created_at), p.created_at))) as last_activity
+  GREATEST(p.created_at, COALESCE(MAX(pc.created_at), p.created_at)) as last_activity
 FROM public.posts p
 LEFT JOIN public.post_likes pl ON p.id = pl.post_id
 LEFT JOIN public.post_comments pc ON p.id = pc.post_id

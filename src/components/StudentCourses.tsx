@@ -2,6 +2,11 @@ import React, { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext.tsx";
 import { supabase } from "@/lib/supabase.ts";
+import { PROGRAMMES } from "@/lib/programmes";
+import {
+  COURSE_OFFERING_SELECT,
+  normalizeCourseOffering,
+} from "@/lib/courseOfferings";
 import { CoursePage } from "./CoursePage"; // <--- IMPORT THIS
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Button } from "./ui/button";
@@ -37,7 +42,9 @@ import { Label } from "./ui/label";
 // --- Types ---
 interface Course {
   id: string;
-  course_code: string;
+  template_id?: string;
+  course_code?: string;
+  code?: string;
   name: string;
   chinese_name: string | null;
   faculty: string;
@@ -48,6 +55,13 @@ interface Course {
   enrollment_key: string | null;
   status: "active" | "unavailable" | "full" | "open";
   semester: string;
+  instructors?: CourseInstructor[];
+}
+
+interface CourseInstructor {
+  id: string;
+  full_name: string;
+  avatar_url?: string | null;
 }
 
 export function StudentCourses() {
@@ -83,9 +97,12 @@ export function StudentCourses() {
 
   // Profile Setup State
   const [showProfileSetup, setShowProfileSetup] = useState(false);
+  const [selectedLevel, setSelectedLevel] = useState<string | null>(null);
   const [programmeSearch, setProgrammeSearch] = useState("");
+  const [modalCurrentPage, setModalCurrentPage] = useState(1);
   const [selectedProgrammeObj, setSelectedProgrammeObj] = useState<{faculty: string, programme: string} | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [profileSetupError, setProfileSetupError] = useState("");
 
   // --- 1. Initial Load & Checks ---
   useEffect(() => {
@@ -97,6 +114,41 @@ export function StudentCourses() {
       fetchData();
     }
   }, [profile]);
+
+  useEffect(() => {
+    if (!profile?.id || profile.role !== "student") return;
+
+    const refreshCourses = () => {
+      if (document.visibilityState === "visible") {
+        fetchData();
+      }
+    };
+
+    const channel = supabase
+      .channel(`student-course-enrollments:${profile.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "course_enrollments",
+          filter: `student_id=eq.${profile.id}`,
+        },
+        () => {
+          fetchData();
+        }
+      )
+      .subscribe();
+
+    window.addEventListener("focus", refreshCourses);
+    document.addEventListener("visibilitychange", refreshCourses);
+
+    return () => {
+      window.removeEventListener("focus", refreshCourses);
+      document.removeEventListener("visibilitychange", refreshCourses);
+      supabase.removeChannel(channel);
+    };
+  }, [profile?.id, profile?.role]);
 
   // Sync URL courseId param with viewingCourseId state
   useEffect(() => {
@@ -112,36 +164,62 @@ export function StudentCourses() {
 
   // --- 2. Data Fetching ---
 
-  const fetchProgrammeOptions = async () => {
-    const { data } = await supabase.from('courses').select('faculty, programme');
-    if (data) {
-      const unique = data.filter((v, i, a) => a.findIndex(t => (t.programme === v.programme)) === i);
-      setProgrammeOptions(unique);
-    }
+  const fetchProgrammeOptions = () => {
+    const options = PROGRAMMES.map(p => ({
+      faculty: p.level,
+      programme: p.name
+    }));
+    setProgrammeOptions(options);
   };
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
+      const { data: instructorRows } = await supabase
+        .from('course_instructors')
+        .select('course_id, user_profiles(id, full_name, avatar_url)');
+
+      const instructorsByCourse = new Map<string, CourseInstructor[]>();
+      (instructorRows || []).forEach((row: any) => {
+        const instructor = row.user_profiles;
+        if (!row.course_id || !instructor) return;
+        const current = instructorsByCourse.get(row.course_id) || [];
+        current.push({
+          id: instructor.id,
+          full_name: instructor.full_name,
+          avatar_url: instructor.avatar_url,
+        });
+        instructorsByCourse.set(row.course_id, current);
+      });
+
+      const attachInstructors = (course: Course) => ({
+        ...course,
+        instructors: instructorsByCourse.get(course.id) || [],
+      });
+
       // A. Fetch Enrolled
       const { data: enrollmentData } = await supabase
-        .from('enrollments')
-        .select(`course_id, courses (*)`)
-        .eq('user_id', profile?.id);
+        .from('course_enrollments')
+        .select(`course_id, course_offerings(${COURSE_OFFERING_SELECT})`)
+        .eq('student_id', profile?.id);
       
-      const myCourses = enrollmentData?.map((e: any) => e.courses) || [];
+      const myCourses = enrollmentData
+        ?.map((enrollment: any) => normalizeCourseOffering(enrollment.course_offerings))
+        .filter((course: any) => course.id)
+        .map(attachInstructors) || [];
       setEnrolledCourses(myCourses);
 
       // B. Fetch Available
       const { data: allCourses } = await supabase
-        .from('courses')
-        .select('*')
-        .neq('status', 'unavailable');
+        .from('course_offerings')
+        .select(COURSE_OFFERING_SELECT)
+        .eq('status', 'active');
 
       if (allCourses && profile) {
         const enrolledIds = new Set(myCourses.map(c => c.id));
+        const offerings = allCourses.map(normalizeCourseOffering);
         
-        const filtered = allCourses.filter((course: Course) => {
+        const filtered = offerings.filter((course: Course) => {
           if (enrolledIds.has(course.id)) return false; 
           
           const isCommonCore = course.course_type === 'common_core' && course.faculty === profile.faculty;
@@ -152,7 +230,7 @@ export function StudentCourses() {
           return isCommonCore || isDisciplineCore || isElectiveOpen || isElectiveCore;
         });
 
-        setAvailableCourses(filtered);
+        setAvailableCourses(filtered.map(attachInstructors));
       }
     } catch (error) {
       console.error("Error fetching courses", error);
@@ -166,6 +244,7 @@ export function StudentCourses() {
   const handleProfileSave = async () => {
     if (!selectedProgrammeObj) return;
     setIsSavingProfile(true);
+    setProfileSetupError("");
     
     const { error } = await updateProfile({
       faculty: selectedProgrammeObj.faculty,
@@ -175,6 +254,8 @@ export function StudentCourses() {
     if (!error) {
       setShowProfileSetup(false);
       fetchData();
+    } else {
+      setProfileSetupError(error.message || "Failed to save programme selection.");
     }
     setIsSavingProfile(false);
   };
@@ -216,8 +297,8 @@ export function StudentCourses() {
       if (!actualKey) throw new Error("System Error: Course has no key set. Contact Admin.");
       if (inputKey !== actualKey) throw new Error("Invalid Enrollment Key.");
 
-      const { error } = await supabase.from('enrollments').insert({
-        user_id: profile.id,
+      const { error } = await supabase.from('course_enrollments').insert({
+        student_id: profile.id,
         course_id: selectedCourseForEnrollment.id
       });
 
@@ -237,6 +318,13 @@ export function StudentCourses() {
     }
   };
 
+  const getCourseCode = (course: Course) => course.course_code || course.code || "N/A";
+  const getLecturerNames = (course: Course) => {
+    if (!course.instructors?.length) return "No lecturer assigned yet";
+    return course.instructors.map((instructor) => instructor.full_name).join(", ");
+  };
+  const hasAssignedLecturer = (course: Course) => Boolean(course.instructors?.length);
+
   // --- 4. Render Logic ---
 
   // *** IF VIEWING A COURSE, SHOW THE TEAMS VIEW ***
@@ -250,7 +338,7 @@ export function StudentCourses() {
 
   const displayedAvailable = availableCourses.filter(c => 
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    c.course_code.toLowerCase().includes(searchTerm.toLowerCase())
+    getCourseCode(c).toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const totalPages = Math.ceil(displayedAvailable.length / ITEMS_PER_PAGE);
@@ -307,7 +395,7 @@ export function StudentCourses() {
                 >
                   <CardHeader>
                     <div className="flex justify-between items-start">
-                      <Badge variant="outline">{course.course_code}</Badge>
+                      <Badge variant="outline">{getCourseCode(course)}</Badge>
                       <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-none">Enrolled</Badge>
                     </div>
                     <CardTitle className="mt-2 line-clamp-1">{course.name}</CardTitle>
@@ -320,6 +408,9 @@ export function StudentCourses() {
                         </div>
                         <div className="flex items-center gap-2">
                            <Users className="h-3 w-3" /> {course.faculty}
+                        </div>
+                        <div className="flex items-center gap-2">
+                           <GraduationCap className="h-3 w-3" /> Lecturer: {getLecturerNames(course)}
                         </div>
                      </div>
                      <Button className="w-full" onClick={(e: React.MouseEvent) => {
@@ -354,7 +445,7 @@ export function StudentCourses() {
               <Card key={course.id} className="flex flex-col hover:border-primary/50 transition-colors">
                 <CardHeader>
                   <div className="flex justify-between items-start">
-                    <Badge variant="outline">{course.course_code}</Badge>
+                    <Badge variant="outline">{getCourseCode(course)}</Badge>
                     <Badge variant={course.course_type === 'common_core' ? 'secondary' : 'outline'}>
                       {course.course_type?.replace('_', ' ')}
                     </Badge>
@@ -363,12 +454,17 @@ export function StudentCourses() {
                   <CardDescription className="font-noto-sans-sc line-clamp-1">{course.chinese_name}</CardDescription>
                 </CardHeader>
                 <CardContent className="mt-auto">
-                   <div className="flex justify-between items-center text-sm text-muted-foreground mb-4">
-                      <span>{course.semester}</span>
-                      <span>{course.credit_hours} Credits</span>
+                   <div className="space-y-3 text-sm text-muted-foreground mb-4">
+                      <div className="flex items-center gap-2">
+                        <GraduationCap className="h-4 w-4" />
+                        <span>Lecturer: {getLecturerNames(course)}</span>
+                      </div>
+                      <div className="flex justify-end items-center">
+                        <span>{course.credit_hours} Credits</span>
+                      </div>
                    </div>
-                   <Button className="w-full" onClick={() => handleEnrollClick(course)}>
-                      <Plus className="h-4 w-4 mr-2" /> Enroll
+                   <Button className="w-full" onClick={() => handleEnrollClick(course)} disabled={!hasAssignedLecturer(course)}>
+                      <Plus className="h-4 w-4 mr-2" /> {hasAssignedLecturer(course) ? "Enroll" : "No Lecturer Assigned"}
                    </Button>
                 </CardContent>
               </Card>
@@ -404,7 +500,7 @@ export function StudentCourses() {
 
       {/* --- DIALOG: PROFILE SETUP --- */}
       <Dialog open={showProfileSetup} onOpenChange={() => {}}>
-        <DialogContent className="max-w-md" onInteractOutside={(e: any) => e.preventDefault()}>
+        <DialogContent className="max-w-md" hideCloseButton onInteractOutside={(e: any) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Welcome! Select your Programme</DialogTitle>
             <DialogDescription>
@@ -413,37 +509,115 @@ export function StudentCourses() {
           </DialogHeader>
           
           <div className="space-y-4 py-2">
-            <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input 
-                    placeholder="Search programmes..." 
-                    className="pl-8"
-                    value={programmeSearch}
-                    onChange={(e) => setProgrammeSearch(e.target.value)}
-                />
-            </div>
-            
-            <div className="border rounded-md h-[200px] overflow-y-auto p-1 bg-muted/10">
-                {filteredProgrammes.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-                        No programmes found.
+            {!selectedLevel ? (
+                // STEP 1: Select Level
+                <div className="space-y-2">
+                    <p className="text-sm font-medium mb-3">1. Select Level of Study</p>
+                    <div className="grid grid-cols-1 gap-2">
+                        {Array.from(new Set(programmeOptions.map(p => p.faculty || "Other"))).map(level => (
+                            <button
+                                key={level}
+                                onClick={() => setSelectedLevel(level)}
+                                className="w-full text-left px-4 py-3 text-sm rounded-md border bg-card hover:bg-accent transition-colors flex justify-between items-center"
+                            >
+                                <span>{level}</span>
+                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            </button>
+                        ))}
                     </div>
-                ) : (
-                    filteredProgrammes.map((opt, idx) => (
-                        <button
-                            key={idx}
-                            onClick={() => setSelectedProgrammeObj(opt)}
-                            className={`w-full text-left px-3 py-2 text-sm rounded-sm transition-colors ${
-                                selectedProgrammeObj?.programme === opt.programme 
-                                ? 'bg-primary text-primary-foreground' 
-                                : 'hover:bg-accent'
-                            }`}
-                        >
-                            {opt.programme}
-                        </button>
-                    ))
-                )}
-            </div>
+                </div>
+            ) : (
+                // STEP 2: Select Programme
+                <div className="space-y-3">
+                    <div className="flex items-center gap-2 mb-2">
+                        <Button variant="ghost" size="sm" onClick={() => { setSelectedLevel(null); setSelectedProgrammeObj(null); setProgrammeSearch(""); setModalCurrentPage(1); }} className="h-8 px-2">
+                            <ChevronLeft className="h-4 w-4 mr-1" /> Back
+                        </Button>
+                        <span className="text-sm font-medium truncate">{selectedLevel}</span>
+                    </div>
+                    
+                    <div className="relative">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input 
+                            placeholder="Search programmes..." 
+                            className="pl-8"
+                            value={programmeSearch}
+                            onChange={(e) => {
+                                setProgrammeSearch(e.target.value);
+                                setModalCurrentPage(1);
+                            }}
+                        />
+                    </div>
+                    
+                    <div className="border rounded-md p-2 bg-muted/10 min-h-[280px] flex flex-col">
+                        {(() => {
+                            const levelProgrammes = filteredProgrammes.filter(p => p.faculty === selectedLevel);
+                            const totalModalPages = Math.ceil(levelProgrammes.length / 5);
+                            const paginatedLevelProgrammes = levelProgrammes.slice((modalCurrentPage - 1) * 5, modalCurrentPage * 5);
+
+                            if (levelProgrammes.length === 0) {
+                                return (
+                                    <div className="h-full flex-1 flex items-center justify-center text-muted-foreground text-sm">
+                                        No programmes found.
+                                    </div>
+                                );
+                            }
+
+                            return (
+                                <>
+                                    <div className="space-y-1 flex-1">
+                                        {paginatedLevelProgrammes.map((opt, idx) => (
+                                            <button
+                                                key={idx}
+                                                onClick={() => setSelectedProgrammeObj(opt)}
+                                                className={`w-full text-left px-3 py-3 text-sm rounded-md transition-colors border ${
+                                                    selectedProgrammeObj?.programme === opt.programme 
+                                                    ? 'bg-primary text-primary-foreground border-primary' 
+                                                    : 'bg-card hover:bg-accent border-transparent'
+                                                }`}
+                                            >
+                                                {opt.programme}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    
+                                    {totalModalPages > 1 && (
+                                        <div className="flex items-center justify-between pt-4 mt-auto border-t">
+                                            <Button 
+                                                variant="outline" 
+                                                size="sm" 
+                                                onClick={() => setModalCurrentPage(p => Math.max(1, p - 1))}
+                                                disabled={modalCurrentPage === 1}
+                                                className="h-8"
+                                            >
+                                                <ChevronLeft className="h-4 w-4" /> Prev
+                                            </Button>
+                                            <span className="text-xs text-muted-foreground">
+                                                {modalCurrentPage} / {totalModalPages}
+                                            </span>
+                                            <Button 
+                                                variant="outline" 
+                                                size="sm" 
+                                                onClick={() => setModalCurrentPage(p => Math.min(totalModalPages, p + 1))}
+                                                disabled={modalCurrentPage === totalModalPages}
+                                                className="h-8"
+                                            >
+                                                Next <ChevronRight className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    )}
+                                </>
+                            );
+                        })()}
+                    </div>
+                </div>
+            )}
+            {profileSetupError && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{profileSetupError}</AlertDescription>
+              </Alert>
+            )}
           </div>
           <DialogFooter>
             <Button onClick={handleProfileSave} disabled={!selectedProgrammeObj || isSavingProfile}>
@@ -459,7 +633,10 @@ export function StudentCourses() {
         open={!!selectedCourseForEnrollment} 
         onOpenChange={(open: boolean) => !open && setSelectedCourseForEnrollment(null)}
       >
-        <DialogContent className="max-w-sm sm:max-w-md">
+        <DialogContent
+          className="max-w-md"
+          style={{ width: "min(calc(100vw - 2rem), 28rem)" }}
+        >
           <DialogHeader>
             <DialogTitle>Enrollment Key Required</DialogTitle>
             <DialogDescription>
@@ -467,7 +644,7 @@ export function StudentCourses() {
             </DialogDescription>
           </DialogHeader>
           
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-2">
             {enrollmentError && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
@@ -495,7 +672,7 @@ export function StudentCourses() {
               </div>
             </div>
 
-            <div className="relative my-4">
+            <div className="relative my-3">
                 <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
                 <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">Or</span></div>
             </div>

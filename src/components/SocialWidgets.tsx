@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
+import { useOnlinePresence } from "@/hooks/useOnlinePresence";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Avatar, AvatarFallback } from "./ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Progress } from "./ui/progress";
@@ -25,31 +26,12 @@ interface OnlineActivityProps {
 }
 
 export function OnlineActivity({ userRole }: OnlineActivityProps) {
-  const [onlineCount, setOnlineCount] = useState(0);
+  const { onlineCount, onlineUsers } = useOnlinePresence();
 
-  useEffect(() => {
-    // Simulate real-time online count updates
-    const interval = setInterval(() => {
-      setOnlineCount(Math.floor(Math.random() * 50) + 120);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const onlineUsers = [
-    { name: "Sarah Kim", role: "student", status: "studying", lastSeen: "now" },
-    { name: "Mike Chen", role: "student", status: "in-class", lastSeen: "2m ago" },
-    { name: "Dr. Rodriguez", role: "lecturer", status: "office-hours", lastSeen: "now" },
-    { name: "Emma Wilson", role: "student", status: "assignment", lastSeen: "1m ago" },
-    { name: "Prof. Johnson", role: "lecturer", status: "grading", lastSeen: "5m ago" }
-  ];
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'studying': return 'bg-blue-100 text-blue-800';
-      case 'in-class': return 'bg-green-100 text-green-800';
-      case 'office-hours': return 'bg-purple-100 text-purple-800';
-      case 'assignment': return 'bg-orange-100 text-orange-800';
-      case 'grading': return 'bg-red-100 text-red-800';
+  const getRoleColor = (role: string) => {
+    switch (role) {
+      case 'lecturer': return 'bg-purple-100 text-purple-800';
+      case 'admin': return 'bg-red-100 text-red-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -75,27 +57,32 @@ export function OnlineActivity({ userRole }: OnlineActivityProps) {
         </div>
 
         <div className="space-y-3">
-          {onlineUsers.slice(0, 4).map((user, index) => (
-            <div key={index} className="flex items-center gap-3">
+          {onlineUsers.length > 0 ? onlineUsers.slice(0, 4).map((onlineUser) => (
+            <div key={onlineUser.id} className="flex items-center gap-3">
               <div className="relative">
                 <Avatar className="h-8 w-8">
+                  <AvatarImage src={onlineUser.avatarUrl} />
                   <AvatarFallback className="text-xs">
-                    {user.name.split(' ').map(n => n[0]).join('')}
+                    {onlineUser.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
                   </AvatarFallback>
                 </Avatar>
                 <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 border-2 border-background rounded-full" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{user.name}</p>
+                <p className="text-sm font-medium truncate">{onlineUser.name}</p>
                 <div className="flex items-center gap-2">
-                  <Badge className={`text-xs ${getStatusColor(user.status)}`}>
-                    {user.status.replace('-', ' ')}
+                  <Badge className={`text-xs ${getRoleColor(onlineUser.role)}`}>
+                    {onlineUser.role}
                   </Badge>
-                  <span className="text-xs text-muted-foreground">{user.lastSeen}</span>
+                  <span className="text-xs text-muted-foreground">now</span>
                 </div>
               </div>
             </div>
-          ))}
+          )) : (
+            <p className="py-2 text-center text-sm text-muted-foreground">
+              No users are sharing their online status.
+            </p>
+          )}
         </div>
 
         <Button variant="outline" className="w-full" size="sm">

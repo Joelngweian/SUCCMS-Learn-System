@@ -129,6 +129,82 @@
   }
 }
 
+.auth-light {
+  color-scheme: light;
+  --background: #ffffff;
+  --foreground: #111827;
+  --card: #ffffff;
+  --card-foreground: #111827;
+  --popover: #ffffff;
+  --popover-foreground: #111827;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #f3f4f6;
+  --secondary-foreground: #111827;
+  --muted: #f3f4f6;
+  --muted-foreground: #4b5563;
+  --accent: #f3f4f6;
+  --accent-foreground: #111827;
+  --border: #d1d5db;
+  --input: #ffffff;
+  --input-background: #ffffff;
+  --ring: #2563eb;
+  background-color: #ffffff;
+  color: #111827;
+}
+
+.auth-light [data-slot="card"] {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  color: #111827 !important;
+}
+
+.auth-light [data-slot="card-title"] {
+  color: #111827 !important;
+}
+
+.auth-light [data-slot="card-description"] {
+  color: #4b5563 !important;
+}
+
+.auth-light [data-slot="tabs-list"] {
+  background-color: #f3f4f6 !important;
+  color: #374151 !important;
+}
+
+.auth-light [data-slot="tabs-trigger"] {
+  color: #374151 !important;
+}
+
+.auth-light [data-slot="tabs-trigger"][data-state="active"] {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+.auth-light [data-slot="input"] {
+  background-color: #ffffff !important;
+  border-color: #d1d5db !important;
+  color: #111827 !important;
+}
+
+.auth-light [data-slot="input"]::placeholder {
+  color: #9ca3af !important;
+}
+
+.auth-light label {
+  color: #111827 !important;
+}
+
+.auth-light [data-slot="button"][data-selected="true"] {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+.auth-light [data-slot="button"][data-selected="false"] {
+  background-color: #ffffff !important;
+  border-color: #d1d5db !important;
+  color: #374151 !important;
+}
+
 /**
  * Base typography. This is not applied to elements which have an ancestor with a Tailwind text class.
  */

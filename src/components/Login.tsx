@@ -48,6 +48,7 @@ export function Login() {
     setError("");
     setInfo("");
 
+
     if (signupPassword.length < 6) {
       setError("Password must be at least 6 characters.");
       setIsLoading(false);
@@ -72,7 +73,7 @@ export function Login() {
       setError(signUpError.message);
       setIsLoading(false);
     } else {
-      setInfo("Account created! Please sign in.");
+      setInfo("Account created! Please check your email to verify your account before signing in.");
       setAuthMode('signin');
       setLoginEmail(signupEmail);
       setIsLoading(false);

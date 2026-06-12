@@ -6,14 +6,14 @@ import { supabase } from '@/lib/supabase.ts';
 export type UserProfile = {
   id: string;
   full_name: string;
-  username: string;
   email: string;
   role: 'student' | 'lecturer' | 'admin';
   faculty?: string;   
   programme?: string; 
   avatar_url?: string; // <--- Added this
-  bio?: string;        // <--- Added this
   cover_url?: string;  // <--- Added this
+  bio?: string;        // <--- Added this
+  is_active?: boolean;
 };
 
 interface AuthContextType {
@@ -52,7 +52,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .eq('id', session.user.id)
       .single();
 
-    if (data) {
+    if (data?.is_active === false) {
+      await supabase.auth.signOut();
+      setSession(null);
+      setUser(null);
+      setProfile(null);
+    } else if (data) {
       setProfile(data as UserProfile);
     } else {
       console.error("Profile load error:", error);
@@ -79,10 +84,60 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`account-status:${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'user_profiles',
+          filter: `id=eq.${user.id}`,
+        },
+        async (payload) => {
+          if ((payload.new as UserProfile).is_active === false) {
+            setSession(null);
+            setUser(null);
+            setProfile(null);
+            await supabase.auth.signOut();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
   // --- Auth Functions ---
 
   const signIn = async (email: string, password: string) => {
-    return supabase.auth.signInWithPassword({ email, password });
+    const result = await supabase.auth.signInWithPassword({ email, password });
+    if (result.error || !result.data.user) return result;
+
+    const { data: signedInProfile, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('is_active')
+      .eq('id', result.data.user.id)
+      .single();
+
+    if (profileError) return { data: result.data, error: profileError };
+
+    if (signedInProfile?.is_active === false) {
+      await supabase.auth.signOut();
+      return {
+        data: null,
+        error: {
+          message: "This account has been suspended. Please contact an administrator."
+        }
+      };
+    }
+
+    return result;
   };
 
   const signUp = async (email: string, password: string, username: string, fullName: string, role: 'student' | 'lecturer' | 'admin') => {

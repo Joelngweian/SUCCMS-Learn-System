@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { useTheme } from "next-themes";
 import { supabase } from "@/lib/supabase.ts"; // Added Supabase import
 import { useAuth } from "@/contexts/AuthContext.tsx";
+import { useOnlinePresence } from "@/hooks/useOnlinePresence";
 import { Login } from "./components/Login";
 import { StudentDashboard } from "./components/StudentDashboard";
 import { StudentCourses } from "./components/StudentCourses";
@@ -12,6 +14,11 @@ import { CourseManagement } from "./components/CourseManagement";
 import { Forum } from "./components/Forum";
 import { Assignments } from "./components/Assignments";
 import { Gamification } from "./components/Gamification";
+import { SettingsPage } from "./components/SettingsPage";
+import { HelpSupportPage } from "./components/HelpSupportPage";
+import { LecturerAnalytics } from "./components/LecturerAnalytics";
+import { NotificationButton } from "./components/NotificationButton";
+import { TopBarSearch } from "./components/TopBarSearch";
 import { Button } from "./components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./components/ui/avatar";
 import { Badge } from "./components/ui/badge";
@@ -34,13 +41,13 @@ type NavigationItem = {
 
 export default function App() {
   const { user, profile, isLoading, signOut } = useAuth();
+  const { resolvedTheme, setTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation(); 
   
   // Local UI state
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
-  const [onlineCount, setOnlineCount] = useState(142);
+  const { onlineCount } = useOnlinePresence();
   
   // Notification State
   const [crucialCount, setCrucialCount] = useState(0);
@@ -56,10 +63,8 @@ export default function App() {
     avatar: profile.avatar_url
   } : null;
 
-  useEffect(() => {
-    const interval = setInterval(() => setOnlineCount(Math.floor(Math.random() * 50) + 120), 5000);
-    return () => clearInterval(interval);
-  }, []);
+
+
 
   // --- CRUCIAL ASSIGNMENTS CHECKER ---
   useEffect(() => {
@@ -70,9 +75,9 @@ export default function App() {
       try {
         // 1. Get Enrolled Courses
         const { data: enrollments } = await supabase
-          .from('enrollments')
+          .from('course_enrollments')
           .select('course_id')
-          .eq('user_id', user.id);
+          .eq('student_id', user.id);
 
         if (!enrollments || enrollments.length === 0) return;
         const courseIds = enrollments.map(e => e.course_id);
@@ -138,7 +143,7 @@ export default function App() {
   const lecturerNavigationItems: NavigationItem[] = [
     { id: '', label: 'Dashboard', icon: LayoutDashboard, description: 'Overview & AI insights' },
     { id: 'courses', label: 'Courses', icon: BookOpen, description: 'Manage course content' },
-    { id: 'assignments', label: 'Assignments', icon: ClipboardList, description: 'Create & grade assignments', badge: '12' }, // Hardcoded for demo (or connect to ungraded count)
+    { id: 'assignments', label: 'Assignments', icon: ClipboardList, description: 'Create & grade assignments' },
     { id: 'forum', label: 'Forums', icon: MessageSquare, description: 'Moderate discussions' },
     { id: 'analytics', label: 'Analytics', icon: BarChart3, description: 'Student progress reports' }
   ];
@@ -148,6 +153,7 @@ export default function App() {
   ];
 
   const navigationItems = userRole === 'student' ? studentNavigationItems : userRole === 'lecturer' ? lecturerNavigationItems : adminNavigationItems;
+  const isDarkMode = resolvedTheme === "dark";
   
   const isActive = (path: string) => {
     if (path === '') return location.pathname === '/';
@@ -159,16 +165,32 @@ export default function App() {
     setSidebarOpen(false);
   };
 
-  const toggleTheme = () => {
-    setDarkMode(!darkMode);
-    document.documentElement.classList.toggle('dark');
+  const toggleTheme = async () => {
+    const nextTheme = isDarkMode ? "light" : "dark";
+    setTheme(nextTheme);
+
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("user_settings")
+      .upsert(
+        {
+          user_id: user.id,
+          theme: nextTheme,
+        },
+        { onConflict: "user_id" }
+      );
+
+    if (error) {
+      console.error("Error saving theme:", error);
+    }
   };
 
   const RoleIcon = userRole === 'student' ? GraduationCap : userRole === 'lecturer' ? UserCog : Shield;
   const roleLabel = userRole === 'student' ? 'Student' : userRole === 'lecturer' ? 'Lecturer' : 'Admin';
 
   return (
-    <div className={`min-h-screen bg-background ${darkMode ? 'dark' : ''}`}>
+    <div className="min-h-screen bg-background">
       <div className="flex">
         {/* Mobile Sidebar Overlay */}
         {sidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
@@ -244,10 +266,10 @@ export default function App() {
                 </div>
                 <Badge className="bg-green-100 text-green-800 text-xs">{onlineCount} online</Badge>
               </div>
-              <Button variant="ghost" className="w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent">
+              <Button variant="ghost" className={`w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent ${location.pathname === '/settings' ? 'bg-sidebar-accent font-medium' : ''}`} onClick={() => { navigate('/settings'); setSidebarOpen(false); }}>
                 <Settings className="h-4 w-4 mr-3" /> Settings
               </Button>
-              <Button variant="ghost" className="w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent">
+              <Button variant="ghost" className={`w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent ${location.pathname === '/help' ? 'bg-sidebar-accent font-medium' : ''}`} onClick={() => { navigate('/help'); setSidebarOpen(false); }}>
                 <HelpCircle className="h-4 w-4 mr-3" /> Help & Support
               </Button>
               <Button variant="ghost" className="w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent" onClick={handleLogout}>
@@ -258,21 +280,18 @@ export default function App() {
         </aside>
 
         {/* Main Content Area */}
+
         <div className="flex-1 lg:ml-0 min-w-0">
           <header className="bg-background border-b sticky top-0 z-30">
             <div className="flex items-center justify-between px-4 sm:px-6 py-4">
               <div className="flex items-center gap-4">
                 <Button variant="ghost" size="sm" onClick={() => setSidebarOpen(true)} className="lg:hidden"><Menu className="h-5 w-5" /></Button>
-                <div className="hidden sm:block">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <input type="text" placeholder="Search..." className="pl-10 pr-4 py-2 bg-muted rounded-lg border-0 focus:outline-none focus:ring-2 focus:ring-ring text-sm w-64" />
-                  </div>
-                </div>
+                <TopBarSearch />
               </div>
 
               <div className="flex items-center gap-3">
-                <Button variant="ghost" size="sm" onClick={toggleTheme}>{darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</Button>
+                <NotificationButton />
+                <Button variant="ghost" size="sm" onClick={toggleTheme}>{isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</Button>
                 <div className="hidden sm:flex items-center gap-2 text-sm text-muted-foreground"><span className="truncate max-w-[150px]">{userData?.name}</span></div>
                 <Avatar className="h-8 w-8 cursor-pointer" onClick={() => navigate(`/profile/${user.id}`)}>
                   <AvatarImage src={userData?.avatar || ''} />
@@ -286,6 +305,8 @@ export default function App() {
             <Routes>
               {/* Common Routes */}
               <Route path="/profile/:userId" element={<UserProfile />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/help" element={<HelpSupportPage />} />
 
               {/* Student Routes */}
               {userRole === 'student' && (
@@ -305,7 +326,7 @@ export default function App() {
                   <Route path="/courses" element={<CourseManagement />} />
                   <Route path="/assignments" element={<Assignments />} />
                   <Route path="/forum" element={<Forum />} />
-                  <Route path="/analytics" element={<div className="p-8 text-center text-muted-foreground">Analytics coming soon...</div>} />
+                  <Route path="/analytics" element={<LecturerAnalytics />} />
                 </>
               )}
 
