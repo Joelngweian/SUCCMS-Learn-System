@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { createClient } from '@supabase/supabase-js';
+import type { Database } from './database.types';
 
 // 1. Get Supabase credentials from environment variables
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -11,4 +12,4 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // 3. Export the initialized client
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);

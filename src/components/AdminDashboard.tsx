@@ -1,5 +1,6 @@
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import type { Json } from "@/lib/database.types";
 import { useAuth } from "@/contexts/AuthContext";
 import { getReportReasonLabel } from "@/lib/reporting";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -92,6 +93,33 @@ interface AnnouncementAttachment {
   type: string;
   size: number;
 }
+
+const getAnnouncementAttachments = (value: Json): AnnouncementAttachment[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((attachment) => {
+    if (!attachment || Array.isArray(attachment) || typeof attachment !== "object") {
+      return [];
+    }
+
+    const isAttachment =
+      typeof attachment.name === "string" &&
+      typeof attachment.path === "string" &&
+      typeof attachment.url === "string" &&
+      typeof attachment.type === "string" &&
+      typeof attachment.size === "number";
+
+    return isAttachment
+      ? [{
+          name: attachment.name as string,
+          path: attachment.path as string,
+          url: attachment.url as string,
+          type: attachment.type as string,
+          size: attachment.size as number,
+        }]
+      : [];
+  });
+};
 
 const formatDateTimeLocal = (value: string | null) => {
   if (!value) return "";
@@ -204,7 +232,13 @@ export function AdminDashboard() {
         console.error("Failed to load reports:", reportsResult.error);
       }
 
-      const activeAnnouncements = (announcementsResult.data || []) as AdminAnnouncement[];
+      const activeAnnouncements: AdminAnnouncement[] = (
+        announcementsResult.data || []
+      ).map((announcement) => ({
+        ...announcement,
+        priority: announcement.priority as AdminAnnouncement["priority"],
+        attachments: getAnnouncementAttachments(announcement.attachments),
+      }));
       const getJoinedRecord = (value: any) =>
         Array.isArray(value) ? value[0] : value;
       const loadedReports: ReportedItem[] = (reportsResult.data || []).map(
@@ -354,7 +388,7 @@ export function AdminDashboard() {
         expires_at: announcementExpiry
           ? new Date(announcementExpiry).toISOString()
           : null,
-        attachments,
+        attachments: attachments as unknown as Json,
         is_active: true,
       };
 

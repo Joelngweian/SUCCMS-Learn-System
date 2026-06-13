@@ -91,6 +91,58 @@ const renderMentionedText = (content: string) => {
     });
 };
 
+function ThreadContentPreview({ content }: { content: string }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [hasOverflow, setHasOverflow] = useState(false);
+
+  useEffect(() => {
+    const element = contentRef.current;
+    if (!element || isExpanded) return;
+
+    const measureOverflow = () => {
+      setHasOverflow(element.scrollHeight > element.clientHeight + 1);
+    };
+
+    measureOverflow();
+    const frame = window.requestAnimationFrame(measureOverflow);
+    const observer = new ResizeObserver(measureOverflow);
+    observer.observe(element);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [content, isExpanded]);
+
+  const handleToggle = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsExpanded(current => !current);
+  };
+
+  return (
+    <div className="forum-thread-preview">
+      <div
+        ref={contentRef}
+        className={`forum-thread-preview-text text-gray-600 dark:text-gray-100 text-base leading-relaxed${isExpanded ? " expanded" : ""}`}
+      >
+        {renderMentionedText(content)}
+      </div>
+      {(hasOverflow || isExpanded) && (
+        <button
+          type="button"
+          className="forum-thread-preview-toggle"
+          onClick={handleToggle}
+          aria-expanded={isExpanded}
+        >
+          {isExpanded ? "Show less" : "See more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function Forum() {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
@@ -850,8 +902,6 @@ export function Forum() {
 
   const handleReaction = async (targetId: string, type: string, isThread: boolean) => {
       if (!user) return;
-      const table = isThread ? 'forum_reactions' : 'forum_reply_reactions';
-      const idField = isThread ? 'thread_id' : 'reply_id';
       const currentReactions = isThread ? userReactions : replyReactions;
       
       const currentType = currentReactions[targetId];
@@ -876,14 +926,38 @@ export function Forum() {
       updateLocalReaction(targetId, currentType, nextType, isThread);
 
       try {
-          if (currentType) {
-              const { error: deleteError } = await supabase.from(table).delete().eq(idField, targetId).eq('user_id', user.id);
-              if (deleteError) throw deleteError;
-          }
+          if (isThread) {
+              if (currentType) {
+                  const { error: deleteError } = await supabase
+                      .from('forum_reactions')
+                      .delete()
+                      .eq('thread_id', targetId)
+                      .eq('user_id', user.id);
+                  if (deleteError) throw deleteError;
+              }
 
-          if (nextType) {
-              const { error: insertError } = await supabase.from(table).insert({ [idField]: targetId, user_id: user.id, type: nextType });
-              if (insertError) throw insertError;
+              if (nextType) {
+                  const { error: insertError } = await supabase
+                      .from('forum_reactions')
+                      .insert({ thread_id: targetId, user_id: user.id, type: nextType });
+                  if (insertError) throw insertError;
+              }
+          } else {
+              if (currentType) {
+                  const { error: deleteError } = await supabase
+                      .from('forum_reply_reactions')
+                      .delete()
+                      .eq('reply_id', targetId)
+                      .eq('user_id', user.id);
+                  if (deleteError) throw deleteError;
+              }
+
+              if (nextType) {
+                  const { error: insertError } = await supabase
+                      .from('forum_reply_reactions')
+                      .insert({ reply_id: targetId, user_id: user.id, type: nextType });
+                  if (insertError) throw insertError;
+              }
           }
       } catch (error) {
           console.error("Failed to update reaction:", error);
@@ -1491,9 +1565,7 @@ export function Forum() {
 
                                     <div>
                                         <h3 className="font-bold text-xl text-gray-900 dark:text-white mb-2 group-hover:text-primary transition-colors">{thread.title}</h3>
-                                        <div style={{ whiteSpace: "pre-wrap" }} className="text-gray-600 dark:text-gray-100 text-base line-clamp-3 leading-relaxed">
-                                            {renderMentionedText(thread.content)}
-                                        </div>
+                                        <ThreadContentPreview content={thread.content || ""} />
 
                                         {/* Image Preview Grid - Fixed Container */}
                                         {(thread?.images ?? []).length > 0 && (

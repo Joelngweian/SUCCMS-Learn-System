@@ -765,9 +765,7 @@ export function StudentDashboard() {
             <CardDescription>Pick up where you left off</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {isLoadingAi ? (
-              <Loader2 className="mx-auto h-5 w-5 animate-spin" />
-            ) : aiData.recentCourses.length > 0 ? (
+            {aiData.recentCourses.length > 0 ? (
               aiData.recentCourses.map((course) => (
                 <button
                   type="button"

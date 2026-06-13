@@ -1,895 +1,1208 @@
-// Supabase Database Types
-// Auto-generated based on schema.sql
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
+type Relationship = {
+  foreignKeyName: string
+  columns: string[]
+  isOneToOne?: boolean
+  referencedRelation: string
+  referencedColumns: string[]
+}
+
+type Table<
+  Row extends Record<string, unknown>,
+  RequiredInsert extends keyof Row = never,
+  Relationships extends Relationship[] = [],
+> = {
+  Row: Row
+  Insert: Pick<Row, RequiredInsert> & Partial<Omit<Row, RequiredInsert>>
+  Update: Partial<Row>
+  Relationships: Relationships
+}
 
 export type Database = {
+  __InternalSupabase: {
+    PostgrestVersion: "14.5"
+  }
   public: {
     Tables: {
-      user_profiles: {
-        Row: {
-          id: string;
-          email: string;
-          full_name: string;
-          role: 'student' | 'lecturer' | 'admin';
-          program_or_department: string | null;
-          faculty: string | null;
-          programme: string | null;
-          avatar_url: string | null;
-          cover_url: string | null;
-          bio: string | null;
-          created_at: string;
-          updated_at: string;
-          is_active: boolean;
-          last_login_at: string | null;
-        };
-        Insert: {
-          id: string;
-          email: string;
-          full_name: string;
-          role: 'student' | 'lecturer' | 'admin';
-          program_or_department?: string | null;
-          faculty?: string | null;
-          programme?: string | null;
-          avatar_url?: string | null;
-          cover_url?: string | null;
-          bio?: string | null;
-          created_at?: string;
-          updated_at?: string;
-          is_active?: boolean;
-          last_login_at?: string | null;
-        };
-        Update: {
-          id?: string;
-          email?: string;
-          full_name?: string;
-          role?: 'student' | 'lecturer' | 'admin';
-          program_or_department?: string | null;
-          faculty?: string | null;
-          programme?: string | null;
-          avatar_url?: string | null;
-          cover_url?: string | null;
-          bio?: string | null;
-          created_at?: string;
-          updated_at?: string;
-          is_active?: boolean;
-          last_login_at?: string | null;
-        };
-      };
-      follows: {
-        Row: {
-          id: string;
-          follower_id: string;
-          following_id: string;
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          follower_id: string;
-          following_id: string;
-          created_at?: string;
-        };
-        Update: {
-          id?: string;
-          follower_id?: string;
-          following_id?: string;
-          created_at?: string;
-        };
-      };
-      reports: {
-        Row: {
-          id: string;
-          reporter_id: string;
-          reported_user_id: string;
-          report_type: 'user' | 'story';
-          story_id: string | null;
-          reason: string;
-          details: string | null;
-          severity: 'low' | 'medium' | 'high';
-          status: 'pending' | 'resolved';
-          resolved_by: string | null;
-          resolved_at: string | null;
-          resolution_notes: string | null;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          reporter_id: string;
-          reported_user_id: string;
-          report_type: 'user' | 'story';
-          story_id?: string | null;
-          reason: string;
-          details?: string | null;
-          severity?: 'low' | 'medium' | 'high';
-          status?: 'pending' | 'resolved';
-          resolved_by?: string | null;
-          resolved_at?: string | null;
-          resolution_notes?: string | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          reason?: string;
-          details?: string | null;
-          severity?: 'low' | 'medium' | 'high';
-          status?: 'pending' | 'resolved';
-          resolved_by?: string | null;
-          resolved_at?: string | null;
-          resolution_notes?: string | null;
-          updated_at?: string;
-        };
-      };
-      courses: {
-        Row: {
-          id: string;
-          code: string;
-          course_code: string | null;
-          name: string;
-          chinese_name: string | null;
-          description: string | null;
-          lecturer_id: string | null;
-          faculty: string | null;
-          programme: string | null;
-          course_type: string | null;
-          credit_hours: number | null;
-          credits: number | null;
-          max_capacity: number | null;
-          max_students: number | null;
-          enrollment_key: string | null;
-          status: string | null;
-          semester: string | null;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          code: string;
-          course_code?: string | null;
-          name: string;
-          chinese_name?: string | null;
-          description?: string | null;
-          lecturer_id?: string | null;
-          faculty?: string | null;
-          programme?: string | null;
-          course_type?: string | null;
-          credit_hours?: number | null;
-          credits?: number | null;
-          max_capacity?: number | null;
-          max_students?: number | null;
-          enrollment_key?: string | null;
-          status?: string | null;
-          semester?: string | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          code?: string;
-          course_code?: string | null;
-          name?: string;
-          chinese_name?: string | null;
-          description?: string | null;
-          lecturer_id?: string | null;
-          faculty?: string | null;
-          programme?: string | null;
-          course_type?: string | null;
-          credit_hours?: number | null;
-          credits?: number | null;
-          max_capacity?: number | null;
-          max_students?: number | null;
-          enrollment_key?: string | null;
-          status?: string | null;
-          semester?: string | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-      };
-      academic_terms: {
-        Row: {
-          id: string;
-          code: string;
-          name: string;
-          starts_at: string | null;
-          ends_at: string | null;
-          status: 'planned' | 'active' | 'closed';
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          code: string;
-          name: string;
-          starts_at?: string | null;
-          ends_at?: string | null;
-          status?: 'planned' | 'active' | 'closed';
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          code?: string;
-          name?: string;
-          starts_at?: string | null;
-          ends_at?: string | null;
-          status?: 'planned' | 'active' | 'closed';
-          created_at?: string;
-          updated_at?: string;
-        };
-      };
-      course_offerings: {
-        Row: {
-          id: string;
-          course_id: string;
-          academic_term_id: string;
-          owner_id: string | null;
-          section_code: string;
-          enrollment_key: string;
-          max_capacity: number | null;
-          status: 'active' | 'closed';
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          course_id: string;
-          academic_term_id: string;
-          owner_id?: string | null;
-          section_code: string;
-          enrollment_key: string;
-          max_capacity?: number | null;
-          status?: 'active' | 'closed';
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          course_id?: string;
-          academic_term_id?: string;
-          owner_id?: string | null;
-          section_code?: string;
-          enrollment_key?: string;
-          max_capacity?: number | null;
-          status?: 'active' | 'closed';
-          created_at?: string;
-          updated_at?: string;
-        };
-      };
-      course_enrollments: {
-        Row: {
-          id: string;
-          course_id: string;
-          student_id: string;
-          enrolled_at: string;
-        };
-        Insert: {
-          id?: string;
-          course_id: string;
-          student_id: string;
-          enrolled_at?: string;
-        };
-        Update: {
-          id?: string;
-          course_id?: string;
-          student_id?: string;
-          enrolled_at?: string;
-        };
-      };
-      course_instructors: {
-        Row: {
-          id: string;
-          course_id: string;
-          user_id: string;
-          assigned_at: string;
-        };
-        Insert: {
-          id?: string;
-          course_id: string;
-          user_id: string;
-          assigned_at?: string;
-        };
-        Update: {
-          id?: string;
-          course_id?: string;
-          user_id?: string;
-          assigned_at?: string;
-        };
-      };
-      course_materials: {
-        Row: {
-          id: string;
-          course_id: string;
-          parent_id: string | null;
-          title: string;
-          description: string | null;
-          file_path: string | null;
-          file_url: string | null;
-          file_type: string | null;
-          size: number | null;
-          ms_drive_id: string | null;
-          ms_drive_item_id: string | null;
-          ms_web_url: string | null;
-          ms_edit_url: string | null;
-          ms_last_synced_at: string | null;
-          created_by: string | null;
-          uploaded_by: string | null;
-          uploaded_at: string;
-          downloads_count: number | null;
-        };
-        Insert: {
-          id?: string;
-          course_id: string;
-          parent_id?: string | null;
-          title: string;
-          description?: string | null;
-          file_path?: string | null;
-          file_url?: string | null;
-          file_type?: string | null;
-          size?: number | null;
-          ms_drive_id?: string | null;
-          ms_drive_item_id?: string | null;
-          ms_web_url?: string | null;
-          ms_edit_url?: string | null;
-          ms_last_synced_at?: string | null;
-          created_by?: string | null;
-          uploaded_by?: string | null;
-          uploaded_at?: string;
-          downloads_count?: number | null;
-        };
-        Update: {
-          id?: string;
-          course_id?: string;
-          parent_id?: string | null;
-          title?: string;
-          description?: string | null;
-          file_path?: string | null;
-          file_url?: string | null;
-          file_type?: string | null;
-          size?: number | null;
-          ms_drive_id?: string | null;
-          ms_drive_item_id?: string | null;
-          ms_web_url?: string | null;
-          ms_edit_url?: string | null;
-          ms_last_synced_at?: string | null;
-          created_by?: string | null;
-          uploaded_by?: string | null;
-          uploaded_at?: string;
-          downloads_count?: number | null;
-        };
-      };
-      course_posts: {
-        Row: {
-          id: string;
-          course_id: string;
-          author_id: string;
-          author_name: string;
-          content: string;
-          attachments: Array<{ name: string; path: string; url: string; type: string; size: number }>;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          course_id: string;
-          author_id: string;
-          author_name: string;
-          content?: string;
-          attachments?: Array<{ name: string; path: string; url: string; type: string; size: number }>;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          course_id?: string;
-          author_id?: string;
-          author_name?: string;
-          content?: string;
-          attachments?: Array<{ name: string; path: string; url: string; type: string; size: number }>;
-          created_at?: string;
-          updated_at?: string;
-        };
-      };
-      assignments: {
-        Row: {
-          id: string;
-          course_id: string;
-          title: string;
-          description: string | null;
-          created_by: string;
-          due_date: string;
-          max_score: number;
-          attachments: Array<{name: string, path: string}> | null;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          course_id: string;
-          title: string;
-          description?: string | null;
-          created_by: string;
-          due_date: string;
-          max_score?: number;
-          attachments?: Array<{name: string, path: string}> | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          course_id?: string;
-          title?: string;
-          description?: string | null;
-          created_by?: string;
-          due_date?: string;
-          max_score?: number;
-          attachments?: Array<{name: string, path: string}> | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-      };
-      assignment_submissions: {
-        Row: {
-          id: string;
-          assignment_id: string;
-          student_id: string;
-          submission_file_url: string | null;
-          submission_text: string | null;
-          submitted_at: string;
-          is_late: boolean;
-          files: Array<{name: string, path: string}> | null;
-          grade: number | null;
-          feedback: string | null;
-        };
-        Insert: {
-          id?: string;
-          assignment_id: string;
-          student_id: string;
-          submission_file_url?: string | null;
-          submission_text?: string | null;
-          submitted_at?: string;
-          is_late?: boolean;
-          files?: Array<{name: string, path: string}> | null;
-          grade?: number | null;
-          feedback?: string | null;
-        };
-        Update: {
-          id?: string;
-          assignment_id?: string;
-          student_id?: string;
-          submission_file_url?: string | null;
-          submission_text?: string | null;
-          submitted_at?: string;
-          is_late?: boolean;
-          files?: Array<{name: string, path: string}> | null;
-          grade?: number | null;
-          feedback?: string | null;
-        };
-      };
-      student_grades: {
-        Row: {
-          id: string;
-          course_id: string;
-          student_id: string;
-          assignment_id: string | null;
-          score: number;
-          max_score: number;
-          graded_by: string;
-          feedback: string | null;
-          graded_at: string;
-        };
-        Insert: {
-          id?: string;
-          course_id: string;
-          student_id: string;
-          assignment_id?: string | null;
-          score: number;
-          max_score?: number;
-          graded_by: string;
-          feedback?: string | null;
-          graded_at?: string;
-        };
-        Update: {
-          id?: string;
-          course_id?: string;
-          student_id?: string;
-          assignment_id?: string | null;
-          score?: number;
-          max_score?: number;
-          graded_by?: string;
-          feedback?: string | null;
-          graded_at?: string;
-        };
-      };
-      student_gpa: {
-        Row: {
-          id: string;
-          student_id: string;
-          gpa: number;
-          total_credits: number;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          student_id: string;
-          gpa?: number;
-          total_credits?: number;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          student_id?: string;
-          gpa?: number;
-          total_credits?: number;
-          updated_at?: string;
-        };
-      };
-      attendance: {
-        Row: {
-          id: string;
-          course_id: string;
-          student_id: string;
-          class_date: string;
-          marked_present: boolean;
-          marked_at: string;
-          marked_by: string;
-        };
-        Insert: {
-          id?: string;
-          course_id: string;
-          student_id: string;
-          class_date: string;
-          marked_present?: boolean;
-          marked_at?: string;
-          marked_by: string;
-        };
-        Update: {
-          id?: string;
-          course_id?: string;
-          student_id?: string;
-          class_date?: string;
-          marked_present?: boolean;
-          marked_at?: string;
-          marked_by?: string;
-        };
-      };
-      posts: {
-        Row: {
-          id: string;
-          course_id: string | null;
-          author_id: string;
-          title: string;
-          content: string;
-          created_at: string;
-          updated_at: string;
-          is_pinned: boolean;
-          is_locked: boolean;
-        };
-        Insert: {
-          id?: string;
-          course_id?: string | null;
-          author_id: string;
-          title: string;
-          content: string;
-          created_at?: string;
-          updated_at?: string;
-          is_pinned?: boolean;
-          is_locked?: boolean;
-        };
-        Update: {
-          id?: string;
-          course_id?: string | null;
-          author_id?: string;
-          title?: string;
-          content?: string;
-          created_at?: string;
-          updated_at?: string;
-          is_pinned?: boolean;
-          is_locked?: boolean;
-        };
-      };
-      post_comments: {
-        Row: {
-          id: string;
-          post_id: string;
-          author_id: string;
-          parent_comment_id: string | null;
-          content: string;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          post_id: string;
-          author_id: string;
-          parent_comment_id?: string | null;
-          content: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          post_id?: string;
-          author_id?: string;
-          parent_comment_id?: string | null;
-          content?: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-      };
-      stories: {
-        Row: {
-          id: string;
-          user_id: string;
-          content: string | null;
-          content_type: 'image' | 'video' | 'text' | 'assignment' | 'grade' | 'course' | null;
-          media_url: string | null;
-          image_url: string | null;
-          title: string | null;
-          description: string | null;
-          created_at: string;
-          expires_at: string;
-          is_active: boolean;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          content?: string | null;
-          content_type?: 'image' | 'video' | 'text' | 'assignment' | 'grade' | 'course' | null;
-          media_url?: string | null;
-          image_url?: string | null;
-          title?: string | null;
-          description?: string | null;
-          created_at?: string;
-          expires_at?: string;
-          is_active?: boolean;
-        };
-        Update: {
-          id?: string;
-          user_id?: string;
-          content?: string;
-          content_type?: 'image' | 'video' | 'text' | 'assignment' | 'grade' | 'course';
-          media_url?: string | null;
-          image_url?: string | null;
-          title?: string | null;
-          description?: string | null;
-          created_at?: string;
-          expires_at?: string;
-          is_active?: boolean;
-        };
-      };
-      announcements: {
-        Row: {
-          id: string;
-          admin_id: string;
-          title: string;
-          content: string;
-          priority: 'low' | 'medium' | 'high';
-          attachments: Array<{ name: string; path: string; url: string; type: string; size: number }>;
-          created_at: string;
-          updated_at: string;
-          expires_at: string | null;
-          is_active: boolean;
-        };
-        Insert: {
-          id?: string;
-          admin_id: string;
-          title: string;
-          content: string;
-          priority?: 'low' | 'medium' | 'high';
-          attachments?: Array<{ name: string; path: string; url: string; type: string; size: number }>;
-          created_at?: string;
-          updated_at?: string;
-          expires_at?: string | null;
-          is_active?: boolean;
-        };
-        Update: {
-          id?: string;
-          admin_id?: string;
-          title?: string;
-          content?: string;
-          priority?: 'low' | 'medium' | 'high';
-          attachments?: Array<{ name: string; path: string; url: string; type: string; size: number }>;
-          created_at?: string;
-          updated_at?: string;
-          expires_at?: string | null;
-          is_active?: boolean;
-        };
-      };
-      notifications: {
-        Row: {
-          id: string;
-          recipient_id: string;
-          actor_id: string | null;
-          type: string;
-          title: string;
-          message: string;
-          course_id: string | null;
-          entity_type: string | null;
-          entity_id: string | null;
-          action_url: string | null;
-          metadata: Record<string, unknown>;
-          dedupe_key: string;
-          is_read: boolean;
-          read_at: string | null;
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          recipient_id: string;
-          actor_id?: string | null;
-          type: string;
-          title: string;
-          message?: string;
-          course_id?: string | null;
-          entity_type?: string | null;
-          entity_id?: string | null;
-          action_url?: string | null;
-          metadata?: Record<string, unknown>;
-          dedupe_key: string;
-          is_read?: boolean;
-          read_at?: string | null;
-          created_at?: string;
-        };
-        Update: {
-          is_read?: boolean;
-          read_at?: string | null;
-        };
-      };
-      user_achievements: {
-        Row: {
-          id: string;
-          user_id: string;
-          achievement_code: string;
-          name: string;
-          description: string;
-          rarity: 'common' | 'rare' | 'epic' | 'legendary';
-          xp_reward: number;
-          earned_at: string;
-          metadata: Record<string, unknown>;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          achievement_code: string;
-          name: string;
-          description: string;
-          rarity: 'common' | 'rare' | 'epic' | 'legendary';
-          xp_reward?: number;
-          earned_at?: string;
-          metadata?: Record<string, unknown>;
-        };
-        Update: {
-          name?: string;
-          description?: string;
-          rarity?: 'common' | 'rare' | 'epic' | 'legendary';
-          xp_reward?: number;
-          earned_at?: string;
-          metadata?: Record<string, unknown>;
-        };
-      };
-      leaderboard: {
-        Row: {
-          id: string;
-          student_id: string;
-          course_id: string | null;
-          average_score: number;
-          rank: number | null;
-          total_assignments_completed: number;
-          attendance_percentage: number;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          student_id: string;
-          course_id?: string | null;
-          average_score?: number;
-          rank?: number | null;
-          total_assignments_completed?: number;
-          attendance_percentage?: number;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          student_id?: string;
-          course_id?: string | null;
-          average_score?: number;
-          rank?: number | null;
-          total_assignments_completed?: number;
-          attendance_percentage?: number;
-          updated_at?: string;
-        };
-      };
-      user_settings: {
-        Row: {
-          user_id: string;
-          theme: string;
-          compact_mode: boolean;
-          animations_enabled: boolean;
-          email_notifications: boolean;
-          assignment_reminders: boolean;
-          forum_replies: boolean;
-          grade_updates: boolean;
-          course_announcements: boolean;
-          achievement_alerts: boolean;
-          sound_enabled: boolean;
-          profile_visibility: string;
-          show_online_status: boolean;
-          show_progress: boolean;
-          show_leaderboard: boolean;
-          language: string;
-          timezone: string;
-          date_format: string;
-          high_contrast: boolean;
-          large_text: boolean;
-          reduce_motion: boolean;
-          push_notifications: boolean;
-          sms_notifications: boolean;
-          weekly_summary: boolean;
-          marketing_emails: boolean;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: Partial<Database['public']['Tables']['user_settings']['Row']> & { user_id: string };
-        Update: Partial<Database['public']['Tables']['user_settings']['Row']>;
-      };
-      login_history: {
-        Row: {
-          id: string;
-          user_id: string;
-          device: string | null;
-          browser: string | null;
-          ip_address: string | null;
-          login_time: string;
-          location: string | null;
-        };
-        Insert: Partial<Database['public']['Tables']['login_history']['Row']> & { user_id: string };
-        Update: Partial<Database['public']['Tables']['login_history']['Row']>;
-      };
-    };
+      academic_terms: Table<
+        {
+          id: string
+          code: string
+          name: string
+          starts_at: string | null
+          ends_at: string | null
+          status: string
+          created_at: string
+          updated_at: string
+        },
+        "code" | "name"
+      >
+      ai_recommendation_preferences: Table<
+        {
+          user_id: string
+          recommendation_id: string
+          title: string
+          url: string
+          is_bookmarked: boolean
+          feedback: string | null
+          created_at: string
+          updated_at: string
+        },
+        "user_id" | "recommendation_id" | "title" | "url",
+        [
+          {
+            foreignKeyName: "ai_recommendation_preferences_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      announcement_reads: Table<
+        {
+          id: string
+          announcement_id: string
+          user_id: string
+          read_at: string
+        },
+        "announcement_id" | "user_id",
+        [
+          {
+            foreignKeyName: "announcement_reads_announcement_id_fkey"
+            columns: ["announcement_id"]
+            isOneToOne: false
+            referencedRelation: "announcements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "announcement_reads_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      announcements: Table<
+        {
+          id: string
+          admin_id: string
+          title: string
+          content: string
+          priority: string
+          created_at: string
+          updated_at: string
+          expires_at: string | null
+          is_active: boolean | null
+          attachments: Json
+        },
+        "admin_id" | "title" | "content",
+        [
+          {
+            foreignKeyName: "announcements_admin_id_fkey"
+            columns: ["admin_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      assignment_submissions: Table<
+        {
+          id: string
+          assignment_id: string
+          student_id: string
+          submission_file_url: string | null
+          submission_text: string | null
+          submitted_at: string
+          is_late: boolean | null
+          grade: number | null
+          feedback: string | null
+          files: Json | null
+        },
+        "assignment_id" | "student_id",
+        [
+          {
+            foreignKeyName: "assignment_submissions_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignment_submissions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      assignments: Table<
+        {
+          id: string
+          course_id: string
+          title: string
+          description: string | null
+          created_by: string
+          due_date: string
+          max_score: number | null
+          created_at: string
+          updated_at: string
+          attachments: Json
+          rubric: string | null
+        },
+        "course_id" | "title" | "created_by" | "due_date",
+        [
+          {
+            foreignKeyName: "assignments_course_offering_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignments_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      attendance: Table<
+        {
+          id: string
+          course_id: string
+          student_id: string
+          class_date: string
+          marked_present: boolean | null
+          marked_at: string
+          marked_by: string
+        },
+        "course_id" | "student_id" | "class_date" | "marked_by",
+        [
+          {
+            foreignKeyName: "attendance_course_offering_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_marked_by_fkey"
+            columns: ["marked_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      course_enrollments: Table<
+        {
+          id: string
+          course_id: string
+          student_id: string
+          enrolled_at: string
+        },
+        "course_id" | "student_id",
+        [
+          {
+            foreignKeyName: "course_enrollments_course_offering_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_enrollments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      course_instructors: Table<
+        {
+          id: string
+          course_id: string
+          user_id: string
+          assigned_at: string
+        },
+        "course_id" | "user_id",
+        [
+          {
+            foreignKeyName: "course_instructors_course_offering_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_instructors_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      course_materials: Table<
+        {
+          id: string
+          course_id: string
+          title: string
+          description: string | null
+          file_url: string | null
+          file_type: string | null
+          uploaded_by: string | null
+          uploaded_at: string
+          downloads_count: number | null
+          ms_drive_id: string | null
+          ms_drive_item_id: string | null
+          ms_web_url: string | null
+          ms_edit_url: string | null
+          ms_last_synced_at: string | null
+          parent_id: string | null
+          file_path: string | null
+          size: number | null
+          created_by: string | null
+        },
+        "course_id" | "title",
+        [
+          {
+            foreignKeyName: "course_materials_course_offering_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_materials_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_materials_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "course_materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_materials_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      course_offerings: Table<
+        {
+          id: string
+          course_id: string
+          academic_term_id: string
+          owner_id: string | null
+          section_code: string
+          enrollment_key: string
+          max_capacity: number | null
+          status: string
+          created_at: string
+          updated_at: string
+        },
+        "course_id" | "academic_term_id" | "section_code" | "enrollment_key",
+        [
+          {
+            foreignKeyName: "course_offerings_academic_term_id_fkey"
+            columns: ["academic_term_id"]
+            isOneToOne: false
+            referencedRelation: "academic_terms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_offerings_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_offerings_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      course_posts: Table<
+        {
+          id: string
+          course_id: string
+          author_id: string
+          author_name: string
+          content: string
+          attachments: Json
+          created_at: string
+          updated_at: string
+        },
+        "course_id" | "author_id" | "author_name",
+        [
+          {
+            foreignKeyName: "course_posts_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_posts_course_offering_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      courses: Table<
+        {
+          id: string
+          code: string
+          name: string
+          description: string | null
+          lecturer_id: string | null
+          credits: number | null
+          max_students: number | null
+          created_at: string
+          updated_at: string
+          course_code: string | null
+          chinese_name: string | null
+          faculty: string | null
+          programme: string | null
+          course_type: string | null
+          credit_hours: number | null
+          max_capacity: number | null
+          enrollment_key: string | null
+          status: string | null
+        },
+        "code" | "name",
+        [
+          {
+            foreignKeyName: "courses_lecturer_id_fkey"
+            columns: ["lecturer_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      follows: Table<
+        {
+          id: string
+          follower_id: string
+          following_id: string
+          created_at: string
+        },
+        "follower_id" | "following_id",
+        [
+          {
+            foreignKeyName: "follows_follower_id_fkey"
+            columns: ["follower_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "follows_following_id_fkey"
+            columns: ["following_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      forum_reactions: Table<
+        {
+          id: string
+          thread_id: string
+          user_id: string
+          type: string
+          created_at: string
+        },
+        "thread_id" | "user_id" | "type",
+        [
+          {
+            foreignKeyName: "forum_reactions_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "forum_threads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "forum_reactions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      forum_replies: Table<
+        {
+          id: string
+          thread_id: string
+          author_id: string
+          parent_id: string | null
+          content: string
+          image_url: string | null
+          created_at: string
+          updated_at: string
+        },
+        "thread_id" | "author_id",
+        [
+          {
+            foreignKeyName: "forum_replies_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "forum_replies_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "forum_replies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "forum_replies_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "forum_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      forum_reply_reactions: Table<
+        {
+          id: string
+          reply_id: string
+          user_id: string
+          type: string
+          created_at: string
+        },
+        "reply_id" | "user_id" | "type",
+        [
+          {
+            foreignKeyName: "forum_reply_reactions_reply_id_fkey"
+            columns: ["reply_id"]
+            isOneToOne: false
+            referencedRelation: "forum_replies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "forum_reply_reactions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      forum_threads: Table<
+        {
+          id: string
+          course_id: string | null
+          author_id: string
+          title: string
+          content: string
+          category: string
+          images: Json
+          is_pinned: boolean
+          is_locked: boolean
+          created_at: string
+          updated_at: string
+        },
+        "author_id" | "title" | "content",
+        [
+          {
+            foreignKeyName: "forum_threads_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "forum_threads_course_offering_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      leaderboard: Table<
+        {
+          id: string
+          student_id: string
+          course_id: string | null
+          average_score: number | null
+          rank: number | null
+          total_assignments_completed: number | null
+          attendance_percentage: number | null
+          updated_at: string
+        },
+        "student_id",
+        [
+          {
+            foreignKeyName: "leaderboard_course_offering_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leaderboard_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      login_history: Table<{
+        id: string
+        user_id: string | null
+        device: string | null
+        browser: string | null
+        ip_address: string | null
+        login_time: string | null
+        location: string | null
+      }>
+      notifications: Table<
+        {
+          id: string
+          recipient_id: string
+          actor_id: string | null
+          type: string
+          title: string
+          message: string
+          course_id: string | null
+          entity_type: string | null
+          entity_id: string | null
+          action_url: string | null
+          metadata: Json
+          dedupe_key: string
+          is_read: boolean
+          read_at: string | null
+          created_at: string
+        },
+        "recipient_id" | "type" | "title" | "dedupe_key",
+        [
+          {
+            foreignKeyName: "notifications_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_course_offering_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      reports: Table<
+        {
+          id: string
+          reporter_id: string
+          reported_user_id: string
+          report_type: string
+          story_id: string | null
+          reason: string
+          details: string | null
+          severity: string
+          status: string
+          resolved_by: string | null
+          resolved_at: string | null
+          resolution_notes: string | null
+          created_at: string
+          updated_at: string
+        },
+        "reporter_id" | "reported_user_id" | "report_type" | "reason",
+        [
+          {
+            foreignKeyName: "reports_reported_user_id_fkey"
+            columns: ["reported_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reports_reporter_id_fkey"
+            columns: ["reporter_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reports_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reports_story_id_fkey"
+            columns: ["story_id"]
+            isOneToOne: false
+            referencedRelation: "stories"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      stories: Table<
+        {
+          id: string
+          user_id: string
+          content: string | null
+          content_type: string | null
+          media_url: string | null
+          title: string | null
+          description: string | null
+          created_at: string
+          expires_at: string
+          is_active: boolean
+          image_url: string | null
+        },
+        "user_id",
+        [
+          {
+            foreignKeyName: "stories_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      story_views: Table<
+        {
+          id: string
+          story_id: string
+          viewed_by: string
+          viewed_at: string
+        },
+        "story_id" | "viewed_by",
+        [
+          {
+            foreignKeyName: "story_views_story_id_fkey"
+            columns: ["story_id"]
+            isOneToOne: false
+            referencedRelation: "stories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "story_views_viewed_by_fkey"
+            columns: ["viewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      student_gpa: Table<
+        {
+          id: string
+          student_id: string
+          gpa: number | null
+          total_credits: number | null
+          updated_at: string
+        },
+        "student_id",
+        [
+          {
+            foreignKeyName: "student_gpa_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: true
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      student_grades: Table<
+        {
+          id: string
+          course_id: string
+          student_id: string
+          assignment_id: string | null
+          score: number
+          max_score: number | null
+          graded_by: string
+          feedback: string | null
+          graded_at: string
+        },
+        "course_id" | "student_id" | "score" | "graded_by",
+        [
+          {
+            foreignKeyName: "student_grades_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_grades_course_offering_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_grades_graded_by_fkey"
+            columns: ["graded_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_grades_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      user_achievements: Table<
+        {
+          id: string
+          user_id: string
+          achievement_code: string
+          name: string
+          description: string
+          rarity: string
+          xp_reward: number
+          earned_at: string
+          metadata: Json
+        },
+        "user_id" | "achievement_code" | "name" | "description" | "rarity",
+        [
+          {
+            foreignKeyName: "user_achievements_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      user_profiles: Table<
+        {
+          id: string
+          email: string
+          full_name: string
+          role: string
+          program_or_department: string | null
+          avatar_url: string | null
+          bio: string | null
+          created_at: string
+          updated_at: string
+          is_active: boolean | null
+          last_login_at: string | null
+          cover_url: string | null
+          faculty: string | null
+          programme: string | null
+        },
+        "id" | "email" | "full_name" | "role"
+      >
+      user_settings: Table<
+        {
+          user_id: string
+          theme: string | null
+          compact_mode: boolean | null
+          animations_enabled: boolean | null
+          email_notifications: boolean | null
+          assignment_reminders: boolean | null
+          forum_replies: boolean | null
+          grade_updates: boolean | null
+          course_announcements: boolean | null
+          achievement_alerts: boolean | null
+          sound_enabled: boolean | null
+          profile_visibility: string | null
+          show_online_status: boolean | null
+          show_progress: boolean | null
+          show_leaderboard: boolean | null
+          language: string | null
+          timezone: string | null
+          date_format: string | null
+          high_contrast: boolean | null
+          large_text: boolean | null
+          reduce_motion: boolean | null
+          push_notifications: boolean | null
+          sms_notifications: boolean | null
+          weekly_summary: boolean | null
+          marketing_emails: boolean | null
+          created_at: string | null
+          updated_at: string | null
+        },
+        "user_id"
+      >
+    }
     Views: {
-      course_summary: {
-        Row: {
-          id: string;
-          code: string;
-          name: string;
-          lecturer_id: string;
-          lecturer_name: string | null;
-          enrolled_students: number | null;
-          created_at: string;
-        };
-      };
-      student_course_summary: {
-        Row: {
-          course_id: string;
-          code: string;
-          name: string;
-          lecturer_name: string | null;
-          student_id: string;
-          average_score: number;
-          grades_received: number | null;
-          last_graded: string | null;
-        };
-      };
-      post_engagement: {
-        Row: {
-          id: string;
-          title: string;
-          author_id: string;
-          like_count: number | null;
-          comment_count: number | null;
-          view_count: number | null;
-          last_activity: string;
-        };
-      };
       active_stories_summary: {
         Row: {
-          id: string;
-          user_id: string;
-          user_name: string;
-          content_type: string;
-          created_at: string;
-          expires_at: string;
-          view_count: number | null;
-        };
-      };
-    };
-  };
-};
+          id: string | null
+          user_id: string | null
+          user_name: string | null
+          content_type: string | null
+          created_at: string | null
+          expires_at: string | null
+          view_count: number | null
+        }
+        Relationships: []
+      }
+      course_summary: {
+        Row: {
+          id: string | null
+          code: string | null
+          name: string | null
+          lecturer_id: string | null
+          lecturer_name: string | null
+          enrolled_students: number | null
+          created_at: string | null
+        }
+        Relationships: []
+      }
+      student_course_summary: {
+        Row: {
+          course_id: string | null
+          code: string | null
+          name: string | null
+          lecturer_name: string | null
+          student_id: string | null
+          average_score: number | null
+          grades_received: number | null
+          last_graded: string | null
+        }
+        Relationships: []
+      }
+    }
+    Functions: {
+      award_user_achievement: {
+        Args: {
+          target_user_id: string
+          target_code: string
+          target_name: string
+          target_description: string
+          target_rarity: string
+          target_xp_reward: number
+          target_metadata?: Json
+        }
+        Returns: boolean
+      }
+      can_view_forum_course: {
+        Args: { target_course_id: string }
+        Returns: boolean
+      }
+      create_course_offering: {
+        Args: { p_course_id: string; p_academic_term_id?: string }
+        Returns: string
+      }
+      create_user_notification: {
+        Args: {
+          target_user_id: string
+          source_actor_id: string
+          notification_type: string
+          notification_title: string
+          notification_message: string
+          target_course_id: string
+          target_entity_type: string
+          target_entity_id: string
+          target_action_url: string
+          notification_metadata: Json
+          notification_dedupe_key: string
+          preference_name?: string
+        }
+        Returns: undefined
+      }
+      delete_user_account: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      drop_course_offering: {
+        Args: { p_offering_id: string }
+        Returns: boolean
+      }
+      evaluate_achievement_from_activity: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      evaluate_user_achievements: {
+        Args: { target_user_id: string }
+        Returns: undefined
+      }
+      expire_old_stories: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      get_course_members: {
+        Args: { target_course_id: string }
+        Returns: {
+          id: string
+          email: string
+          full_name: string
+          role: string
+          faculty: string
+          programme: string
+          avatar_url: string
+          course_role: string
+          membership_id: string
+          joined_at: string
+        }[]
+      }
+      get_course_offering_name: {
+        Args: { target_offering_id: string }
+        Returns: string
+      }
+      get_profile_visibility: {
+        Args: { target_user_id: string }
+        Returns: string
+      }
+      handle_new_user: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      is_assignment_instructor: {
+        Args: { target_assignment_id: string }
+        Returns: boolean
+      }
+      is_assignment_student: {
+        Args: { target_assignment_id: string; target_student_id: string }
+        Returns: boolean
+      }
+      is_course_instructor: {
+        Args: { target_course_id: string }
+        Returns: boolean
+      }
+      notification_preference_enabled: {
+        Args: { target_user_id: string; preference_name: string }
+        Returns: boolean
+      }
+      notify_admins_new_report: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      notify_assignment_created: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      notify_assignment_submission: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      notify_course_enrollment_created: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      notify_course_instructor_created: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      notify_course_material_created: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      notify_course_post_created: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      notify_forum_reaction: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      notify_forum_reply: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      notify_student_grade: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      notify_user_followed: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      protect_user_account_status: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      refresh_progress_leaderboard: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      set_report_severity: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      trigger_refresh_progress_leaderboard: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+      update_updated_at_column: {
+        Args: Record<PropertyKey, never>
+        Returns: unknown
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
+}
+
+type PublicSchema = Database["public"]
+
+export type Tables<
+  PublicTableNameOrOptions extends
+    | keyof (PublicSchema["Tables"] & PublicSchema["Views"])
+    | { schema: keyof Omit<Database, "__InternalSupabase"> },
+  TableName extends PublicTableNameOrOptions extends {
+    schema: keyof Omit<Database, "__InternalSupabase">
+  }
+    ? keyof (Database[PublicTableNameOrOptions["schema"]]["Tables"] &
+        Database[PublicTableNameOrOptions["schema"]]["Views"])
+    : never = never,
+> = PublicTableNameOrOptions extends {
+  schema: keyof Omit<Database, "__InternalSupabase">
+}
+  ? (Database[PublicTableNameOrOptions["schema"]]["Tables"] &
+      Database[PublicTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+      Row: infer R
+    }
+    ? R
+    : never
+  : PublicTableNameOrOptions extends keyof (PublicSchema["Tables"] &
+        PublicSchema["Views"])
+    ? (PublicSchema["Tables"] &
+        PublicSchema["Views"])[PublicTableNameOrOptions] extends {
+        Row: infer R
+      }
+      ? R
+      : never
+    : never
+
+export type TablesInsert<
+  PublicTableNameOrOptions extends
+    | keyof PublicSchema["Tables"]
+    | { schema: keyof Omit<Database, "__InternalSupabase"> },
+  TableName extends PublicTableNameOrOptions extends {
+    schema: keyof Omit<Database, "__InternalSupabase">
+  }
+    ? keyof Database[PublicTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = PublicTableNameOrOptions extends {
+  schema: keyof Omit<Database, "__InternalSupabase">
+}
+  ? Database[PublicTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Insert: infer I
+    }
+    ? I
+    : never
+  : PublicTableNameOrOptions extends keyof PublicSchema["Tables"]
+    ? PublicSchema["Tables"][PublicTableNameOrOptions] extends {
+        Insert: infer I
+      }
+      ? I
+      : never
+    : never
+
+export type TablesUpdate<
+  PublicTableNameOrOptions extends
+    | keyof PublicSchema["Tables"]
+    | { schema: keyof Omit<Database, "__InternalSupabase"> },
+  TableName extends PublicTableNameOrOptions extends {
+    schema: keyof Omit<Database, "__InternalSupabase">
+  }
+    ? keyof Database[PublicTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = PublicTableNameOrOptions extends {
+  schema: keyof Omit<Database, "__InternalSupabase">
+}
+  ? Database[PublicTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Update: infer U
+    }
+    ? U
+    : never
+  : PublicTableNameOrOptions extends keyof PublicSchema["Tables"]
+    ? PublicSchema["Tables"][PublicTableNameOrOptions] extends {
+        Update: infer U
+      }
+      ? U
+      : never
+    : never
+
+export type Enums<
+  PublicEnumNameOrOptions extends
+    | keyof PublicSchema["Enums"]
+    | { schema: keyof Omit<Database, "__InternalSupabase"> },
+  EnumName extends PublicEnumNameOrOptions extends {
+    schema: keyof Omit<Database, "__InternalSupabase">
+  }
+    ? keyof Database[PublicEnumNameOrOptions["schema"]]["Enums"]
+    : never = never,
+> = PublicEnumNameOrOptions extends {
+  schema: keyof Omit<Database, "__InternalSupabase">
+}
+  ? Database[PublicEnumNameOrOptions["schema"]]["Enums"][EnumName]
+  : PublicEnumNameOrOptions extends keyof PublicSchema["Enums"]
+    ? PublicSchema["Enums"][PublicEnumNameOrOptions]
+    : never
+
+export type CompositeTypes<
+  PublicCompositeTypeNameOrOptions extends
+    | keyof PublicSchema["CompositeTypes"]
+    | { schema: keyof Omit<Database, "__InternalSupabase"> },
+  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+    schema: keyof Omit<Database, "__InternalSupabase">
+  }
+    ? keyof Database[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never = never,
+> = PublicCompositeTypeNameOrOptions extends {
+  schema: keyof Omit<Database, "__InternalSupabase">
+}
+  ? Database[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+  : PublicCompositeTypeNameOrOptions extends keyof PublicSchema["CompositeTypes"]
+    ? PublicSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never

@@ -3522,6 +3522,279 @@ html {
   }
 }
 
+.assignment-detail-dialog {
+  width: min(95vw, 1500px);
+  max-width: 95vw;
+  height: min(90vh, 860px);
+  padding: 0;
+  gap: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+}
+
+.assignment-detail-header {
+  min-height: 64px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 10;
+}
+
+.assignment-detail-body {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.assignment-detail-content {
+  min-width: 0;
+  min-height: 0;
+  padding: 24px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  background: #fff;
+}
+
+.assignment-detail-sidebar {
+  width: 400px;
+  min-width: 400px;
+  padding: 24px;
+  display: flex;
+  flex: 0 0 400px;
+  flex-direction: column;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  box-shadow: inset 10px 0 20px -10px rgb(0 0 0 / 5%);
+}
+
+.assignment-grading-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.assignment-grading-header {
+  padding-bottom: 18px;
+}
+
+.assignment-grading-header h3 {
+  margin: 0 0 6px;
+}
+
+.assignment-grading-header p {
+  margin: 0;
+}
+
+.assignment-ai-card {
+  border-radius: 8px;
+}
+
+.assignment-ai-card-content {
+  padding: 18px;
+}
+
+.assignment-ai-card-title {
+  margin-bottom: 8px;
+}
+
+.assignment-ai-card-description {
+  margin: 0 0 16px;
+}
+
+.assignment-ai-grade-button {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #07051c;
+  background: #07051c;
+  color: #fff;
+  box-shadow: 0 4px 10px rgb(7 5 28 / 18%);
+}
+
+.assignment-ai-grade-button:hover:not(:disabled) {
+  background: #18143d;
+}
+
+.assignment-ai-grade-button:disabled {
+  border-color: #a7a5b2;
+  background: #a7a5b2;
+  color: #fff;
+  cursor: wait;
+  opacity: 1;
+}
+
+.assignment-ai-error {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.assignment-ai-details {
+  margin-top: 13px;
+  border: 1px solid #dddce5;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.assignment-ai-details summary {
+  min-height: 38px;
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  color: #29253e;
+  font-size: 12px;
+  font-weight: 600;
+  list-style: none;
+}
+
+.assignment-ai-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.assignment-ai-confidence {
+  color: #6b677e;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.assignment-ai-details-content {
+  max-height: 260px;
+  padding: 0 11px 11px;
+  overflow-y: auto;
+  border-top: 1px solid #eeedf2;
+}
+
+.assignment-ai-criterion {
+  padding: 10px 0;
+  border-bottom: 1px solid #eeedf2;
+}
+
+.assignment-ai-criterion:last-child {
+  border-bottom: 0;
+}
+
+.assignment-ai-criterion-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  color: #171426;
+  font-size: 12px;
+}
+
+.assignment-ai-criterion-heading strong {
+  white-space: nowrap;
+}
+
+.assignment-ai-criterion p,
+.assignment-ai-review-notes p {
+  margin-top: 4px;
+  color: #625f70;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.assignment-ai-review-notes {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #854d0e;
+  font-size: 11px;
+}
+
+.assignment-grading-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.assignment-grading-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.assignment-grading-field label {
+  line-height: 1.3;
+}
+
+.assignment-score-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.assignment-score-input {
+  width: 92px;
+  height: 50px;
+  padding-inline: 10px;
+}
+
+.assignment-score-total {
+  line-height: 1;
+}
+
+.assignment-feedback-input {
+  min-height: 170px;
+  padding: 14px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.assignment-save-grade-button {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 2px;
+}
+
+@media (max-width: 900px) {
+  .assignment-detail-dialog {
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+    height: calc(100vh - 24px);
+  }
+
+  .assignment-detail-body {
+    flex-direction: column;
+  }
+
+  .assignment-detail-content {
+    padding: 18px;
+  }
+
+  .assignment-detail-sidebar {
+    width: 100%;
+    min-width: 0;
+    max-height: 48%;
+    padding: 18px;
+    flex: 0 0 auto;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+    box-shadow: inset 0 10px 20px -10px rgb(0 0 0 / 5%);
+  }
+
+  .assignment-grading-panel {
+    gap: 18px;
+  }
+}
+
 @property --tw-shadow-color {
   syntax: "*";
   inherits: false

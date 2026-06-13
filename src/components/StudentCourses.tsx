@@ -33,7 +33,6 @@ import {
   GraduationCap,
   ChevronLeft,
   ChevronRight,
-  Send,
   ArrowRightCircle
 } from "lucide-react";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -92,8 +91,6 @@ export function StudentCourses() {
   const [enrollmentKeyInput, setEnrollmentKeyInput] = useState("");
   const [enrollmentError, setEnrollmentError] = useState("");
   const [isEnrolling, setIsEnrolling] = useState(false);
-  const [isRequestingKey, setIsRequestingKey] = useState(false);
-  const [keyRequestSent, setKeyRequestSent] = useState(false);
 
   // Profile Setup State
   const [showProfileSetup, setShowProfileSetup] = useState(false);
@@ -263,26 +260,7 @@ export function StudentCourses() {
   const handleEnrollClick = (course: Course) => {
     setEnrollmentError("");
     setEnrollmentKeyInput("");
-    setKeyRequestSent(false);
     setSelectedCourseForEnrollment(course);
-  };
-
-  const handleRequestKey = async () => {
-    if (!selectedCourseForEnrollment || !profile) return;
-    setIsRequestingKey(true);
-    
-    const { error } = await supabase.from('key_requests').insert({
-        user_id: profile.id,
-        course_id: selectedCourseForEnrollment.id,
-        status: 'pending'
-    });
-
-    if (error) {
-        setEnrollmentError("Failed to send request. You may have already requested this.");
-    } else {
-        setKeyRequestSent(true);
-    }
-    setIsRequestingKey(false);
   };
 
   const handleEnrollSubmit = async () => {
@@ -294,7 +272,7 @@ export function StudentCourses() {
       const inputKey = enrollmentKeyInput.trim();
       const actualKey = selectedCourseForEnrollment.enrollment_key?.trim();
 
-      if (!actualKey) throw new Error("System Error: Course has no key set. Contact Admin.");
+      if (!actualKey) throw new Error("System Error: Course has no key set. Contact your lecturer.");
       if (inputKey !== actualKey) throw new Error("Invalid Enrollment Key.");
 
       const { error } = await supabase.from('course_enrollments').insert({
@@ -652,13 +630,6 @@ export function StudentCourses() {
               </Alert>
             )}
 
-            {keyRequestSent && (
-                <Alert className="bg-green-50 text-green-800 border-green-200">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>Request sent! Admin will review shortly.</AlertDescription>
-                </Alert>
-            )}
-            
             <div className="space-y-2">
               <Label>Enrollment Key</Label>
               <div className="relative">
@@ -671,21 +642,6 @@ export function StudentCourses() {
                 />
               </div>
             </div>
-
-            <div className="relative my-3">
-                <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
-                <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">Or</span></div>
-            </div>
-
-            <Button 
-                variant="outline" 
-                className="w-full" 
-                onClick={handleRequestKey}
-                disabled={isRequestingKey || keyRequestSent}
-            >
-                {isRequestingKey ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Send className="mr-2 h-4 w-4" />}
-                {keyRequestSent ? "Request Sent" : "Request Key from Admin"}
-            </Button>
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">

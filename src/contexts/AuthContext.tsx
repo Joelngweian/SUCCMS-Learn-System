@@ -142,16 +142,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signUp = async (email: string, password: string, username: string, fullName: string, role: 'student' | 'lecturer' | 'admin') => {
     try {
-      const { data: existingUser } = await supabase
-        .from('user_profiles')
-        .select('username')
-        .eq('username', username)
-        .single();
-
-      if (existingUser) {
-        return { data: null, error: { message: "Username already taken" } };
-      }
-
       const { data, error } = await supabase.auth.signUp({
         email,
         password,

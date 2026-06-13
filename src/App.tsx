@@ -1,22 +1,10 @@
-import { useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useTheme } from "next-themes";
 import { supabase } from "@/lib/supabase.ts"; // Added Supabase import
 import { useAuth } from "@/contexts/AuthContext.tsx";
 import { useOnlinePresence } from "@/hooks/useOnlinePresence";
 import { Login } from "./components/Login";
-import { StudentDashboard } from "./components/StudentDashboard";
-import { StudentCourses } from "./components/StudentCourses";
-import { LecturerDashboard } from "./components/LecturerDashboard";
-import { AdminDashboard } from "./components/AdminDashboard";
-import { UserProfile } from "./components/UserProfile";
-import { CourseManagement } from "./components/CourseManagement"; 
-import { Forum } from "./components/Forum";
-import { Assignments } from "./components/Assignments";
-import { Gamification } from "./components/Gamification";
-import { SettingsPage } from "./components/SettingsPage";
-import { HelpSupportPage } from "./components/HelpSupportPage";
-import { LecturerAnalytics } from "./components/LecturerAnalytics";
 import { NotificationButton } from "./components/NotificationButton";
 import { TopBarSearch } from "./components/TopBarSearch";
 import { Button } from "./components/ui/button";
@@ -27,6 +15,73 @@ import {
   Settings, HelpCircle, LogOut, Menu, X, Search, Moon, Sun,
   Shield, GraduationCap, UserCog, ClipboardList, BarChart3
 } from "lucide-react";
+
+const StudentDashboard = lazy(() =>
+  import("./components/StudentDashboard").then((module) => ({
+    default: module.StudentDashboard,
+  }))
+);
+const StudentCourses = lazy(() =>
+  import("./components/StudentCourses").then((module) => ({
+    default: module.StudentCourses,
+  }))
+);
+const LecturerDashboard = lazy(() =>
+  import("./components/LecturerDashboard").then((module) => ({
+    default: module.LecturerDashboard,
+  }))
+);
+const AdminDashboard = lazy(() =>
+  import("./components/AdminDashboard").then((module) => ({
+    default: module.AdminDashboard,
+  }))
+);
+const UserProfile = lazy(() =>
+  import("./components/UserProfile").then((module) => ({
+    default: module.UserProfile,
+  }))
+);
+const CourseManagement = lazy(() =>
+  import("./components/CourseManagement").then((module) => ({
+    default: module.CourseManagement,
+  }))
+);
+const Forum = lazy(() =>
+  import("./components/Forum").then((module) => ({
+    default: module.Forum,
+  }))
+);
+const Assignments = lazy(() =>
+  import("./components/Assignments").then((module) => ({
+    default: module.Assignments,
+  }))
+);
+const Gamification = lazy(() =>
+  import("./components/Gamification").then((module) => ({
+    default: module.Gamification,
+  }))
+);
+const SettingsPage = lazy(() =>
+  import("./components/SettingsPage").then((module) => ({
+    default: module.SettingsPage,
+  }))
+);
+const HelpSupportPage = lazy(() =>
+  import("./components/HelpSupportPage").then((module) => ({
+    default: module.HelpSupportPage,
+  }))
+);
+const LecturerAnalytics = lazy(() =>
+  import("./components/LecturerAnalytics").then((module) => ({
+    default: module.LecturerAnalytics,
+  }))
+);
+
+const PageLoadingFallback = () => (
+  <div className="flex min-h-[420px] items-center justify-center">
+    <div className="h-10 w-10 animate-spin rounded-full border-4 border-muted border-t-primary" />
+  </div>
+);
 
 // Types
 type UserRole = 'student' | 'lecturer' | 'admin';
@@ -302,42 +357,44 @@ export default function App() {
           </header>
 
           <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-            <Routes>
-              {/* Common Routes */}
-              <Route path="/profile/:userId" element={<UserProfile />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/help" element={<HelpSupportPage />} />
+            <Suspense fallback={<PageLoadingFallback />}>
+              <Routes>
+                {/* Common Routes */}
+                <Route path="/profile/:userId" element={<UserProfile />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/help" element={<HelpSupportPage />} />
 
-              {/* Student Routes */}
-              {userRole === 'student' && (
-                <>
-                  <Route path="/" element={<StudentDashboard />} />
-                  <Route path="/courses" element={<StudentCourses />} />
-                  <Route path="/assignments" element={<Assignments />} />
-                  <Route path="/forum" element={<Forum />} />
-                  <Route path="/progress" element={<Gamification />} />
-                </>
-              )}
+                {/* Student Routes */}
+                {userRole === 'student' && (
+                  <>
+                    <Route path="/" element={<StudentDashboard />} />
+                    <Route path="/courses" element={<StudentCourses />} />
+                    <Route path="/assignments" element={<Assignments />} />
+                    <Route path="/forum" element={<Forum />} />
+                    <Route path="/progress" element={<Gamification />} />
+                  </>
+                )}
 
-              {/* Lecturer Routes */}
-              {userRole === 'lecturer' && (
-                <>
-                  <Route path="/" element={<LecturerDashboard />} />
-                  <Route path="/courses" element={<CourseManagement />} />
-                  <Route path="/assignments" element={<Assignments />} />
-                  <Route path="/forum" element={<Forum />} />
-                  <Route path="/analytics" element={<LecturerAnalytics />} />
-                </>
-              )}
+                {/* Lecturer Routes */}
+                {userRole === 'lecturer' && (
+                  <>
+                    <Route path="/" element={<LecturerDashboard />} />
+                    <Route path="/courses" element={<CourseManagement />} />
+                    <Route path="/assignments" element={<Assignments />} />
+                    <Route path="/forum" element={<Forum />} />
+                    <Route path="/analytics" element={<LecturerAnalytics />} />
+                  </>
+                )}
 
-              {/* Admin Routes */}
-              {userRole === 'admin' && (
-                 <Route path="/" element={<AdminDashboard />} />
-              )}
+                {/* Admin Routes */}
+                {userRole === 'admin' && (
+                  <Route path="/" element={<AdminDashboard />} />
+                )}
 
-              {/* Fallback */}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+                {/* Fallback */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </Suspense>
           </main>
         </div>
       </div>

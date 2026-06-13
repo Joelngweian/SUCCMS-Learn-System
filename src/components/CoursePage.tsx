@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom"; 
 import { supabase } from "@/lib/supabase.ts";
+import type { Json } from "@/lib/database.types";
 import { useAuth } from "@/contexts/AuthContext.tsx";
 import {
   COURSE_OFFERING_SELECT,
@@ -40,6 +41,31 @@ interface CoursePageProps {
   onBack: () => void;
 }
 
+type AiGradeDetails = {
+  confidence: number | null;
+  criteria: Array<{
+    name: string;
+    score: number;
+    maxScore: number;
+    reason: string;
+  }>;
+  warnings: string[];
+};
+
+type SubmissionFile = {
+  name: string;
+  path: string;
+};
+
+const getSubmissionFiles = (value: Json | null): SubmissionFile[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value.filter((file): file is SubmissionFile => {
+    if (!file || Array.isArray(file) || typeof file !== "object") return false;
+    return typeof file.name === "string" && typeof file.path === "string";
+  });
+};
+
 const getFileIcon = (type: string) => {
   if (type === 'folder') return <Folder className="h-6 w-6 text-blue-500 fill-blue-100" />;
   if (type.includes('image')) return <FileImage className="h-6 w-6 text-purple-500" />;
@@ -47,6 +73,27 @@ const getFileIcon = (type: string) => {
   if (type.includes('sheet') || type.includes('excel')) return <FileSpreadsheet className="h-6 w-6 text-green-500" />;
   if (type.includes('code') || type.includes('tsx') || type.includes('java')) return <FileCode className="h-6 w-6 text-yellow-500" />;
   return <File className="h-6 w-6 text-gray-500" />;
+};
+
+const getAssignmentMaxScore = (assignment: any) => {
+  const value = Number(assignment?.max_score ?? assignment?.points ?? 100);
+  return Number.isFinite(value) && value > 0 ? value : 100;
+};
+
+const getFunctionErrorMessage = async (error: any, fallback: string) => {
+  try {
+    const response = error?.context;
+    if (response && typeof response.clone === "function") {
+      const payload = await response.clone().json();
+      if (typeof payload?.error === "string" && payload.error.trim()) {
+        return payload.error;
+      }
+    }
+  } catch {
+    // Fall back to the invoke error message.
+  }
+
+  return error?.message || fallback;
 };
 
 export function CoursePage({ courseId, onBack }: CoursePageProps) {
@@ -72,6 +119,8 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
   const [currentGrade, setCurrentGrade] = useState("");
   const [currentFeedback, setCurrentFeedback] = useState("");
   const [isAiGrading, setIsAiGrading] = useState(false);
+  const [aiGradingError, setAiGradingError] = useState("");
+  const [aiGradeDetails, setAiGradeDetails] = useState<AiGradeDetails | null>(null);
 
   // File Browser States
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -107,7 +156,7 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
 
   // View Assignment State
   const [selectedAssignment, setSelectedAssignment] = useState<any | null>(null);
-  const [submissionFiles, setSubmissionFiles] = useState<{name: string, path: string}[]>([]);
+  const [submissionFiles, setSubmissionFiles] = useState<SubmissionFile[]>([]);
 
   const isLecturer = profile?.role === 'lecturer';
 
@@ -164,7 +213,7 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
                         const others = prev.filter(s => s.assignment_id !== selectedAssignment.id);
                         return [...others, data];
                     });
-                    setSubmissionFiles(data.files || []); 
+                    setSubmissionFiles(getSubmissionFiles(data.files));
                 }
             };
             fetchMyLatestSubmission();
@@ -175,8 +224,10 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
   useEffect(() => {
     if (gradingStudentId && allSubmissions.length > 0) {
         const sub = allSubmissions.find(s => s.student_id === gradingStudentId);
-        setCurrentGrade(sub?.grade || "");
+        setCurrentGrade(sub?.grade != null ? String(sub.grade) : "");
         setCurrentFeedback(sub?.feedback || "");
+        setAiGradingError("");
+        setAiGradeDetails(null);
     }
   }, [gradingStudentId, allSubmissions]);
 
@@ -354,21 +405,37 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
 
   const handleSaveGrade = async () => {
     if (!gradingStudentId || !selectedAssignment) return;
+    const maxScore = getAssignmentMaxScore(selectedAssignment);
+    const numericGrade = Number(currentGrade);
+
+    if (!Number.isFinite(numericGrade) || numericGrade < 0 || numericGrade > maxScore) {
+        alert(`Enter a grade between 0 and ${maxScore}.`);
+        return;
+    }
+
     const existingSub = allSubmissions.find(s => s.student_id === gradingStudentId);
+    let error;
     
     if (existingSub) {
-        await supabase.from('assignment_submissions').update({
-            grade: currentGrade,
+        const result = await supabase.from('assignment_submissions').update({
+            grade: Math.round(numericGrade),
             feedback: currentFeedback
         }).eq('id', existingSub.id);
+        error = result.error;
     } else {
-        await supabase.from('assignment_submissions').insert({
+        const result = await supabase.from('assignment_submissions').insert({
             assignment_id: selectedAssignment.id,
             student_id: gradingStudentId,
-            grade: currentGrade,
+            grade: Math.round(numericGrade),
             feedback: currentFeedback,
             submitted_at: new Date().toISOString()
         });
+        error = result.error;
+    }
+
+    if (error) {
+        alert(`Failed to save grade: ${error.message}`);
+        return;
     }
     
     alert("Grade Saved!");
@@ -376,19 +443,90 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
   };
 
   const handleAiAutoGrade = async () => {
+    if (!selectedAssignment || !gradingStudentId) return;
+
+    const submission = allSubmissions.find(
+        item => item.student_id === gradingStudentId
+    );
+    if (!submission) {
+        alert("This student has not submitted the assignment yet.");
+        return;
+    }
+    if (!selectedAssignment.rubric) {
+        alert("Add a grading rubric before using AI grading.");
+        return;
+    }
+
+    setAiGradingError("");
+    setAiGradeDetails(null);
     setIsAiGrading(true);
-    setTimeout(() => {
-        setIsAiGrading(false);
-        const randomScore = Math.floor(Math.random() * (100 - 70 + 1)) + 70;
-        setCurrentGrade(randomScore.toString());
-        setCurrentFeedback(
-            "AI Generated Feedback:\n" +
-            "- Good understanding of the core concepts.\n" +
-            "- Structure is logical and easy to follow.\n" +
-            "- Please include more citations in the future.\n" +
-            "- Overall: Excellent work."
+    try {
+        const { data, error } = await supabase.functions.invoke("ai-grade-assignment", {
+            body: {
+                assignmentId: selectedAssignment.id,
+                studentId: gradingStudentId
+            }
+        });
+
+        if (error) {
+            throw new Error(
+                await getFunctionErrorMessage(
+                    error,
+                    "The AI grading service could not be reached."
+                )
+            );
+        }
+        if (data?.error) {
+            throw new Error(data.error);
+        }
+
+        const maxScore = getAssignmentMaxScore(selectedAssignment);
+        const suggestedScore = Number(data?.suggestedScore);
+        if (!Number.isFinite(suggestedScore)) {
+            throw new Error("The AI grading service returned an invalid score.");
+        }
+
+        const criteria = Array.isArray(data?.criteria)
+            ? data.criteria
+                .filter((criterion: any) => criterion?.name)
+                .map((criterion: any) => {
+                    const score = Number(criterion?.score);
+                    const criterionMax = Number(criterion?.maxScore);
+                    return {
+                        name: String(criterion.name),
+                        score: Number.isFinite(score) ? score : 0,
+                        maxScore: Number.isFinite(criterionMax) ? criterionMax : 0,
+                        reason: criterion.reason ? String(criterion.reason) : ""
+                    };
+                })
+            : [];
+        const warnings = Array.isArray(data?.warnings)
+            ? data.warnings.filter(Boolean).map((warning: string) => String(warning))
+            : [];
+        const confidence = Number(data?.confidence);
+
+        setCurrentGrade(
+            Math.min(maxScore, Math.max(0, Math.round(suggestedScore))).toString()
         );
-    }, 2000);
+        setCurrentFeedback(
+            data?.feedback || "No written feedback was generated."
+        );
+        setAiGradeDetails({
+            confidence: Number.isFinite(confidence) ? Math.round(confidence) : null,
+            criteria,
+            warnings
+        });
+    } catch (error) {
+        const message = error instanceof Error
+            ? error.message
+            : "AI grading failed. Please try again.";
+        const friendlyMessage = message.toLowerCase().includes("high demand")
+            ? "Gemini is currently busy. No grade was changed. Please try again in a moment."
+            : message;
+        setAiGradingError(friendlyMessage);
+    } finally {
+        setIsAiGrading(false);
+    }
   };
 
   const uploadTempFile = async (e: React.ChangeEvent<HTMLInputElement>, setList: Function, currentList: any[]) => {
@@ -924,7 +1062,7 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
                             className="cursor-pointer hover:border-primary transition-colors"
                             onClick={() => {
                                 setSelectedAssignment(assign);
-                                setSubmissionFiles(submission?.files || []);
+                                setSubmissionFiles(getSubmissionFiles(submission?.files ?? null));
                             }}
                         >
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -947,10 +1085,10 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
                                     <span>Due: {new Date(assign.due_date).toLocaleDateString()}</span>
                                     {submission?.grade != null ? (
                                         <Badge variant="secondary" className="text-sm font-bold bg-green-100 text-green-800 hover:bg-green-200 px-2">
-                                            {submission.grade} / {assign.points || 100}
+                                            {submission.grade} / {getAssignmentMaxScore(assign)}
                                         </Badge>
                                     ) : (
-                                        <span>{assign.points ? `${assign.points} pts` : "Ungraded"}</span>
+                                        <span>{getAssignmentMaxScore(assign)} pts</span>
                                     )}
                                 </div>
                             </CardContent>
@@ -1152,10 +1290,10 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
       </Dialog>
 
       <Dialog open={!!selectedAssignment} onOpenChange={(open: boolean) => !open && setSelectedAssignment(null)}>
-        <DialogContent className="sm:max-w-[95vw] w-full h-[90vh] flex flex-col p-0 gap-0 overflow-hidden [&>button]:hidden bg-white">
+        <DialogContent hideCloseButton className="assignment-detail-dialog">
             {selectedAssignment && (
                 <>
-                <div className="border-b p-4 flex justify-between items-center bg-gray-50 z-10 shrink-0 h-16">
+                <div className="assignment-detail-header border-b bg-gray-50">
                     <div className="flex items-center gap-4">
                         {isLecturer && gradingStudentId && (
                             <Button variant="ghost" size="sm" onClick={() => setGradingStudentId(null)}>
@@ -1164,17 +1302,17 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
                         )}
                         <div>
                             <h2 className="text-xl font-bold tracking-tight text-gray-900">{selectedAssignment.title}</h2>
-                            <p className="text-xs text-gray-500">Due {new Date(selectedAssignment.due_date).toLocaleDateString()} • {selectedAssignment.points || "0"} Points</p>
+                            <p className="text-xs text-gray-500">Due {new Date(selectedAssignment.due_date).toLocaleDateString()} • {getAssignmentMaxScore(selectedAssignment)} Points</p>
                         </div>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={() => setSelectedAssignment(null)}>
+                    <Button variant="ghost" size="icon" onClick={() => setSelectedAssignment(null)} aria-label="Close assignment">
                         <X className="h-5 w-5 text-gray-500" />
                     </Button>
                 </div>
 
-                <div className="flex-1 flex overflow-hidden">
+                <div className="assignment-detail-body">
                     
-                    <div className={`flex-1 min-w-[320px] overflow-y-auto p-6 bg-white ${isLecturer && gradingStudentId ? 'hidden md:block md:w-2/3 border-r' : 'w-full'}`}>
+                    <div className="assignment-detail-content">
                         
                         {isLecturer && !gradingStudentId && (
                             <div className="space-y-4">
@@ -1267,7 +1405,7 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
                                                 </div>
                                                 <div className="text-4xl font-bold text-gray-900 mb-4">
                                                     {mySubmissions.find(s => s.assignment_id === selectedAssignment.id).grade} 
-                                                    <span className="text-lg font-medium text-gray-400"> / {selectedAssignment.points}</span>
+                                                    <span className="text-lg font-medium text-gray-400"> / {getAssignmentMaxScore(selectedAssignment)}</span>
                                                 </div>
                                                 {mySubmissions.find(s => s.assignment_id === selectedAssignment.id).feedback && (
                                                     <div className="bg-white p-4 rounded-lg border border-green-100 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed shadow-sm">
@@ -1330,62 +1468,105 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
                         )}
                     </div>
 
-                    <div className="w-[400px] bg-gray-50 border-l p-6 overflow-y-auto shrink-0 flex flex-col shadow-[inset_10px_0_20px_-10px_rgba(0,0,0,0.05)]">
+                    <div className="assignment-detail-sidebar bg-gray-50">
                         
                         {isLecturer ? (
                             gradingStudentId ? (
-                                <div className="space-y-6">
-                                    <div className="pb-4 border-b border-gray-200">
+                                <div className="assignment-grading-panel">
+                                    <div className="assignment-grading-header border-b border-gray-200">
                                         <h3 className="font-bold text-lg mb-1 text-gray-900">Grading</h3>
                                         <p className="text-sm text-gray-500 flex items-center gap-2">
                                             Student: <span className="font-medium text-gray-900">{people.find(p => p.id === gradingStudentId)?.full_name}</span>
                                         </p>
                                     </div>
 
-                                    <Card className="bg-gradient-to-br from-indigo-50 to-white border-indigo-100 shadow-sm overflow-hidden">
-                                        <CardContent className="p-5">
-                                            <div className="flex items-center gap-2 mb-2 text-indigo-700 font-bold text-sm">
+                                    <Card className="assignment-ai-card bg-gradient-to-br from-indigo-50 to-white border-indigo-100 shadow-sm overflow-hidden">
+                                        <CardContent className="assignment-ai-card-content">
+                                            <div className="assignment-ai-card-title flex items-center gap-2 text-indigo-700 font-bold text-sm">
                                                 <Sparkles className="h-4 w-4 text-indigo-500" /> AI Grader
                                             </div>
-                                            <p className="text-xs text-gray-600 mb-4 leading-relaxed">
-                                                Use AI to analyze the submission and generate a suggested grade and feedback.
+                                            <p className="assignment-ai-card-description text-xs text-gray-600 leading-relaxed">
+                                                Click below to analyze this submission. AI grading never starts automatically.
                                             </p>
+                                            {aiGradingError && (
+                                                <div className="assignment-ai-error" role="alert">
+                                                    {aiGradingError}
+                                                </div>
+                                            )}
                                             <Button 
+                                                type="button"
                                                 onClick={handleAiAutoGrade} 
                                                 disabled={isAiGrading}
                                                 size="sm" 
-                                                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white border-0 shadow-md transition-all active:scale-95"
+                                                className="assignment-ai-grade-button"
                                             >
                                                 {isAiGrading ? <Loader2 className="h-3 w-3 animate-spin mr-2"/> : <Sparkles className="h-3 w-3 mr-2"/>}
-                                                {isAiGrading ? "Analyzing..." : "Auto-Grade Now"}
+                                                {isAiGrading ? "Analyzing..." : aiGradingError ? "Try Again" : "Start AI Grading"}
                                             </Button>
+                                            {aiGradeDetails && (
+                                                <details className="assignment-ai-details">
+                                                    <summary>
+                                                        <span>View grading details</span>
+                                                        {aiGradeDetails.confidence != null && (
+                                                            <span className="assignment-ai-confidence">
+                                                                {aiGradeDetails.confidence}% confidence
+                                                            </span>
+                                                        )}
+                                                    </summary>
+                                                    <div className="assignment-ai-details-content">
+                                                        {aiGradeDetails.criteria.length > 0 && (
+                                                            <div className="assignment-ai-criteria">
+                                                                {aiGradeDetails.criteria.map((criterion, index) => (
+                                                                    <div className="assignment-ai-criterion" key={`${criterion.name}-${index}`}>
+                                                                        <div className="assignment-ai-criterion-heading">
+                                                                            <span>{criterion.name}</span>
+                                                                            <strong>{criterion.score}/{criterion.maxScore}</strong>
+                                                                        </div>
+                                                                        {criterion.reason && <p>{criterion.reason}</p>}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                        {aiGradeDetails.warnings.length > 0 && (
+                                                            <div className="assignment-ai-review-notes">
+                                                                <strong>Review notes</strong>
+                                                                {aiGradeDetails.warnings.map((warning, index) => (
+                                                                    <p key={index}>{warning}</p>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </details>
+                                            )}
                                         </CardContent>
                                     </Card>
 
-                                    <div className="space-y-5">
-                                        <div className="space-y-2">
+                                    <div className="assignment-grading-form">
+                                        <div className="assignment-grading-field">
                                             <Label className="text-gray-700 font-semibold">Score</Label>
-                                            <div className="flex items-center gap-2">
+                                            <div className="assignment-score-row">
                                                 <Input 
                                                     type="number" 
+                                                    min={0}
+                                                    max={getAssignmentMaxScore(selectedAssignment)}
                                                     value={currentGrade} 
                                                     onChange={e => setCurrentGrade(e.target.value)} 
-                                                    className="text-2xl font-bold h-14 w-24 text-center bg-white"
+                                                    className="assignment-score-input text-2xl font-bold text-center bg-white"
                                                     placeholder="-"
                                                 />
-                                                <span className="text-gray-400 text-lg font-medium">/ {selectedAssignment.points || 100}</span>
+                                                <span className="assignment-score-total text-gray-400 text-lg font-medium">/ {getAssignmentMaxScore(selectedAssignment)}</span>
                                             </div>
                                         </div>
-                                        <div className="space-y-2">
+                                        <div className="assignment-grading-field">
                                             <Label className="text-gray-700 font-semibold">Feedback</Label>
                                             <Textarea 
                                                 value={currentFeedback} 
                                                 onChange={e => setCurrentFeedback(e.target.value)} 
-                                                className="min-h-[200px] bg-white text-base leading-relaxed p-4"
+                                                className="assignment-feedback-input bg-white text-base leading-relaxed"
                                                 placeholder="Enter detailed feedback for the student..."
                                             />
                                         </div>
-                                        <Button onClick={handleSaveGrade} className="w-full h-12 text-lg shadow-lg hover:shadow-xl transition-all">
+                                        <Button onClick={handleSaveGrade} className="assignment-save-grade-button text-lg shadow-lg hover:shadow-xl transition-all">
                                             Save Grade & Return
                                         </Button>
                                     </div>
