@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext.tsx";
 import { supabase } from "@/lib/supabase.ts";
+import { getNotifyMessage, notify } from "@/lib/notify";
+import { confirmAction } from "@/lib/confirm";
 import { REPORT_REASON_OPTIONS } from "@/lib/reporting";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { X, Plus, ChevronLeft, ChevronRight, Flag, Loader2, Heart, Pause, Play, Trash2 } from "lucide-react";
+import { X, Plus, ChevronLeft, ChevronRight, Flag, Loader2, Pause, Play, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -17,30 +19,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./ui/dialog";
-
-interface Story {
-  id: string;
-  userId: string;
-  userName: string;
-  userInitials: string;
-  contentUrl: string;
-  type: "image";
-  timestamp: string;
-  viewed: boolean;
-  created_at: string;
-  expires_at: string;
-}
-
-interface StoryUser {
-  id: string;
-  name: string;
-  initials: string;
-  avatar_url?: string;
-  role: string;
-  hasActiveStories: boolean;
-  stories: Story[];
-  viewed: boolean;
-}
+import type { StoryUser } from "./stories/storyTypes";
+import { useStoriesData } from "./stories/useStoriesData";
 
 export function Stories({ 
   currentUserAvatar, 
@@ -54,13 +34,10 @@ export function Stories({
   const { user } = useAuth();
   const [selectedUser, setSelectedUser] = useState<StoryUser | null>(null);
   const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
-  const [storyUsers, setStoryUsers] = useState<StoryUser[]>([]);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
   const [reportDetails, setReportDetails] = useState("");
   const [isReporting, setIsReporting] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   const [progress, setProgress] = useState(0);
@@ -70,195 +47,19 @@ export function Stories({
   const STORY_DURATION = 5000; // 5 seconds per story
   const PROGRESS_INTERVAL = 50; // Update progress every 50ms
 
-  const [viewedStoryIds, setViewedStoryIds] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem("viewed_story_ids");
-    return new Set(saved ? JSON.parse(saved) : []);
+  const {
+    deleteStory,
+    isDeleting,
+    isUploading,
+    markAsViewed,
+    storyUsers,
+    uploadStory,
+    viewedStoryIds,
+  } = useStoriesData({
+    currentUserAvatar,
+    currentUserInitials,
+    currentUserId: user?.id,
   });
-
-  const fetchStories = async () => {
-    const currentUserId = user?.id;
-    
-    // Always create "Your Story" tile first
-    const yourStory: StoryUser = {
-      id: currentUserId || "me",
-      name: "Your Story",
-      initials: currentUserInitials,
-      avatar_url: currentUserAvatar,
-      role: "student",
-      hasActiveStories: false,
-      stories: [],
-      viewed: true 
-    };
-
-    try {
-      const now = new Date().toISOString();
-
-      const { data, error } = await supabase
-        .from('stories')
-        .select('id, user_id, image_url, created_at, expires_at')
-        .eq('is_active', true)
-        .gt('expires_at', now)
-        .order('created_at', { ascending: true });
-
-      if (error) {
-        console.error("Error fetching stories:", error);
-        setStoryUsers([yourStory]);
-        return;
-      }
-
-      // Get unique user IDs to fetch profiles
-      const userIds = [...new Set(data?.map(s => s.user_id).filter(id => id !== currentUserId))];
-      
-      // Fetch user profiles for other users
-      const userProfiles: Record<string, any> = {};
-      if (userIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('user_profiles')
-          .select('id, full_name, avatar_url, role')
-          .in('id', userIds);
-        
-        profiles?.forEach(p => {
-          userProfiles[p.id] = p;
-        });
-      }
-
-      const groups: Record<string, StoryUser> = {};
-
-      data?.filter((s: any) => Boolean(s.image_url)).forEach((s: any) => {
-        const uId = s.user_id;
-        const isMe = uId === currentUserId;
-        
-        if (isMe) {
-          // Add to "Your Story"
-          yourStory.stories.push({
-            id: s.id,
-            userId: uId,
-            userName: "You",
-            userInitials: currentUserInitials,
-            contentUrl: s.image_url,
-            type: "image",
-            timestamp: new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            created_at: s.created_at,
-            expires_at: s.expires_at,
-            viewed: viewedStoryIds.has(s.id)
-          });
-          yourStory.hasActiveStories = true;
-        } else {
-          // Group other users' stories
-          const profile = userProfiles[uId];
-          if (!groups[uId]) {
-            groups[uId] = {
-              id: uId,
-              name: profile?.full_name || "Unknown",
-              initials: (profile?.full_name || "U").charAt(0),
-              avatar_url: profile?.avatar_url,
-              role: profile?.role || "student",
-              hasActiveStories: true,
-              stories: [],
-              viewed: true
-            };
-          }
-
-          groups[uId].stories.push({
-            id: s.id,
-            userId: uId,
-            userName: profile?.full_name || "Unknown",
-            userInitials: (profile?.full_name || "U").charAt(0),
-            contentUrl: s.image_url,
-            type: "image",
-            timestamp: new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            created_at: s.created_at,
-            expires_at: s.expires_at,
-            viewed: viewedStoryIds.has(s.id)
-          });
-        }
-      });
-
-      // Update viewed status for all groups
-      if (yourStory.stories.length > 0) {
-        const hasUnread = yourStory.stories.some(s => !viewedStoryIds.has(s.id));
-        yourStory.viewed = !hasUnread;
-      }
-
-      Object.values(groups).forEach(group => {
-        if (group.stories.length > 0) {
-           const hasUnread = group.stories.some(s => !viewedStoryIds.has(s.id));
-           group.viewed = !hasUnread;
-        }
-      });
-
-      const others = Object.values(groups);
-      setStoryUsers([yourStory, ...others]);
-
-    } catch (e) {
-      console.error("Error loading stories", e);
-      // Still show "Your Story" even on error
-      setStoryUsers([yourStory]);
-    }
-  };
-
-  useEffect(() => {
-    fetchStories();
-  }, [user?.id, currentUserAvatar, currentUserInitials]);
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || isUploading || !user) return;
-
-    if (!file.type.startsWith('image/')) {
-      alert("Please select an image file.");
-      e.target.value = "";
-      return;
-    }
-
-    if (file.size > 10 * 1024 * 1024) {
-      alert("Story images must be 10 MB or smaller.");
-      e.target.value = "";
-      return;
-    }
-
-    setIsUploading(true);
-    let uploadedFileName: string | null = null;
-
-    try {
-      const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg';
-      const fileName = `${user.id}/${Date.now()}-${crypto.randomUUID()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage.from('stories').upload(fileName, file);
-      if (uploadError) {
-        throw new Error(`Story image upload failed: ${uploadError.message}`);
-      }
-
-      uploadedFileName = fileName;
-
-      const { data: { publicUrl } } = supabase.storage.from('stories').getPublicUrl(fileName);
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-      
-      const { error: insertError } = await supabase.from('stories').insert({ 
-        user_id: user.id, 
-        image_url: publicUrl,
-        expires_at: expiresAt,
-        is_active: true
-      });
-      
-      if (insertError) {
-        await supabase.storage.from('stories').remove([fileName]);
-        uploadedFileName = null;
-        throw new Error(`Story record creation failed: ${insertError.message}`);
-      }
-
-      await fetchStories();
-    } catch (err: any) {
-      console.error("Upload error:", err);
-      if (uploadedFileName) {
-        await supabase.storage.from('stories').remove([uploadedFileName]);
-      }
-      alert(err?.message || "Story upload failed. Please try again.");
-    } finally {
-      setIsUploading(false);
-      e.target.value = "";
-    }
-  };
 
   const handleStoryClick = (storyUser: StoryUser) => {
     // Only open viewer if user has stories
@@ -276,20 +77,6 @@ export function Stories({
     
     markAsViewed(storyUser.stories[idx].id);
   };
-
-  const markAsViewed = useCallback((storyId: string) => {
-    if (viewedStoryIds.has(storyId)) return;
-    const newSet = new Set(viewedStoryIds).add(storyId);
-    setViewedStoryIds(newSet);
-    localStorage.setItem("viewed_story_ids", JSON.stringify([...newSet]));
-
-    // Update UI rings immediately
-    setStoryUsers(prev => prev.map(u => {
-      const updatedStories = u.stories.map(s => s.id === storyId ? { ...s, viewed: true } : s);
-      const hasUnread = updatedStories.some(s => !s.viewed);
-      return { ...u, stories: updatedStories, viewed: !hasUnread };
-    }));
-  }, [viewedStoryIds]);
 
   const closeStoryViewer = useCallback(() => {
     setSelectedUser(null);
@@ -445,14 +232,21 @@ export function Stories({
       setReportDialogOpen(false);
       setReportReason("");
       setReportDetails("");
-      alert("Story report submitted for administrator review.");
-    } catch (error: any) {
+      notify.success("Story report submitted for administrator review.");
+    } catch (error: unknown) {
       console.error("Failed to report story:", error);
-      alert(
-        error?.code === "23505"
-          ? "You already have a pending report for this story."
-          : `Failed to report story: ${error?.message || "Please try again."}`
-      );
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? (error as { code?: unknown }).code
+          : null;
+      if (code === "23505") {
+        notify.warning("You already have a pending report for this story.");
+      } else {
+        notify.error(
+          error,
+          `Failed to report story: ${getNotifyMessage(error, "Please try again.")}`,
+        );
+      }
     } finally {
       setIsReporting(false);
     }
@@ -460,37 +254,25 @@ export function Stories({
 
   const handleDeleteStory = async () => {
     if (!currentStory || !user || selectedUser?.id !== user.id || isDeleting) return;
-    
-    if (!confirm("Are you sure you want to delete this story?")) return;
 
-    setIsDeleting(true);
-    try {
-      // 1. Hard delete from DB
-      const { error: dbError } = await supabase
-        .from('stories')
-        .delete()
-        .eq('id', currentStory.id);
-        
-      if (dbError) throw dbError;
+    setIsPaused(true);
+    const confirmed = await confirmAction({
+        title: "Delete story?",
+        description: "This story will be permanently deleted.",
+        confirmLabel: "Delete",
+        destructive: true,
+    });
 
-      // 2. Remove from Storage
-      try {
-        const urlParts = currentStory.contentUrl.split('/stories/');
-        if (urlParts.length === 2) {
-            const fileName = urlParts[1];
-            await supabase.storage.from('stories').remove([fileName]);
-        }
-      } catch (storageErr) {
-        console.error("Storage delete failed, but DB record hidden:", storageErr);
-      }
-      
+    if (!confirmed) {
+      setIsPaused(false);
+      return;
+    }
+
+    const deleted = await deleteStory(currentStory);
+    if (deleted) {
       closeStoryViewer();
-      await fetchStories();
-    } catch (error: any) {
-      console.error("Failed to delete story:", error);
-      alert("Failed to delete story. Please try again.");
-    } finally {
-      setIsDeleting(false);
+    } else {
+      setIsPaused(false);
     }
   };
 
@@ -541,7 +323,7 @@ export function Stories({
               </div>
             );
           })}
-          <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleUpload} />
+          <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={uploadStory} />
         </div>
       </div>
 
@@ -599,15 +381,6 @@ export function Stories({
                     {isPaused ? <Play className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
                   </Button>
                   
-                  <Button 
-                    variant="ghost" 
-                    size="icon"
-                    className="text-white hover:bg-white/20 rounded-full h-10 w-10" 
-                    onClick={() => alert("Liked!")}
-                  >
-                    <Heart className="h-5 w-5" />
-                  </Button>
-
                   {selectedUser.id === user?.id && (
                     <Button
                       variant="ghost"

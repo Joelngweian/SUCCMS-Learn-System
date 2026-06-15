@@ -1,0 +1,111 @@
+import { useEffect } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { CourseAssignmentDetailDialog } from "./CourseAssignmentDetailDialog";
+import { CourseAssignmentsTab } from "./CourseAssignmentsTab";
+import { CreateAssignmentDialog } from "./CourseDialogs";
+import { useCourseAssignments } from "./useCourseAssignments";
+import { useCoursePeople } from "./useCoursePeople";
+
+export function CourseAssignmentsSection({
+  assignmentId,
+  courseId,
+  isLecturer,
+}: {
+  assignmentId: string | null;
+  courseId: string;
+  isLecturer: boolean;
+}) {
+  const { user } = useAuth();
+  const assignments = useCourseAssignments({
+    courseId,
+    isLecturer,
+    userId: user?.id,
+  });
+  const { people } = useCoursePeople(courseId);
+  const {
+    assignments: assignmentItems,
+    selectAssignment,
+  } = assignments;
+
+  useEffect(() => {
+    if (!assignmentId || assignmentItems.length === 0) return;
+    const target = assignmentItems.find(
+      (assignment) => assignment.id === assignmentId,
+    );
+    if (target) selectAssignment(target);
+  }, [
+    assignmentId,
+    assignmentItems,
+    selectAssignment,
+  ]);
+
+  return (
+    <>
+      <CourseAssignmentsTab
+        isLecturer={isLecturer}
+        assignments={assignmentItems}
+        mySubmissions={assignments.mySubmissions}
+        onCreateAssignment={() => assignments.setShowNewAssignmentDialog(true)}
+        onDeleteAssignment={assignments.deleteAssignment}
+        onSelectAssignment={selectAssignment}
+      />
+
+      <CreateAssignmentDialog
+        open={assignments.showNewAssignmentDialog}
+        assignment={assignments.newAssign}
+        rubricFiles={assignments.newRubricFiles}
+        materialFiles={assignments.newAssignFiles}
+        isUploading={assignments.isAssignmentUploading}
+        onOpenChange={assignments.setShowNewAssignmentDialog}
+        onAssignmentChange={assignments.setNewAssign}
+        onRubricUpload={(event) =>
+          void assignments.uploadAssignmentFile(
+            event,
+            assignments.setNewRubricFiles,
+            assignments.newRubricFiles,
+          )
+        }
+        onMaterialUpload={(event) =>
+          void assignments.uploadAssignmentFile(
+            event,
+            assignments.setNewAssignFiles,
+            assignments.newAssignFiles,
+          )
+        }
+        onCreate={() => void assignments.createAssignment()}
+      />
+
+      <CourseAssignmentDetailDialog
+        assignment={assignments.selectedAssignment}
+        isLecturer={isLecturer}
+        gradingStudentId={assignments.gradingStudentId}
+        people={people}
+        allSubmissions={assignments.allSubmissions}
+        mySubmissions={assignments.mySubmissions}
+        submissionFiles={assignments.submissionFiles}
+        isUploading={assignments.isAssignmentUploading}
+        isAiGrading={assignments.isAiGrading}
+        aiGradingError={assignments.aiGradingError}
+        aiGradeDetails={assignments.aiGradeDetails}
+        currentGrade={assignments.currentGrade}
+        currentFeedback={assignments.currentFeedback}
+        onClose={() => assignments.setSelectedAssignment(null)}
+        onGradingStudentChange={assignments.setGradingStudentId}
+        onSubmissionFilesChange={assignments.setSubmissionFiles}
+        onUploadSubmissionFile={(event) =>
+          void assignments.uploadAssignmentFile(
+            event,
+            assignments.setSubmissionFiles,
+            assignments.submissionFiles,
+          )
+        }
+        onTurnIn={() => void assignments.turnIn()}
+        onUndoTurnIn={() => void assignments.undoTurnIn()}
+        onAiGrade={() => void assignments.aiAutoGrade()}
+        onGradeChange={assignments.setCurrentGrade}
+        onFeedbackChange={assignments.setCurrentFeedback}
+        onSaveGrade={() => void assignments.saveGrade()}
+      />
+    </>
+  );
+}

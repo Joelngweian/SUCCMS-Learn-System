@@ -7,7 +7,7 @@ import { Pencil, Camera, Trash2 } from "lucide-react"
 
 interface ProfileHeaderProps {
   name: string
-  role: "student" | "lecturer"
+  role: "student" | "lecturer" | "admin"
   profileImage: string
   backgroundImage: string
   bio: string

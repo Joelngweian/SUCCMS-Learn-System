@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useOnlinePresence } from "@/hooks/useOnlinePresence";
+import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Badge } from "./ui/badge";
@@ -9,16 +11,12 @@ import {
   Users, 
   Activity, 
   TrendingUp, 
-  Clock, 
-  Heart,
   MessageCircle,
   Share2,
-  Zap,
-  Eye,
-  UserPlus,
   Trophy,
   Target,
-  Plus
+  Loader2,
+  ChevronDown
 } from "lucide-react";
 
 interface OnlineActivityProps {
@@ -93,294 +91,449 @@ export function OnlineActivity({ userRole }: OnlineActivityProps) {
     </Card>
   );
 }
-
-interface PeerBenchmarkingProps {
-  currentGrade: string;
-  courseProgress: number;
+export interface AssignmentBenchmark {
+  courseId: string;
+  courseCode: string;
+  courseName: string;
+  studentAverage: number;
+  classAverage: number;
+  percentile: number | null;
+  comparedStudents: number;
+  gradedAssignments: number;
 }
 
-export function PeerBenchmarking({ currentGrade, courseProgress }: PeerBenchmarkingProps) {
-  const benchmarkData = {
-    gradePercentile: 78,
-    progressPercentile: 82,
-    studyTimePercentile: 65,
-    participationPercentile: 90
-  };
+interface PeerBenchmarkingProps {
+  benchmarks: AssignmentBenchmark[];
+}
 
+export function PeerBenchmarking({ benchmarks }: PeerBenchmarkingProps) {
   const getPercentileMessage = (percentile: number) => {
-    if (percentile >= 90) return { message: "Excellent! Top 10%", color: "text-green-600", icon: Trophy };
-    if (percentile >= 75) return { message: "Great! Above average", color: "text-blue-600", icon: TrendingUp };
-    if (percentile >= 50) return { message: "Good! Keep improving", color: "text-yellow-600", icon: Target };
-    return { message: "Room for improvement", color: "text-red-600", icon: Target };
-  };
-
-  const benchmarks = [
-    {
-      label: "Grade Performance",
-      value: benchmarkData.gradePercentile,
-      description: `Your ${currentGrade} is better than ${benchmarkData.gradePercentile}% of peers`
-    },
-    {
-      label: "Course Progress", 
-      value: benchmarkData.progressPercentile,
-      description: `You're ahead of ${benchmarkData.progressPercentile}% of classmates`
-    },
-    {
-      label: "Study Consistency",
-      value: benchmarkData.studyTimePercentile,
-      description: `More consistent than ${benchmarkData.studyTimePercentile}% of students`
-    },
-    {
-      label: "Class Participation",
-      value: benchmarkData.participationPercentile,
-      description: `More active than ${benchmarkData.participationPercentile}% of peers`
+    if (percentile >= 90) {
+      return {
+        message: "Top 10% of graded classmates",
+        color: "text-green-600",
+        icon: Trophy,
+      };
     }
-  ];
+    if (percentile >= 75) {
+      return {
+        message: "Above most graded classmates",
+        color: "text-blue-600",
+        icon: TrendingUp,
+      };
+    }
+    if (percentile >= 50) {
+      return {
+        message: "At or above the class midpoint",
+        color: "text-yellow-600",
+        icon: Target,
+      };
+    }
+    return {
+      message: "Below the current class midpoint",
+      color: "text-red-600",
+      icon: Target,
+    };
+  };
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <TrendingUp className="h-5 w-5" />
-          Peer Benchmarking
+          Assignment Performance Benchmarking
         </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Compare your average graded Assignment score within each course.
+        </p>
       </CardHeader>
-      <CardContent className="space-y-6">
-        {benchmarks.map((benchmark, index) => {
-          const result = getPercentileMessage(benchmark.value);
-          const Icon = result.icon;
-          
-          return (
-            <div key={index} className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Icon className={`h-4 w-4 ${result.color}`} />
-                  <span className="text-sm font-medium">{benchmark.label}</span>
-                </div>
-                <span className={`text-sm ${result.color}`}>
-                  {benchmark.value}%
-                </span>
-              </div>
-              
-              <Progress value={benchmark.value} className="h-2" />
-              
-              <p className="text-xs text-muted-foreground">
-                {benchmark.description}
-              </p>
-            </div>
-          );
-        })}
+      <CardContent className="space-y-4">
+        {benchmarks.length > 0 ? (
+          benchmarks.map((benchmark) => {
+            const result =
+              benchmark.percentile == null
+                ? null
+                : getPercentileMessage(benchmark.percentile);
+            const Icon = result?.icon || Users;
 
-        <div className="pt-4 border-t">
-          <div className="flex items-center gap-2 mb-2">
-            <Zap className="h-4 w-4 text-blue-500" />
-            <span className="text-sm font-medium">Overall Ranking</span>
+            return (
+              <div
+                key={benchmark.courseId}
+                className="space-y-4 rounded-lg border p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">{benchmark.courseCode}</Badge>
+                      <span className="text-sm font-medium">
+                        {benchmark.courseName}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Based on {benchmark.gradedAssignments} graded Assignment
+                      {benchmark.gradedAssignments === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xl font-semibold">
+                      {benchmark.studentAverage.toFixed(1)}%
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Your average
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-md bg-muted/40 p-3">
+                    <p className="text-xs text-muted-foreground">
+                      Class Average
+                    </p>
+                    <p className="mt-1 font-semibold">
+                      {benchmark.classAverage.toFixed(1)}%
+                    </p>
+                  </div>
+                  <div className="rounded-md bg-muted/40 p-3">
+                    <p className="text-xs text-muted-foreground">
+                      Graded Students
+                    </p>
+                    <p className="mt-1 font-semibold">
+                      {benchmark.comparedStudents}
+                    </p>
+                  </div>
+                </div>
+
+                {benchmark.percentile == null ? (
+                  <div className="flex items-center gap-2 rounded-md bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                    <Users className="h-4 w-4 shrink-0" />
+                    At least two graded students are required for a percentile.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className={`flex items-center gap-2 ${result?.color}`}>
+                        <Icon className="h-4 w-4" />
+                        {result?.message}
+                      </span>
+                      <span className={`font-semibold ${result?.color}`}>
+                        {benchmark.percentile}th percentile
+                      </span>
+                    </div>
+                    <Progress value={benchmark.percentile} className="h-2" />
+                    <p className="text-xs text-muted-foreground">
+                      Your average performed better than approximately{" "}
+                      {benchmark.percentile}% of graded classmates in this
+                      course offering.
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        ) : (
+          <div className="rounded-lg border bg-muted/20 py-10 text-center">
+            <Target className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
+            <p className="font-medium">No graded Assignments yet</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Benchmarking appears after your lecturer saves an Assignment
+              grade.
+            </p>
           </div>
-          <div className="text-center p-4 bg-blue-50 rounded-lg">
-            <div className="text-2xl font-bold text-blue-600">Top 25%</div>
-            <div className="text-sm text-blue-700">Among all CS students</div>
-          </div>
-        </div>
+        )}
+
+        <p className="text-xs text-muted-foreground">
+          Only aggregated class statistics are shown. Individual classmates'
+          grades remain private.
+        </p>
       </CardContent>
     </Card>
   );
 }
 
-export function SocialActivityFeed() {
-  const activities = [
-    {
-      user: "Sarah Kim",
-      action: "completed",
-      target: "Database Design Assignment", 
-      course: "CS301",
-      time: "5m ago",
-      likes: 3,
-      comments: 1,
-      type: "achievement"
-    },
-    {
-      user: "Mike Chen", 
-      action: "shared",
-      target: "SQL Tutorial Notes",
-      course: "CS301",
-      time: "12m ago",
-      likes: 7,
-      comments: 2,
-      type: "share"
-    },
-    {
-      user: "Emma Wilson",
-      action: "asked a question in",
-      target: "Algorithm Discussion",
-      course: "CS205", 
-      time: "1h ago",
-      likes: 2,
-      comments: 5,
-      type: "question"
-    },
-    {
-      user: "Alex Johnson",
-      action: "earned badge",
-      target: "Week 3 Streak",
-      course: "",
-      time: "2h ago",
-      likes: 8,
-      comments: 0,
-      type: "badge"
-    }
-  ];
+const SOCIAL_ACTIVITY_PAGE_SIZE = 10;
 
-  const getActivityIcon = (type: string) => {
-    switch (type) {
-      case 'achievement': return Trophy;
-      case 'share': return Share2;
-      case 'question': return MessageCircle;
-      case 'badge': return Zap;
-      default: return Activity;
+interface SocialActivity {
+  id: string;
+  event_type:
+    | "assignment_submission"
+    | "course_material"
+    | "discussion"
+    | "achievement";
+  source_id: string;
+  title: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  actor_id: string;
+  actor_name: string;
+  actor_avatar_url: string | null;
+  actor_role: string;
+  course_id: string | null;
+  course_code: string | null;
+  course_name: string | null;
+}
+
+const formatActivityTime = (value: string) => {
+  const timestamp = new Date(value).getTime();
+  const differenceSeconds = Math.max(
+    0,
+    Math.floor((Date.now() - timestamp) / 1000)
+  );
+
+  if (differenceSeconds < 60) return "Just now";
+  if (differenceSeconds < 3600) {
+    return `${Math.floor(differenceSeconds / 60)}m ago`;
+  }
+  if (differenceSeconds < 86400) {
+    return `${Math.floor(differenceSeconds / 3600)}h ago`;
+  }
+  if (differenceSeconds < 604800) {
+    return `${Math.floor(differenceSeconds / 86400)}d ago`;
+  }
+  return new Date(value).toLocaleDateString();
+};
+
+export function SocialActivityFeed() {
+  const navigate = useNavigate();
+  const [activities, setActivities] = useState<SocialActivity[]>([]);
+  const [cursor, setCursor] = useState<{
+    createdAt: string;
+    id: string;
+  } | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState("");
+
+  const loadActivityPage = async (
+    before: { createdAt: string; id: string } | null,
+    replace: boolean
+  ) => {
+    if (replace) {
+      setIsLoading(true);
+      setLoadError("");
+    } else {
+      setIsLoadingMore(true);
+    }
+
+    try {
+      const { data, error } = await supabase.rpc("get_social_activity_feed", {
+        p_limit: SOCIAL_ACTIVITY_PAGE_SIZE + 1,
+        p_before_created_at: before?.createdAt || null,
+        p_before_id: before?.id || null,
+      });
+
+      if (error) throw error;
+
+      const rows = (data || []) as SocialActivity[];
+      const page = rows.slice(0, SOCIAL_ACTIVITY_PAGE_SIZE);
+      const lastRow = page[page.length - 1];
+
+      setActivities((current) =>
+        replace
+          ? page
+          : [
+              ...current,
+              ...page.filter(
+                (activity) =>
+                  !current.some((existing) => existing.id === activity.id)
+              ),
+            ]
+      );
+      setHasMore(rows.length > SOCIAL_ACTIVITY_PAGE_SIZE);
+      setCursor(
+        lastRow
+          ? { createdAt: lastRow.created_at, id: lastRow.id }
+          : before
+      );
+    } catch (error: unknown) {
+      console.error("Failed to load social activity:", error);
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Recent activity could not be loaded.",
+      );
+    } finally {
+      setIsLoading(false);
+      setIsLoadingMore(false);
     }
   };
 
-  const getActivityColor = (type: string) => {
+  useEffect(() => {
+    void loadActivityPage(null, true);
+  }, []);
+
+  const getActivityPresentation = (type: SocialActivity["event_type"]) => {
     switch (type) {
-      case 'achievement': return 'text-green-600';
-      case 'share': return 'text-blue-600';
-      case 'question': return 'text-purple-600';
-      case 'badge': return 'text-yellow-600';
-      default: return 'text-gray-600';
+      case "assignment_submission":
+        return {
+          action: "submitted",
+          icon: Target,
+          color: "text-green-600",
+          background: "bg-green-50 dark:bg-green-950/30",
+        };
+      case "course_material":
+        return {
+          action: "shared",
+          icon: Share2,
+          color: "text-blue-600",
+          background: "bg-blue-50 dark:bg-blue-950/30",
+        };
+      case "discussion":
+        return {
+          action: "started a discussion",
+          icon: MessageCircle,
+          color: "text-purple-600",
+          background: "bg-purple-50 dark:bg-purple-950/30",
+        };
+      case "achievement":
+        return {
+          action: "earned",
+          icon: Trophy,
+          color: "text-amber-600",
+          background: "bg-amber-50 dark:bg-amber-950/30",
+        };
+      default:
+        return {
+          action: "updated",
+          icon: Activity,
+          color: "text-muted-foreground",
+          background: "bg-muted",
+        };
+    }
+  };
+
+  const openActivity = (activity: SocialActivity) => {
+    if (activity.event_type === "discussion") {
+      navigate("/forum");
+      return;
+    }
+
+    if (activity.event_type === "achievement") {
+      navigate("/progress");
+      return;
+    }
+
+    if (activity.course_id) {
+      const assignmentId =
+        typeof activity.metadata?.assignment_id === "string"
+          ? activity.metadata.assignment_id
+          : null;
+      const assignmentQuery = assignmentId
+        ? `&assignmentId=${encodeURIComponent(assignmentId)}`
+        : "";
+      navigate(
+        `/courses?courseId=${encodeURIComponent(
+          activity.course_id
+        )}${assignmentQuery}`
+      );
     }
   };
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2">
           <Activity className="h-5 w-5" />
           Recent Activity
         </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Latest activity from your courses and classmates.
+        </p>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {activities.map((activity, index) => {
-          const Icon = getActivityIcon(activity.type);
-          const iconColor = getActivityColor(activity.type);
-          
-          return (
-            <div key={index} className="space-y-3">
-              <div className="flex items-start gap-3">
-                <Avatar className="h-8 w-8">
-                  <AvatarFallback className="text-xs">
-                    {activity.user.split(' ').map(n => n[0]).join('')}
-                  </AvatarFallback>
-                </Avatar>
-                
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Icon className={`h-4 w-4 ${iconColor}`} />
-                    <p className="text-sm">
-                      <span className="font-medium">{activity.user}</span>{' '}
-                      <span className="text-muted-foreground">{activity.action}</span>{' '}
-                      <span className="font-medium">{activity.target}</span>
-                      {activity.course && (
-                        <span className="text-muted-foreground"> in {activity.course}</span>
-                      )}
-                    </p>
-                  </div>
-                  
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span>{activity.time}</span>
-                    <button className="flex items-center gap-1 hover:text-red-500">
-                      <Heart className="h-3 w-3" />
-                      {activity.likes}
-                    </button>
-                    {activity.comments > 0 && (
-                      <button className="flex items-center gap-1 hover:text-blue-500">
-                        <MessageCircle className="h-3 w-3" />
-                        {activity.comments}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-
-        <Button variant="outline" className="w-full" size="sm">
-          <Eye className="h-4 w-4 mr-2" />
-          View All Activity
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-export function StudyGroups() {
-  const studyGroups = [
-    {
-      name: "Database Study Group",
-      course: "CS301",
-      members: 8,
-      online: 3,
-      nextSession: "Tonight 8 PM",
-      topic: "SQL Optimization"
-    },
-    {
-      name: "Algorithm Practice",
-      course: "CS205", 
-      members: 12,
-      online: 5,
-      nextSession: "Tomorrow 7 PM",
-      topic: "Dynamic Programming"
-    },
-    {
-      name: "Software Engineering Team",
-      course: "CS410",
-      members: 6,
-      online: 2,
-      nextSession: "Friday 6 PM", 
-      topic: "Design Patterns"
-    }
-  ];
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Users className="h-5 w-5" />
-          Study Groups
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {studyGroups.map((group, index) => (
-          <div key={index} className="p-3 border rounded-lg space-y-2">
-            <div className="flex items-start justify-between">
-              <div>
-                <h4 className="font-medium text-sm">{group.name}</h4>
-                <p className="text-xs text-muted-foreground">{group.course}</p>
-              </div>
-              <Badge variant="secondary" className="text-xs">
-                {group.online}/{group.members} online
-              </Badge>
-            </div>
-            
-            <div className="space-y-1">
-              <p className="text-xs">
-                <Clock className="h-3 w-3 inline mr-1" />
-                {group.nextSession}
-              </p>
-              <p className="text-xs text-muted-foreground">Topic: {group.topic}</p>
-            </div>
-            
-            <Button size="sm" variant="outline" className="w-full text-xs">
-              <UserPlus className="h-3 w-3 mr-1" />
-              Join Session
-            </Button>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex min-h-32 items-center justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
-        ))}
+        ) : loadError ? (
+          <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+            Recent activity is temporarily unavailable.
+          </div>
+        ) : activities.length === 0 ? (
+          <div className="rounded-md border border-dashed py-10 text-center">
+            <Activity className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
+            <p className="font-medium">No recent activity yet</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Course submissions, shared files, discussions and achievements
+              will appear here.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y">
+            {activities.map((activity) => {
+              const presentation = getActivityPresentation(activity.event_type);
+              const Icon = presentation.icon;
 
-        <Button variant="outline" className="w-full" size="sm">
-          <Plus className="h-4 w-4 mr-2" />
-          Create Study Group
-        </Button>
+              return (
+                <button
+                  type="button"
+                  key={activity.id}
+                  onClick={() => openActivity(activity)}
+                  className="flex w-full items-start gap-3 px-1 py-4 text-left transition-colors hover:bg-muted/40"
+                >
+                  <Avatar className="h-9 w-9 shrink-0">
+                    <AvatarImage src={activity.actor_avatar_url || undefined} />
+                    <AvatarFallback className="text-xs">
+                      {activity.actor_name
+                        .split(" ")
+                        .map((part) => part[0])
+                        .join("")
+                        .slice(0, 2)}
+                    </AvatarFallback>
+                  </Avatar>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
+                      <span className="font-semibold">
+                        {activity.actor_name}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {presentation.action}
+                      </span>
+                      <span className="font-medium">{activity.title}</span>
+                      {activity.course_code && (
+                        <Badge variant="outline" className="ml-1 text-[10px]">
+                          {activity.course_code}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                      <span
+                        className={`rounded-md p-1 ${presentation.background}`}
+                      >
+                        <Icon className={`h-3.5 w-3.5 ${presentation.color}`} />
+                      </span>
+                      <span>{formatActivityTime(activity.created_at)}</span>
+                      {activity.course_name && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="truncate">{activity.course_name}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {hasMore && !loadError && (
+          <Button
+            variant="outline"
+            className="mt-4 w-full"
+            size="sm"
+            disabled={isLoadingMore}
+            onClick={() => void loadActivityPage(cursor, false)}
+          >
+            {isLoadingMore ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <ChevronDown className="mr-2 h-4 w-4" />
+            )}
+            Load More
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

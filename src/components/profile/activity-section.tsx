@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card"
 import { Heart, MessageSquare, UserPlus, FileText } from "lucide-react"
 
 interface Activity {
-  id: number
+  id: string
   type: string
   content: string
   time: string

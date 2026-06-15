@@ -14,7 +14,7 @@ import { Separator } from "./ui/separator";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Skeleton } from "./ui/skeleton";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -312,9 +312,9 @@ const ProfileSettings = memo(() => {
       });
 
       if (error) throw error;
-      toast.success("Profile updated successfully.");
+      notify.success("Profile updated successfully.");
     } catch (err) {
-      toast.error("Failed to update profile: " + getErrorMessage(err));
+      notify.error(err, "Failed to update profile.");
     } finally {
       setIsSavingProfile(false);
     }
@@ -639,17 +639,23 @@ const SecurityTab = memo(({ settings, updateSetting }: SettingsTabProps) => {
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pwdForm.new !== pwdForm.confirm) return toast.error("Passwords do not match");
-    if (pwdForm.new.length < 8) return toast.error("Password must be at least 8 characters");
+    if (pwdForm.new !== pwdForm.confirm) {
+      notify.warning("Passwords do not match.");
+      return;
+    }
+    if (pwdForm.new.length < 8) {
+      notify.warning("Password must be at least 8 characters.");
+      return;
+    }
 
     setIsChangingPwd(true);
     try {
       const { error } = await supabase.auth.updateUser({ password: pwdForm.new });
       if (error) throw error;
-      toast.success("Password updated successfully");
+      notify.success("Password updated successfully.");
       setPwdForm({ new: "", confirm: "" });
     } catch (err) {
-      toast.error(getErrorMessage(err) || "Failed to update password");
+      notify.error(err, "Failed to update password.");
     } finally {
       setIsChangingPwd(false);
     }
@@ -657,7 +663,7 @@ const SecurityTab = memo(({ settings, updateSetting }: SettingsTabProps) => {
 
   const handleDeleteAccount = async () => {
     if (deleteConfirm.trim().toUpperCase() !== "DELETE") {
-      toast.error("Type DELETE to confirm account deletion.");
+      notify.warning("Type DELETE to confirm account deletion.");
       return;
     }
 
@@ -667,7 +673,7 @@ const SecurityTab = memo(({ settings, updateSetting }: SettingsTabProps) => {
       await supabase.auth.signOut();
       window.location.href = "/login";
     } catch (err) {
-      toast.error("Failed to delete account: " + getErrorMessage(err));
+      notify.error(err, "Failed to delete account.");
     }
   };
 

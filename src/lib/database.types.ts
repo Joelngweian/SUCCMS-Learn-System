@@ -187,6 +187,10 @@ export type Database = {
           marked_present: boolean | null
           marked_at: string
           marked_by: string
+          session_id: string | null
+          status: string
+          check_in_at: string | null
+          check_in_method: string | null
         },
         "course_id" | "student_id" | "class_date" | "marked_by",
         [
@@ -207,6 +211,45 @@ export type Database = {
           {
             foreignKeyName: "attendance_student_id_fkey"
             columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "attendance_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      attendance_sessions: Table<
+        {
+          id: string
+          course_id: string
+          class_date: string
+          check_in_code: string
+          status: string
+          starts_at: string
+          ends_at: string
+          closed_at: string | null
+          created_by: string
+          created_at: string
+          updated_at: string
+        },
+        "course_id" | "class_date" | "check_in_code" | "ends_at" | "created_by",
+        [
+          {
+            foreignKeyName: "attendance_sessions_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_sessions_created_by_fkey"
+            columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
             referencedColumns: ["id"]
@@ -569,6 +612,10 @@ export type Database = {
           rank: number | null
           total_assignments_completed: number | null
           attendance_percentage: number | null
+          total_xp: number
+          weekly_xp: number
+          level: number
+          week_start_date: string | null
           updated_at: string
         },
         "student_id",
@@ -690,6 +737,187 @@ export type Database = {
           },
         ]
       >
+      social_activity_events: Table<
+        {
+          id: string
+          actor_id: string
+          course_id: string | null
+          event_type: string
+          source_table: string
+          source_id: string
+          title: string
+          metadata: Json
+          created_at: string
+        },
+        "actor_id" | "event_type" | "source_table" | "source_id" | "title",
+        [
+          {
+            foreignKeyName: "social_activity_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "social_activity_events_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      study_group_members: Table<
+        {
+          id: string
+          group_id: string
+          user_id: string
+          role: string
+          joined_at: string
+        },
+        "group_id" | "user_id",
+        [
+          {
+            foreignKeyName: "study_group_members_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "study_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_group_members_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      study_group_posts: Table<
+        {
+          id: string
+          group_id: string
+          author_id: string
+          post_type: string
+          title: string | null
+          content: string
+          resource_url: string | null
+          attachment_name: string | null
+          attachment_path: string | null
+          attachment_type: string | null
+          attachment_size: number | null
+          created_at: string
+          updated_at: string
+        },
+        "group_id" | "author_id",
+        [
+          {
+            foreignKeyName: "study_group_posts_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "study_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_group_posts_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      study_group_session_attendees: Table<
+        {
+          id: string
+          session_id: string
+          user_id: string
+          status: string
+          responded_at: string
+        },
+        "session_id" | "user_id",
+        [
+          {
+            foreignKeyName: "study_group_session_attendees_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "study_group_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_group_session_attendees_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      study_group_sessions: Table<
+        {
+          id: string
+          group_id: string
+          created_by: string
+          title: string
+          description: string
+          starts_at: string
+          ends_at: string
+          location_type: string
+          location_text: string | null
+          meeting_url: string | null
+          max_attendees: number | null
+          reminder_sent_at: string | null
+          created_at: string
+          updated_at: string
+        },
+        "group_id" | "created_by" | "title" | "starts_at" | "ends_at" | "location_type",
+        [
+          {
+            foreignKeyName: "study_group_sessions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_group_sessions_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "study_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      study_groups: Table<
+        {
+          id: string
+          course_id: string
+          name: string
+          description: string
+          created_by: string
+          max_members: number
+          status: string
+          created_at: string
+          updated_at: string
+        },
+        "course_id" | "name" | "created_by",
+        [
+          {
+            foreignKeyName: "study_groups_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_groups_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
       stories: Table<
         {
           id: string
@@ -803,6 +1031,24 @@ export type Database = {
           },
         ]
       >
+      student_xp_summary: Table<
+        {
+          student_id: string
+          total_xp: number
+          level: number
+          updated_at: string
+        },
+        "student_id",
+        [
+          {
+            foreignKeyName: "student_xp_summary_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: true
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
       user_achievements: Table<
         {
           id: string
@@ -877,6 +1123,52 @@ export type Database = {
         },
         "user_id"
       >
+      weekly_xp_summary: Table<
+        {
+          student_id: string
+          week_start_date: string
+          weekly_xp: number
+          updated_at: string
+        },
+        "student_id" | "week_start_date",
+        [
+          {
+            foreignKeyName: "weekly_xp_summary_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      xp_events: Table<
+        {
+          id: string
+          student_id: string
+          source_type: string
+          source_id: string
+          xp_amount: number
+          earned_at: string
+          week_start_date: string
+          created_at: string
+          updated_at: string
+        },
+        | "student_id"
+        | "source_type"
+        | "source_id"
+        | "xp_amount"
+        | "earned_at"
+        | "week_start_date",
+        [
+          {
+            foreignKeyName: "xp_events_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
     }
     Views: {
       active_stories_summary: {
@@ -934,6 +1226,34 @@ export type Database = {
         Args: { target_course_id: string }
         Returns: boolean
       }
+      check_in_attendance: {
+        Args: { p_course_id: string; p_code: string }
+        Returns: Json
+      }
+      correct_attendance_session_date: {
+        Args: { p_session_id: string; p_new_date: string }
+        Returns: Json
+      }
+      course_id_from_storage_path: {
+        Args: { object_name: string }
+        Returns: string | null
+      }
+      course_material_parent_matches: {
+        Args: {
+          target_parent_id: string | null
+          target_course_id: string
+        }
+        Returns: boolean
+      }
+      create_study_group: {
+        Args: {
+          p_course_id: string
+          p_name: string
+          p_description?: string
+          p_max_members?: number
+        }
+        Returns: string
+      }
       create_course_offering: {
         Args: { p_course_id: string; p_academic_term_id?: string }
         Returns: string
@@ -959,9 +1279,17 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: undefined
       }
+      delete_attendance_class: {
+        Args: { p_session_id: string }
+        Returns: Json
+      }
       drop_course_offering: {
         Args: { p_offering_id: string }
         Returns: boolean
+      }
+      dispatch_study_session_reminders: {
+        Args: Record<PropertyKey, never>
+        Returns: number
       }
       evaluate_achievement_from_activity: {
         Args: Record<PropertyKey, never>
@@ -990,6 +1318,28 @@ export type Database = {
           joined_at: string
         }[]
       }
+      get_assignment_peer_benchmarks: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          course_id: string
+          course_code: string
+          course_name: string
+          student_average: number
+          class_average: number
+          percentile: number | null
+          compared_students: number
+          graded_assignments: number
+        }[]
+      }
+      get_my_xp_progress: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          total_xp: number
+          level: number
+          weekly_xp: number
+          weekly_rank: number | null
+        }[]
+      }
       get_course_offering_name: {
         Args: { target_offering_id: string }
         Returns: string
@@ -997,6 +1347,86 @@ export type Database = {
       get_profile_visibility: {
         Args: { target_user_id: string }
         Returns: string
+      }
+      get_social_activity_feed: {
+        Args: {
+          p_limit?: number
+          p_before_created_at?: string | null
+          p_before_id?: string | null
+        }
+        Returns: {
+          id: string
+          event_type: string
+          source_id: string
+          title: string
+          metadata: Json
+          created_at: string
+          actor_id: string
+          actor_name: string
+          actor_avatar_url: string | null
+          actor_role: string
+          course_id: string | null
+          course_code: string | null
+          course_name: string | null
+        }[]
+      }
+      get_weekly_xp_leaderboard: {
+        Args: { p_limit?: number }
+        Returns: {
+          student_id: string
+          full_name: string
+          avatar_url: string | null
+          weekly_xp: number
+          total_xp: number
+          level: number
+          rank: number
+        }[]
+      }
+      get_study_groups: {
+        Args: {
+          p_limit?: number
+          p_before_created_at?: string | null
+          p_before_id?: string | null
+          p_course_id?: string | null
+          p_search?: string | null
+          p_joined_only?: boolean
+        }
+        Returns: {
+          id: string
+          course_id: string
+          name: string
+          description: string
+          max_members: number
+          status: string
+          created_at: string
+          creator_id: string
+          creator_name: string
+          creator_avatar_url: string | null
+          course_code: string
+          course_name: string
+          member_count: number
+          is_member: boolean
+          is_owner: boolean
+          next_session_start: string | null
+          next_session_title: string | null
+        }[]
+      }
+      get_my_upcoming_study_sessions: {
+        Args: { p_limit?: number }
+        Returns: {
+          id: string
+          group_id: string
+          group_name: string
+          course_code: string
+          title: string
+          starts_at: string
+          ends_at: string
+          location_type: string
+          location_text: string | null
+          meeting_url: string | null
+          attendee_count: number
+          is_going: boolean
+        }[]
       }
       handle_new_user: {
         Args: Record<PropertyKey, never>
@@ -1012,6 +1442,36 @@ export type Database = {
       }
       is_course_instructor: {
         Args: { target_course_id: string }
+        Returns: boolean
+      }
+      is_course_manager: {
+        Args: {
+          target_course_id: string
+          target_user_id?: string
+        }
+        Returns: boolean
+      }
+      is_course_member: {
+        Args: {
+          target_course_id: string
+          target_user_id?: string
+        }
+        Returns: boolean
+      }
+      is_study_group_member: {
+        Args: { target_group_id: string; target_user_id?: string }
+        Returns: boolean
+      }
+      is_study_group_owner: {
+        Args: { target_group_id: string; target_user_id?: string }
+        Returns: boolean
+      }
+      join_study_group: {
+        Args: { p_group_id: string }
+        Returns: boolean
+      }
+      leave_study_group: {
+        Args: { p_group_id: string }
         Returns: boolean
       }
       notification_preference_enabled: {
@@ -1046,6 +1506,14 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: unknown
       }
+      remove_study_group_member: {
+        Args: { p_group_id: string; p_user_id: string }
+        Returns: boolean
+      }
+      set_study_session_attendance: {
+        Args: { p_session_id: string; p_attending: boolean }
+        Returns: boolean
+      }
       notify_forum_reaction: {
         Args: Record<PropertyKey, never>
         Returns: unknown
@@ -1066,15 +1534,7 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: unknown
       }
-      refresh_progress_leaderboard: {
-        Args: Record<PropertyKey, never>
-        Returns: undefined
-      }
       set_report_severity: {
-        Args: Record<PropertyKey, never>
-        Returns: unknown
-      }
-      trigger_refresh_progress_leaderboard: {
         Args: Record<PropertyKey, never>
         Returns: unknown
       }

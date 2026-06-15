@@ -7,13 +7,20 @@ import './styles/globals.css'
 import './styles/accessibility.css'
 import { AuthProvider } from '@/contexts/AuthContext.tsx'
 import { ThemeProvider } from '@/components/ThemeProvider'
+import { OnlinePresenceProvider } from '@/hooks/useOnlinePresence'
+import { Toaster } from '@/components/ui/sonner'
+import { GlobalConfirmDialog } from '@/components/GlobalConfirmDialog'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <AuthProvider>
-          <App />
+          <OnlinePresenceProvider>
+            <App />
+            <GlobalConfirmDialog />
+            <Toaster position="top-right" richColors closeButton />
+          </OnlinePresenceProvider>
         </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>

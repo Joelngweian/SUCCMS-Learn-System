@@ -1,16 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import {
   COURSE_OFFERING_SELECT,
   normalizeCourseOffering,
+  type NormalizedCourseOffering,
 } from "@/lib/courseOfferings";
+import type { Database } from "@/lib/database.types";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Button } from "./ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import {
+  PeerBenchmarking,
+  type AssignmentBenchmark,
+} from "./SocialWidgets";
 import {
   Trophy,
   Target,
@@ -31,10 +37,17 @@ interface LeaderboardEntry {
   name: string;
   avatarUrl?: string;
   rank: number | null;
-  averageScore: number;
-  completedAssignments: number;
-  attendancePercentage: number;
+  totalXp: number;
+  weeklyXp: number;
+  level: number;
   isUser: boolean;
+}
+
+interface XpProgress {
+  totalXp: number;
+  level: number;
+  weeklyXp: number;
+  weeklyRank: number | null;
 }
 
 interface Achievement {
@@ -65,6 +78,21 @@ interface Milestone {
   date: string;
   type: "course" | "submission" | "grade" | "discussion";
 }
+
+type AssignmentRow = Pick<
+  Database["public"]["Tables"]["assignments"]["Row"],
+  "id" | "course_id" | "title" | "max_score"
+>;
+type SubmissionRow = Pick<
+  Database["public"]["Tables"]["assignment_submissions"]["Row"],
+  "id" | "assignment_id" | "submitted_at" | "grade"
+>;
+type GradeRow = Database["public"]["Tables"]["student_grades"]["Row"];
+
+type EffectiveGrade = Pick<
+  GradeRow,
+  "id" | "course_id" | "assignment_id" | "score" | "max_score" | "graded_at"
+>;
 
 const calculateStreak = (dates: string[]) => {
   const uniqueDays = Array.from(
@@ -101,10 +129,15 @@ const formatPercentage = (value: number | null) =>
 
 export function Gamification() {
   const { user, profile } = useAuth();
+  const userId = user?.id;
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [xpProgress, setXpProgress] = useState<XpProgress | null>(null);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [assignmentBenchmarks, setAssignmentBenchmarks] = useState<
+    AssignmentBenchmark[]
+  >([]);
   const [achievementDates, setAchievementDates] = useState<Record<string, string>>({});
   const [metrics, setMetrics] = useState({
     enrolledCourses: 0,
@@ -122,21 +155,17 @@ export function Gamification() {
   });
 
   useEffect(() => {
-    if (user) loadProgressData();
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
 
     const channel = supabase
-      .channel(`user-achievements:${user.id}`)
+      .channel(`user-achievements:${userId}`)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "user_achievements",
-          filter: `user_id=eq.${user.id}`,
+          filter: `user_id=eq.${userId}`,
         },
         (payload) => {
           const achievement = payload.new as {
@@ -157,10 +186,10 @@ export function Gamification() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user?.id]);
+  }, [userId]);
 
-  const loadProgressData = async () => {
-    if (!user) return;
+  const loadProgressData = useCallback(async () => {
+    if (!userId) return;
 
     setIsLoading(true);
     setLoadError("");
@@ -174,45 +203,42 @@ export function Gamification() {
         replyResult,
         loginResult,
         leaderboardResult,
+        xpProgressResult,
+        benchmarkResult,
       ] = await Promise.all([
         supabase
           .from("course_enrollments")
           .select(`course_id, enrolled_at, course_offerings(${COURSE_OFFERING_SELECT})`)
-          .eq("student_id", user.id),
+          .eq("student_id", userId),
         supabase
           .from("student_grades")
           .select("id, course_id, assignment_id, score, max_score, graded_at")
-          .eq("student_id", user.id)
+          .eq("student_id", userId)
           .order("graded_at", { ascending: false }),
         supabase
           .from("attendance")
           .select("id, course_id, class_date, marked_present")
-          .eq("student_id", user.id)
+          .eq("student_id", userId)
           .order("class_date", { ascending: false }),
         supabase
           .from("forum_threads")
           .select("id, title, created_at")
-          .eq("author_id", user.id)
+          .eq("author_id", userId)
           .order("created_at", { ascending: false }),
         supabase
           .from("forum_replies")
           .select("id, created_at")
-          .eq("author_id", user.id)
+          .eq("author_id", userId)
           .order("created_at", { ascending: false }),
         supabase
           .from("login_history")
           .select("id, login_time")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .order("login_time", { ascending: false })
           .limit(100),
-        supabase
-          .from("leaderboard")
-          .select(
-            "student_id, average_score, rank, total_assignments_completed, attendance_percentage"
-          )
-          .is("course_id", null)
-          .order("rank", { ascending: true })
-          .limit(50),
+        supabase.rpc("get_weekly_xp_leaderboard", { p_limit: 50 }),
+        supabase.rpc("get_my_xp_progress"),
+        supabase.rpc("get_assignment_peer_benchmarks"),
       ]);
 
       if (enrollmentResult.error) throw enrollmentResult.error;
@@ -226,12 +252,62 @@ export function Gamification() {
       const replyRows = replyResult.data || [];
       const loginRows = loginResult.data || [];
       const leaderboardRows = leaderboardResult.data || [];
+      const xpProgressRow = xpProgressResult.data?.[0];
+
+      if (leaderboardResult.error) {
+        console.warn(
+          "Weekly XP leaderboard could not be loaded:",
+          leaderboardResult.error
+        );
+        setLeaderboard([]);
+      }
+
+      if (xpProgressResult.error) {
+        console.warn(
+          "XP progress could not be loaded:",
+          xpProgressResult.error
+        );
+        setXpProgress(null);
+      } else {
+        setXpProgress({
+          totalXp: Number(xpProgressRow?.total_xp) || 0,
+          level: Number(xpProgressRow?.level) || 1,
+          weeklyXp: Number(xpProgressRow?.weekly_xp) || 0,
+          weeklyRank:
+            xpProgressRow?.weekly_rank == null
+              ? null
+              : Number(xpProgressRow.weekly_rank),
+        });
+      }
+
+      if (benchmarkResult.error) {
+        console.warn(
+          "Assignment peer benchmarks could not be loaded:",
+          benchmarkResult.error
+        );
+        setAssignmentBenchmarks([]);
+      } else {
+        setAssignmentBenchmarks(
+          (benchmarkResult.data || []).map((row) => ({
+            courseId: row.course_id,
+            courseCode: row.course_code,
+            courseName: row.course_name,
+            studentAverage: Number(row.student_average) || 0,
+            classAverage: Number(row.class_average) || 0,
+            percentile:
+              row.percentile == null ? null : Number(row.percentile),
+            comparedStudents: Number(row.compared_students) || 0,
+            gradedAssignments: Number(row.graded_assignments) || 0,
+          }))
+        );
+      }
+
       const courseIds = enrollmentRows
-        .map((row: any) => row.course_id)
+        .map((row) => row.course_id)
         .filter(Boolean);
 
-      let assignmentRows: any[] = [];
-      let submissionRows: any[] = [];
+      let assignmentRows: AssignmentRow[] = [];
+      let submissionRows: SubmissionRow[] = [];
 
       if (courseIds.length > 0) {
         const assignmentResult = await supabase
@@ -242,12 +318,12 @@ export function Gamification() {
         if (assignmentResult.error) throw assignmentResult.error;
         assignmentRows = assignmentResult.data || [];
 
-        const assignmentIds = assignmentRows.map((assignment: any) => assignment.id);
+        const assignmentIds = assignmentRows.map((assignment) => assignment.id);
         if (assignmentIds.length > 0) {
           const submissionResult = await supabase
             .from("assignment_submissions")
             .select("id, assignment_id, submitted_at, grade")
-            .eq("student_id", user.id)
+            .eq("student_id", userId)
             .in("assignment_id", assignmentIds)
             .order("submitted_at", { ascending: false });
 
@@ -257,29 +333,29 @@ export function Gamification() {
       }
 
       const assignmentById = new Map(
-        assignmentRows.map((assignment: any) => [assignment.id, assignment])
+        assignmentRows.map((assignment) => [assignment.id, assignment])
       );
-      const courseById = new Map(
+      const courseById = new Map<string, NormalizedCourseOffering>(
         enrollmentRows
-          .map((row: any) => normalizeCourseOffering(row.course_offerings))
-          .filter((course: any) => course.id)
-          .map((course: any) => [course.id, course])
+          .map((row) => normalizeCourseOffering(row.course_offerings))
+          .filter((course) => course.id)
+          .map((course) => [course.id, course])
       );
       const recordedGradeAssignments = new Set(
         gradeRows
-          .map((grade: any) => grade.assignment_id)
+          .map((grade) => grade.assignment_id)
           .filter(Boolean)
       );
-      const effectiveGradeRows = [
+      const effectiveGradeRows: EffectiveGrade[] = [
         ...gradeRows,
         ...submissionRows
           .filter(
-            (submission: any) =>
+            (submission) =>
               submission.grade != null &&
               !recordedGradeAssignments.has(submission.assignment_id)
           )
-          .map((submission: any) => {
-            const assignment: any = assignmentById.get(submission.assignment_id);
+          .map((submission) => {
+            const assignment = assignmentById.get(submission.assignment_id);
             return {
               id: `submission-${submission.id}`,
               course_id: assignment?.course_id,
@@ -293,75 +369,56 @@ export function Gamification() {
 
       const overallAverage =
         effectiveGradeRows.length > 0
-          ? effectiveGradeRows.reduce((sum: number, grade: any) => {
+          ? effectiveGradeRows.reduce((sum, grade) => {
               const maxScore = Number(grade.max_score) || 100;
               return sum + (Number(grade.score) / maxScore) * 100;
             }, 0) / effectiveGradeRows.length
           : null;
-      const perfectScores = effectiveGradeRows.filter((grade: any) => {
+      const perfectScores = effectiveGradeRows.filter((grade) => {
         const maxScore = Number(grade.max_score) || 100;
         return (Number(grade.score) / maxScore) * 100 >= 100;
       }).length;
       const overallAttendance =
         attendanceRows.length > 0
-          ? (attendanceRows.filter((record: any) => record.marked_present).length /
+          ? (attendanceRows.filter((record) => record.marked_present).length /
               attendanceRows.length) *
             100
           : null;
       const activityDates = [
-        ...loginRows.map((row: any) => row.login_time),
-        ...submissionRows.map((row: any) => row.submitted_at),
-        ...threadRows.map((row: any) => row.created_at),
-        ...replyRows.map((row: any) => row.created_at),
+        ...loginRows.map((row) => row.login_time),
+        ...submissionRows.map((row) => row.submitted_at),
+        ...threadRows.map((row) => row.created_at),
+        ...replyRows.map((row) => row.created_at),
       ];
 
-      const leaderboardStudentIds = leaderboardRows
-        .map((row: any) => row.student_id)
-        .filter(Boolean);
-      let leaderboardProfiles: any[] = [];
-
-      if (leaderboardStudentIds.length > 0) {
-        const profileResult = await supabase
-          .from("user_profiles")
-          .select("id, full_name, avatar_url")
-          .in("id", leaderboardStudentIds);
-
-        if (profileResult.error) throw profileResult.error;
-        leaderboardProfiles = profileResult.data || [];
-      }
-
-      const profilesById = new Map(
-        leaderboardProfiles.map((row: any) => [row.id, row])
-      );
-      const leaderboardEntries = leaderboardRows.map((row: any) => {
-        const student: any = profilesById.get(row.student_id);
+      const leaderboardEntries: LeaderboardEntry[] = leaderboardRows.map((row) => {
         return {
           studentId: row.student_id,
           name:
-            row.student_id === user.id
+            row.student_id === userId
               ? "You"
-              : student?.full_name || "Student",
+              : row.full_name || "Student",
           avatarUrl:
-            row.student_id === user.id
-              ? profile?.avatar_url || student?.avatar_url
-              : student?.avatar_url,
+            row.student_id === userId
+              ? profile?.avatar_url || row.avatar_url
+              : row.avatar_url,
           rank: row.rank == null ? null : Number(row.rank),
-          averageScore: Number(row.average_score) || 0,
-          completedAssignments: Number(row.total_assignments_completed) || 0,
-          attendancePercentage: Number(row.attendance_percentage) || 0,
-          isUser: row.student_id === user.id,
+          totalXp: Number(row.total_xp) || 0,
+          weeklyXp: Number(row.weekly_xp) || 0,
+          level: Number(row.level) || 1,
+          isUser: row.student_id === userId,
         };
       });
 
       const milestoneRows: Milestone[] = [
-        ...enrollmentRows.map((row: any) => ({
+        ...enrollmentRows.map((row) => ({
           id: `course-${row.course_id}`,
           title: `Enrolled in ${normalizeCourseOffering(row.course_offerings).name || "a course"}`,
           date: row.enrolled_at,
           type: "course" as const,
         })),
-        ...submissionRows.map((row: any) => {
-          const assignment: any = assignmentById.get(row.assignment_id);
+        ...submissionRows.map((row) => {
+          const assignment = assignmentById.get(row.assignment_id);
           return {
             id: `submission-${row.id}`,
             title: `Submitted ${assignment?.title || "an assignment"}`,
@@ -369,8 +426,8 @@ export function Gamification() {
             type: "submission" as const,
           };
         }),
-        ...effectiveGradeRows.map((row: any) => {
-          const course: any = courseById.get(row.course_id);
+        ...effectiveGradeRows.map((row) => {
+          const course = courseById.get(row.course_id);
           return {
             id: `grade-${row.id}`,
             title: `Received a grade in ${course?.name || "a course"}`,
@@ -378,7 +435,7 @@ export function Gamification() {
             type: "grade" as const,
           };
         }),
-        ...threadRows.map((row: any) => ({
+        ...threadRows.map((row) => ({
           id: `thread-${row.id}`,
           title: `Started discussion: ${row.title}`,
           date: row.created_at,
@@ -389,16 +446,15 @@ export function Gamification() {
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
         .slice(0, 3);
 
-      const currentLeaderboard = leaderboardEntries.find((entry) => entry.isUser);
       const achievementResult = await supabase
         .from("user_achievements")
         .select("achievement_code, earned_at")
-        .eq("user_id", user.id);
+        .eq("user_id", userId);
 
       if (!achievementResult.error) {
         setAchievementDates(
           Object.fromEntries(
-            (achievementResult.data || []).map((achievement: any) => [
+            (achievementResult.data || []).map((achievement) => [
               achievement.achievement_code,
               achievement.earned_at,
             ])
@@ -418,17 +474,28 @@ export function Gamification() {
         attendanceRate: overallAttendance,
         discussionCount: threadRows.length + replyRows.length,
         replyCount: replyRows.length,
-        attendedClasses: attendanceRows.filter((record: any) => record.marked_present).length,
+        attendedClasses: attendanceRows.filter((record) => record.marked_present).length,
         streak: calculateStreak(activityDates),
-        rank: currentLeaderboard?.rank || null,
+        rank:
+          xpProgressRow?.weekly_rank == null
+            ? null
+            : Number(xpProgressRow.weekly_rank),
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to load progress data:", error);
-      setLoadError(error?.message || "Could not load progress data.");
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Could not load progress data.",
+      );
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [profile?.avatar_url, userId]);
+
+  useEffect(() => {
+    if (userId) void loadProgressData();
+  }, [loadProgressData, userId]);
 
   const achievements = useMemo<Achievement[]>(() => {
     const firstSubmission = milestones
@@ -493,7 +560,7 @@ export function Gamification() {
   }, [metrics, milestones, achievementDates]);
 
   const earnedAchievements = achievements.filter((achievement) => achievement.earned);
-  const xp =
+  const calculatedXp =
     metrics.submittedAssignments * 100 +
     metrics.discussionCount * 20 +
     metrics.attendedClasses * 25 +
@@ -501,7 +568,8 @@ export function Gamification() {
       (total, achievement) => total + achievement.xpReward,
       0
     );
-  const level = Math.floor(xp / 500) + 1;
+  const xp = xpProgress?.totalXp ?? calculatedXp;
+  const level = xpProgress?.level ?? Math.floor(xp / 500) + 1;
   const xpToNext = level * 500;
   const completionRate =
     metrics.totalAssignments > 0
@@ -576,16 +644,6 @@ export function Gamification() {
       case "social": return <Users className="h-4 w-4" />;
       default: return <Star className="h-4 w-4" />;
     }
-  };
-
-  const getLeaderboardXp = (entry: LeaderboardEntry) => {
-    if (entry.isUser) return xp;
-
-    return (
-      entry.completedAssignments * 100 +
-      Math.round(entry.averageScore) * 5 +
-      Math.round(entry.attendancePercentage) * 2
-    );
   };
 
   const getMilestoneStyle = (type: Milestone["type"]) => {
@@ -666,7 +724,7 @@ export function Gamification() {
               <div className="text-2xl font-bold">
                 {metrics.rank == null ? "--" : `#${metrics.rank}`}
               </div>
-              <p className="text-sm text-muted-foreground">Global Rank</p>
+              <p className="text-sm text-muted-foreground">Weekly Rank</p>
             </div>
           </CardContent>
         </Card>
@@ -809,8 +867,6 @@ export function Gamification() {
             <CardContent className="space-y-3">
               {leaderboard.length > 0 ? (
                 leaderboard.map((entry) => {
-                  const entryXp = getLeaderboardXp(entry);
-                  const entryLevel = Math.floor(entryXp / 500) + 1;
                   const badge =
                     entry.rank === 1
                       ? "🏆"
@@ -844,11 +900,14 @@ export function Gamification() {
                         <p className={`font-medium ${entry.isUser ? 'text-primary' : ''}`}>
                           {entry.name}
                         </p>
-                        <p className="text-sm text-muted-foreground">Level {entryLevel}</p>
+                        <p className="text-sm text-muted-foreground">Level {entry.level}</p>
                       </div>
 
                       <div className="text-right">
-                        <p className="font-medium">{entryXp.toLocaleString()} XP</p>
+                        <p className="font-medium">
+                          {entry.weeklyXp.toLocaleString()} XP
+                        </p>
+                        <p className="text-xs text-muted-foreground">this week</p>
                       </div>
                     </div>
                   );
@@ -863,6 +922,8 @@ export function Gamification() {
         </TabsContent>
 
         <TabsContent value="benchmarks" className="space-y-6">
+          <PeerBenchmarking benchmarks={assignmentBenchmarks} />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Study Goals */}
             <Card>

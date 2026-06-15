@@ -13,8 +13,9 @@ import { Badge } from "./components/ui/badge";
 import {
   LayoutDashboard, BookOpen, MessageSquare, FileText, Trophy,
   Settings, HelpCircle, LogOut, Menu, X, Search, Moon, Sun,
-  Shield, GraduationCap, UserCog, ClipboardList, BarChart3
+  Shield, GraduationCap, UserCog, ClipboardList, BarChart3, UsersRound
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 const StudentDashboard = lazy(() =>
   import("./components/StudentDashboard").then((module) => ({
@@ -76,6 +77,11 @@ const LecturerAnalytics = lazy(() =>
     default: module.LecturerAnalytics,
   }))
 );
+const StudyGroupsPage = lazy(() =>
+  import("./components/StudyGroupsPage").then((module) => ({
+    default: module.StudyGroupsPage,
+  }))
+);
 
 const PageLoadingFallback = () => (
   <div className="flex min-h-[420px] items-center justify-center">
@@ -89,7 +95,7 @@ type UserRole = 'student' | 'lecturer' | 'admin';
 type NavigationItem = {
   id: string; // Used as the URL path
   label: string;
-  icon: any;
+  icon: LucideIcon;
   description: string;
   badge?: string;
 };
@@ -192,6 +198,7 @@ export default function App() {
         badge: crucialCount > 0 ? crucialCount.toString() : undefined // Dynamic Badge
     },
     { id: 'forum', label: 'Discussions', icon: MessageSquare, description: 'Course discussions & Q&A' },
+    { id: 'study-groups', label: 'Study Groups', icon: UsersRound, description: 'Study sessions & shared resources' },
     { id: 'progress', label: 'My Progress', icon: Trophy, description: 'Grades & peer benchmarking' }
   ];
 
@@ -371,6 +378,7 @@ export default function App() {
                     <Route path="/courses" element={<StudentCourses />} />
                     <Route path="/assignments" element={<Assignments />} />
                     <Route path="/forum" element={<Forum />} />
+                    <Route path="/study-groups" element={<StudyGroupsPage />} />
                     <Route path="/progress" element={<Gamification />} />
                   </>
                 )}

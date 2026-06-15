@@ -21,20 +21,53 @@ interface AuthContextType {
   profile: UserProfile | null;
   session: Session | null;
   isLoading: boolean;
-  signIn: (email: string, password: string) => Promise<any>;
-  signUp: (email: string, password: string, username: string, fullName: string, role: 'student' | 'lecturer' | 'admin') => Promise<any>;
-  signOut: () => Promise<any>;
-  updateProfile: (updates: Partial<UserProfile>) => Promise<any>; 
+  signIn: (email: string, password: string) => Promise<AuthActionResult>;
+  signUp: (email: string, password: string, username: string, fullName: string, role: 'student' | 'lecturer' | 'admin') => Promise<AuthActionResult>;
+  signOut: () => Promise<void>;
+  updateProfile: (updates: Partial<UserProfile>) => Promise<ProfileUpdateResult>;
   refreshProfile: () => Promise<void>; 
 }
 
+type AuthActionResult = {
+  data: unknown;
+  error: { message: string } | null;
+};
+
+type ProfileUpdateResult = {
+  data?: UserProfile | null;
+  error: unknown;
+};
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const getLoginClientInfo = () => {
+  const userAgent = navigator.userAgent;
+  const browser =
+    userAgent.includes('Edg/')
+      ? 'Microsoft Edge'
+      : userAgent.includes('Chrome/')
+        ? 'Google Chrome'
+        : userAgent.includes('Firefox/')
+          ? 'Mozilla Firefox'
+          : userAgent.includes('Safari/')
+            ? 'Safari'
+            : 'Other';
+  const device =
+    /iPad|Tablet/i.test(userAgent)
+      ? 'Tablet'
+      : /Android|iPhone|Mobile/i.test(userAgent)
+        ? 'Mobile'
+        : 'Desktop';
+
+  return { browser, device };
+};
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const userId = user?.id;
 
   // Load User Data
   const loadUserAndProfile = async (session: Session) => {
@@ -85,17 +118,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
 
     const channel = supabase
-      .channel(`account-status:${user.id}`)
+      .channel(`account-status:${userId}`)
       .on(
         'postgres_changes',
         {
           event: 'UPDATE',
           schema: 'public',
           table: 'user_profiles',
-          filter: `id=eq.${user.id}`,
+          filter: `id=eq.${userId}`,
         },
         async (payload) => {
           if ((payload.new as UserProfile).is_active === false) {
@@ -111,7 +144,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user?.id]);
+  }, [userId]);
 
   // --- Auth Functions ---
 
@@ -137,6 +170,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       };
     }
 
+    const loginTime = new Date().toISOString();
+    const { browser, device } = getLoginClientInfo();
+    const [historyResult, profileUpdateResult] = await Promise.all([
+      supabase.from('login_history').insert({
+        user_id: result.data.user.id,
+        browser,
+        device,
+        login_time: loginTime,
+      }),
+      supabase
+        .from('user_profiles')
+        .update({ last_login_at: loginTime })
+        .eq('id', result.data.user.id),
+    ]);
+
+    if (historyResult.error) {
+      console.warn('Failed to record login history:', historyResult.error);
+    }
+
+    if (profileUpdateResult.error) {
+      console.warn('Failed to update last login time:', profileUpdateResult.error);
+    }
+
     return result;
   };
 
@@ -151,8 +207,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (error) throw error;
 
       return { data, error: null };
-    } catch (error: any) {
-      return { data: null, error };
+    } catch (error: unknown) {
+      return {
+        data: null,
+        error: {
+          message:
+            error instanceof Error ? error.message : "Unable to create account.",
+        },
+      };
     }
   };
 
@@ -165,8 +227,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // --- NEW FUNCTIONS ---
 
-  const updateProfile = async (updates: Partial<UserProfile>) => {
-    if (!user) return { error: "No user" };
+  const updateProfile = async (
+    updates: Partial<UserProfile>,
+  ): Promise<ProfileUpdateResult> => {
+    if (!user) {
+      return { data: null, error: { message: "No authenticated user." } };
+    }
 
     const { data, error } = await supabase
       .from('user_profiles')
@@ -175,8 +241,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .select()
       .single();
 
-    if (data) setProfile(data as UserProfile);
-    return { data, error };
+    const nextProfile = data ? data as UserProfile : null;
+    if (nextProfile) setProfile(nextProfile);
+    return { data: nextProfile, error };
   };
 
   const refreshProfile = async () => {

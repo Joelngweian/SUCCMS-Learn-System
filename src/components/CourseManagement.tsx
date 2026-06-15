@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase.ts";
 import { useAuth } from "@/contexts/AuthContext.tsx";
@@ -6,7 +6,9 @@ import {
   COURSE_OFFERING_SELECT,
   normalizeCourseOffering,
   removeCourseOfferingFiles,
+  type NormalizedCourseOffering,
 } from "@/lib/courseOfferings";
+import type { Database } from "@/lib/database.types";
 import { CoursePage } from "./CoursePage"; 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Button } from "./ui/button";
@@ -14,14 +16,18 @@ import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Search, Plus, Loader2, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { confirmAction } from "@/lib/confirm";
+import { notify } from "@/lib/notify";
+import { invalidateCourseCache } from "@/data/courseRepository";
 
 export function CourseManagement() {
   const { profile } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState("my-teaching");
-  const [courses, setCourses] = useState<any[]>([]);
-  const [myCourses, setMyCourses] = useState<any[]>([]);
+  type CourseTemplate = Database["public"]["Tables"]["courses"]["Row"];
+  const [courses, setCourses] = useState<CourseTemplate[]>([]);
+  const [myCourses, setMyCourses] = useState<NormalizedCourseOffering[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [droppingCourseId, setDroppingCourseId] = useState<string | null>(null);
@@ -33,11 +39,7 @@ export function CourseManagement() {
   const ITEMS_PER_PAGE = 9;
   const [currentPage, setCurrentPage] = useState(1);
 
-  useEffect(() => {
-    if (profile) {
-      fetchData();
-    }
-  }, [profile]);
+  const profileId = profile?.id;
 
   // Open CoursePage directly when courseId is present in URL
   useEffect(() => {
@@ -45,14 +47,15 @@ export function CourseManagement() {
     if (urlCourseId && urlCourseId !== selectedCourseId) {
       setSelectedCourseId(urlCourseId);
     }
-  }, [searchParams]);
+  }, [searchParams, selectedCourseId]);
 
   // Reset pagination when search changes
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    if (!profileId) return;
     setIsLoading(true);
     // 1. Fetch All Courses
     const { data: allData } = await supabase.from('courses').select('*');
@@ -62,17 +65,23 @@ export function CourseManagement() {
     const { data: myData } = await supabase
       .from('course_instructors')
       .select(`course_id, course_offerings(${COURSE_OFFERING_SELECT})`)
-      .eq('user_id', profile?.id);
+      .eq('user_id', profileId);
     
     setMyCourses(
       myData
-        ?.map((row: any) => normalizeCourseOffering(row.course_offerings))
-        .filter((course: any) => course.id) || []
+        ?.map((row) => normalizeCourseOffering(row.course_offerings))
+        .filter((course) => Boolean(course.id)) || []
     );
     setIsLoading(false);
-  };
+  }, [profileId]);
 
-  const getCourseCode = (course: any) => course?.course_code || course?.code || "N/A";
+  useEffect(() => {
+    if (profileId) void fetchData();
+  }, [fetchData, profileId]);
+
+  const getCourseCode = (
+    course: CourseTemplate | NormalizedCourseOffering,
+  ) => course.course_code || course.code || "N/A";
 
   const handleClaimCourse = async (courseId: string) => {
     const { error } = await supabase.rpc('create_course_offering', {
@@ -80,20 +89,25 @@ export function CourseManagement() {
     });
     
     if (!error) {
-      fetchData(); 
+      invalidateCourseCache();
+      void fetchData();
       setActiveTab("my-teaching");
     } else {
       console.error("Error creating course offering:", error);
-      alert(`Failed to add course: ${error.message}`);
+      notify.error(error, "Failed to add course.");
     }
   };
 
-  const handleDropCourse = async (course: any) => {
+  const handleDropCourse = async (course: NormalizedCourseOffering) => {
     if (!profile?.id) return;
     const courseName = course?.name || "this course";
-    const confirmed = window.confirm(
-      `Permanently drop ${courseName}?\n\nAll enrolled students, posts, discussions, files, assignments, submissions, grades and attendance for this class will be deleted. This cannot be undone.`
-    );
+    const confirmed = await confirmAction({
+      title: `Permanently drop ${courseName}?`,
+      description:
+        "All enrolled students, posts, discussions, files, assignments, submissions, grades, and attendance for this class will be deleted. This cannot be undone.",
+      confirmLabel: "Drop Course",
+      destructive: true,
+    });
     if (!confirmed) return;
 
     setDroppingCourseId(course.id);
@@ -109,10 +123,14 @@ export function CourseManagement() {
       });
 
       if (!error) {
+        invalidateCourseCache({
+          courseId: course.id,
+          userId: profile.id,
+        });
         setMyCourses((current) => current.filter((item) => item.id !== course.id));
       } else {
         console.error("Error dropping course:", error);
-        alert(`Failed to drop course: ${error.message}`);
+        notify.error(error, "Failed to drop course.");
       }
     } finally {
       setDroppingCourseId(null);

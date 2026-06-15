@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card"
 import { BookOpen } from "lucide-react"
 
 interface Course {
-  id: number
+  id: string
   name: string
   code: string
 }

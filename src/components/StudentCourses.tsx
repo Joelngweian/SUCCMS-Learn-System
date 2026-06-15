@@ -1,12 +1,17 @@
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext.tsx";
 import { supabase } from "@/lib/supabase.ts";
 import { PROGRAMMES } from "@/lib/programmes";
 import {
-  COURSE_OFFERING_SELECT,
-  normalizeCourseOffering,
+  type NormalizedCourseOffering,
 } from "@/lib/courseOfferings";
+import {
+  getActiveCourseOfferings,
+  getCourseInstructorSummaries,
+  getStudentCourseOfferings,
+  invalidateCourseCache,
+} from "@/data/courseRepository";
 import { CoursePage } from "./CoursePage"; // <--- IMPORT THIS
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Button } from "./ui/button";
@@ -39,29 +44,18 @@ import { Alert, AlertDescription } from "./ui/alert";
 import { Label } from "./ui/label";
 
 // --- Types ---
-interface Course {
-  id: string;
-  template_id?: string;
-  course_code?: string;
-  code?: string;
-  name: string;
-  chinese_name: string | null;
-  faculty: string;
-  programme: string;
-  course_type: "common_core" | "discipline_core" | "elective_open" | "elective_core";
-  credit_hours: number;
-  max_capacity: number;
-  enrollment_key: string | null;
-  status: "active" | "unavailable" | "full" | "open";
-  semester: string;
+type Course = NormalizedCourseOffering & {
   instructors?: CourseInstructor[];
-}
+};
 
 interface CourseInstructor {
   id: string;
   full_name: string;
   avatar_url?: string | null;
 }
+
+const getErrorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback;
 
 export function StudentCourses() {
   const { profile, updateProfile } = useAuth();
@@ -101,51 +95,10 @@ export function StudentCourses() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSetupError, setProfileSetupError] = useState("");
 
-  // --- 1. Initial Load & Checks ---
-  useEffect(() => {
-    if (!profile) return;
-    if (!profile.faculty || !profile.programme) {
-      setShowProfileSetup(true);
-      fetchProgrammeOptions();
-    } else {
-      fetchData();
-    }
-  }, [profile]);
-
-  useEffect(() => {
-    if (!profile?.id || profile.role !== "student") return;
-
-    const refreshCourses = () => {
-      if (document.visibilityState === "visible") {
-        fetchData();
-      }
-    };
-
-    const channel = supabase
-      .channel(`student-course-enrollments:${profile.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "course_enrollments",
-          filter: `student_id=eq.${profile.id}`,
-        },
-        () => {
-          fetchData();
-        }
-      )
-      .subscribe();
-
-    window.addEventListener("focus", refreshCourses);
-    document.addEventListener("visibilitychange", refreshCourses);
-
-    return () => {
-      window.removeEventListener("focus", refreshCourses);
-      document.removeEventListener("visibilitychange", refreshCourses);
-      supabase.removeChannel(channel);
-    };
-  }, [profile?.id, profile?.role]);
+  const profileId = profile?.id;
+  const profileRole = profile?.role;
+  const profileFaculty = profile?.faculty;
+  const profileProgramme = profile?.programme;
 
   // Sync URL courseId param with viewingCourseId state
   useEffect(() => {
@@ -153,7 +106,7 @@ export function StudentCourses() {
     if (urlCourseId && urlCourseId !== viewingCourseId) {
       setViewingCourseId(urlCourseId);
     }
-  }, [searchParams]);
+  }, [searchParams, viewingCourseId]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -169,24 +122,61 @@ export function StudentCourses() {
     setProgrammeOptions(options);
   };
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    if (!profileId) return;
     setIsLoading(true);
     try {
-      const { data: instructorRows } = await supabase
-        .from('course_instructors')
-        .select('course_id, user_profiles(id, full_name, avatar_url)');
+      const [myCourses, offerings] = await Promise.all([
+        getStudentCourseOfferings(profileId),
+        getActiveCourseOfferings(),
+      ]);
+      const enrolledIdSet = new Set(myCourses.map(course => course.id));
+      const available = offerings.filter((course) => {
+        if (enrolledIdSet.has(course.id)) return false;
 
+        const isCommonCore =
+          course.course_type === "common_core" &&
+          course.faculty === profileFaculty;
+        const isDisciplineCore =
+          course.course_type === "discipline_core" &&
+          course.programme === profileProgramme;
+        const isElectiveOpen = course.course_type === "elective_open";
+        const isElectiveCore =
+          course.course_type === "elective_core" &&
+          course.faculty === profileFaculty;
+
+        return (
+          isCommonCore ||
+          isDisciplineCore ||
+          isElectiveOpen ||
+          isElectiveCore
+        );
+      });
+      const visibleCourseIds = [
+        ...myCourses.map(course => course.id),
+        ...available.map(course => course.id),
+      ];
+      setEnrolledCourses(myCourses);
+      setAvailableCourses(available);
+
+      let instructorRows = [];
+      try {
+        instructorRows =
+          await getCourseInstructorSummaries(visibleCourseIds);
+      } catch (instructorError) {
+        console.error("Error fetching course instructors", instructorError);
+        return;
+      }
       const instructorsByCourse = new Map<string, CourseInstructor[]>();
-      (instructorRows || []).forEach((row: any) => {
-        const instructor = row.user_profiles;
-        if (!row.course_id || !instructor) return;
-        const current = instructorsByCourse.get(row.course_id) || [];
+
+      instructorRows.forEach(instructor => {
+        const current = instructorsByCourse.get(instructor.courseId) || [];
         current.push({
+          avatar_url: instructor.avatarUrl,
+          full_name: instructor.fullName,
           id: instructor.id,
-          full_name: instructor.full_name,
-          avatar_url: instructor.avatar_url,
         });
-        instructorsByCourse.set(row.course_id, current);
+        instructorsByCourse.set(instructor.courseId, current);
       });
 
       const attachInstructors = (course: Course) => ({
@@ -194,47 +184,68 @@ export function StudentCourses() {
         instructors: instructorsByCourse.get(course.id) || [],
       });
 
-      // A. Fetch Enrolled
-      const { data: enrollmentData } = await supabase
-        .from('course_enrollments')
-        .select(`course_id, course_offerings(${COURSE_OFFERING_SELECT})`)
-        .eq('student_id', profile?.id);
-      
-      const myCourses = enrollmentData
-        ?.map((enrollment: any) => normalizeCourseOffering(enrollment.course_offerings))
-        .filter((course: any) => course.id)
-        .map(attachInstructors) || [];
-      setEnrolledCourses(myCourses);
-
-      // B. Fetch Available
-      const { data: allCourses } = await supabase
-        .from('course_offerings')
-        .select(COURSE_OFFERING_SELECT)
-        .eq('status', 'active');
-
-      if (allCourses && profile) {
-        const enrolledIds = new Set(myCourses.map(c => c.id));
-        const offerings = allCourses.map(normalizeCourseOffering);
-        
-        const filtered = offerings.filter((course: Course) => {
-          if (enrolledIds.has(course.id)) return false; 
-          
-          const isCommonCore = course.course_type === 'common_core' && course.faculty === profile.faculty;
-          const isDisciplineCore = course.course_type === 'discipline_core' && course.programme === profile.programme;
-          const isElectiveOpen = course.course_type === 'elective_open';
-          const isElectiveCore = course.course_type === 'elective_core' && course.faculty === profile.faculty;
-
-          return isCommonCore || isDisciplineCore || isElectiveOpen || isElectiveCore;
-        });
-
-        setAvailableCourses(filtered.map(attachInstructors));
-      }
+      setEnrolledCourses(myCourses.map(attachInstructors));
+      setAvailableCourses(available.map(attachInstructors));
     } catch (error) {
-      console.error("Error fetching courses", error);
+      console.error(
+        "Error fetching courses",
+        error instanceof Error
+          ? { message: error.message, stack: error.stack }
+          : error,
+      );
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [profileFaculty, profileId, profileProgramme]);
+
+  // --- 1. Initial Load & Checks ---
+  useEffect(() => {
+    if (!profileId) return;
+    if (!profileFaculty || !profileProgramme) {
+      setShowProfileSetup(true);
+      fetchProgrammeOptions();
+    } else {
+      invalidateCourseCache({ userId: profileId });
+      void fetchData();
+    }
+  }, [fetchData, profileFaculty, profileId, profileProgramme]);
+
+  useEffect(() => {
+    if (!profileId || profileRole !== "student") return;
+
+    const refreshCourses = () => {
+      if (document.visibilityState === "visible") {
+        invalidateCourseCache({ userId: profileId });
+        void fetchData();
+      }
+    };
+
+    const channel = supabase
+      .channel(`student-course-enrollments:${profileId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "course_enrollments",
+          filter: `student_id=eq.${profileId}`,
+        },
+        () => {
+          invalidateCourseCache({ userId: profileId });
+          void fetchData();
+        }
+      )
+      .subscribe();
+
+    window.addEventListener("focus", refreshCourses);
+    document.addEventListener("visibilitychange", refreshCourses);
+
+    return () => {
+      window.removeEventListener("focus", refreshCourses);
+      document.removeEventListener("visibilitychange", refreshCourses);
+      supabase.removeChannel(channel);
+    };
+  }, [fetchData, profileId, profileRole]);
 
   // --- 3. Actions ---
 
@@ -252,7 +263,7 @@ export function StudentCourses() {
       setShowProfileSetup(false);
       fetchData();
     } else {
-      setProfileSetupError(error.message || "Failed to save programme selection.");
+      setProfileSetupError(getErrorMessage(error, "Failed to save programme selection."));
     }
     setIsSavingProfile(false);
   };
@@ -285,12 +296,16 @@ export function StudentCourses() {
         throw error;
       }
 
+      invalidateCourseCache({
+        courseId: selectedCourseForEnrollment.id,
+        userId: profile.id,
+      });
       setSelectedCourseForEnrollment(null);
       setActiveTab("my-courses");
-      fetchData(); 
+      void fetchData();
       
-    } catch (error: any) {
-      setEnrollmentError(error.message || "Failed to enroll");
+    } catch (error: unknown) {
+      setEnrollmentError(getErrorMessage(error, "Failed to enroll"));
     } finally {
       setIsEnrolling(false);
     }
@@ -478,7 +493,7 @@ export function StudentCourses() {
 
       {/* --- DIALOG: PROFILE SETUP --- */}
       <Dialog open={showProfileSetup} onOpenChange={() => {}}>
-        <DialogContent className="max-w-md" hideCloseButton onInteractOutside={(e: any) => e.preventDefault()}>
+        <DialogContent className="max-w-md" hideCloseButton onInteractOutside={(event) => event.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Welcome! Select your Programme</DialogTitle>
             <DialogDescription>

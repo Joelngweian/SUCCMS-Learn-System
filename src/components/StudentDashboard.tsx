@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -6,29 +6,28 @@ import {
   COURSE_OFFERING_SELECT,
   normalizeCourseOffering,
 } from "@/lib/courseOfferings";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
-import { Progress } from "./ui/progress";
+import type { Database } from "@/lib/database.types";
+import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
-import { OnlineActivity } from "./SocialWidgets";
+import { OnlineActivity, SocialActivityFeed } from "./SocialWidgets";
+import { StudyGroupsDashboard } from "./StudyGroupsDashboard";
 import { Stories } from "./Stories";
 import {
-  BookOpen,
-  Clock,
+  StudentStudyInsights,
+  type StudyInsight,
+} from "./StudentStudyInsights";
+import {
+  AnnouncementsCard,
+  StudentCoursesCard,
+  StudentFocusPanels,
+  StudentStatsGrid,
+  UpcomingAssignmentsCard,
+} from "./student-dashboard/StudentDashboardPanels";
+import {
   AlertCircle,
-  TrendingUp,
-  FileText,
-  Bell,
   Brain,
   Sparkles,
-  BrainCircuit,
-  Youtube,
-  PlayCircle,
-  ExternalLink,
-  Music,
   Loader2,
-  GraduationCap,
-  ChevronRight,
 } from "lucide-react";
 
 const KNOWLEDGE_BASE = [
@@ -185,7 +184,109 @@ interface DashboardAnnouncement {
   isRead: boolean;
 }
 
-const getCourseCode = (course: any) => course?.course_code || course?.code || "N/A";
+type StudyInsightCourseContext = {
+  id: string;
+  code: string;
+  name: string;
+  grades: Array<{
+    percentage: number;
+    gradedAt: string;
+    feedback: string;
+    assignmentTitle: string;
+    rubric: string;
+  }>;
+  attendance: Array<{
+    status: string;
+    classDate: string;
+  }>;
+  assignments: Array<{
+    title: string;
+    dueDate: string;
+    submitted: boolean;
+    isLate: boolean;
+  }>;
+};
+
+type AssignmentRow = Pick<
+  Database["public"]["Tables"]["assignments"]["Row"],
+  | "id"
+  | "course_id"
+  | "title"
+  | "description"
+  | "rubric"
+  | "due_date"
+  | "max_score"
+  | "created_at"
+>;
+type SubmissionRow = Pick<
+  Database["public"]["Tables"]["assignment_submissions"]["Row"],
+  "id" | "assignment_id" | "submitted_at" | "is_late" | "grade" | "feedback"
+>;
+type GradeRow = Pick<
+  Database["public"]["Tables"]["student_grades"]["Row"],
+  | "course_id"
+  | "assignment_id"
+  | "score"
+  | "max_score"
+  | "feedback"
+  | "graded_at"
+>;
+type AttendanceRow = Pick<
+  Database["public"]["Tables"]["attendance"]["Row"],
+  "course_id" | "class_date" | "status" | "marked_present"
+>;
+
+type InstructorRow = {
+  course_id: string;
+  user_profiles: {
+    id: string;
+    full_name: string;
+    avatar_url: string | null;
+  } | null;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+
+const isRecommendation = (value: unknown): value is Recommendation => {
+  const item = asRecord(value);
+  return (
+    typeof item.id === "string"
+    && typeof item.title === "string"
+    && typeof item.type === "string"
+    && typeof item.url === "string"
+    && /^https?:\/\//i.test(item.url)
+  );
+};
+
+const normalizeAnnouncementAttachments = (
+  value: unknown,
+): DashboardAnnouncement["attachments"] =>
+  Array.isArray(value)
+    ? value.flatMap((attachment) => {
+        const item = asRecord(attachment);
+        if (
+          typeof item.name !== "string"
+          || typeof item.url !== "string"
+        ) {
+          return [];
+        }
+        return [{
+          name: item.name,
+          path: typeof item.path === "string" ? item.path : "",
+          url: item.url,
+          type: typeof item.type === "string" ? item.type : "",
+          size: typeof item.size === "number" ? item.size : 0,
+        }];
+      })
+    : [];
+
+const getCourseCode = (course: {
+  course_code?: string | null;
+  code?: string | null;
+}) => course.course_code || course.code || "N/A";
 
 const percentageToGrade = (percentage: number | null) => {
   if (percentage == null) return null;
@@ -211,8 +312,168 @@ const formatRelativeDate = (value: string) => {
   return `Due ${date.toLocaleDateString()}`;
 };
 
+const buildRuleBasedInsights = (
+  courses: StudyInsightCourseContext[]
+): StudyInsight[] => {
+  const insights: Array<StudyInsight & { priority: number }> = [];
+  const now = Date.now();
+
+  courses.forEach((course) => {
+    const grades = [...course.grades].sort(
+      (a, b) =>
+        new Date(a.gradedAt).getTime() - new Date(b.gradedAt).getTime()
+    );
+
+    if (grades.length >= 2) {
+      const midpoint = Math.ceil(grades.length / 2);
+      const earlier = grades.slice(0, midpoint);
+      const recent = grades.slice(midpoint);
+      const earlierAverage =
+        earlier.reduce((sum, grade) => sum + grade.percentage, 0) /
+        earlier.length;
+      const recentAverage =
+        recent.reduce((sum, grade) => sum + grade.percentage, 0) /
+        recent.length;
+      const change = Math.round(recentAverage - earlierAverage);
+
+      insights.push({
+        id: `performance-${course.id}`,
+        type: "performance",
+        severity: change >= 0 ? "positive" : change <= -10 ? "critical" : "warning",
+        title: change >= 0 ? "Performance Is Improving" : "Performance Has Declined",
+        description:
+          change >= 0
+            ? `Your recent ${course.code} results improved by ${Math.abs(
+                change
+              )} percentage points.`
+            : `Your recent ${course.code} results dropped by ${Math.abs(
+                change
+              )} percentage points compared with earlier work.`,
+        confidence: Math.min(95, 65 + grades.length * 5),
+        courseCode: course.code,
+        actionPlan:
+          change >= 0
+            ? [
+                "Continue the study method used for your recent assignments.",
+                "Review the latest feedback to preserve the same standard.",
+              ]
+            : [
+                "Review feedback from your two most recent graded assignments.",
+                "Redo the lowest-scoring section before the next assessment.",
+                "Ask your lecturer about any requirement that remains unclear.",
+              ],
+        priority: change >= 0 ? 35 : 90 + Math.min(Math.abs(change), 10),
+      });
+    }
+
+    const attendance = [...course.attendance].sort((a, b) =>
+      b.classDate.localeCompare(a.classDate)
+    );
+    if (attendance.length >= 2) {
+      const credited = attendance.filter(
+        (record) => record.status !== "absent"
+      ).length;
+      const attendanceRate = Math.round((credited / attendance.length) * 100);
+      const consecutiveConcern = attendance
+        .slice(0, 3)
+        .filter(
+          (record) =>
+            record.status === "absent" || record.status === "late"
+        ).length;
+
+      if (attendanceRate < 80 || consecutiveConcern >= 2) {
+        insights.push({
+          id: `attendance-${course.id}`,
+          type: "attendance",
+          severity: attendanceRate < 60 ? "critical" : "warning",
+          title: "Attendance Needs Attention",
+          description: `${course.code} attendance is ${attendanceRate}%. ${
+            consecutiveConcern >= 2
+              ? `${consecutiveConcern} of your latest 3 classes were absent or late.`
+              : "Improving consistency will reduce learning gaps."
+          }`,
+          confidence: Math.min(98, 70 + attendance.length * 3),
+          courseCode: course.code,
+          actionPlan: [
+            "Check the next class schedule and set a reminder before it starts.",
+            "Review materials from any missed or late class.",
+            "Contact your lecturer if an absence should be recorded as excused.",
+          ],
+          priority: attendanceRate < 60 ? 100 : 85,
+        });
+      } else if (attendance.length >= 5 && attendanceRate >= 90) {
+        insights.push({
+          id: `attendance-positive-${course.id}`,
+          type: "attendance",
+          severity: "positive",
+          title: "Strong Attendance",
+          description: `You have maintained ${attendanceRate}% attendance in ${course.code}.`,
+          confidence: Math.min(98, 75 + attendance.length * 2),
+          courseCode: course.code,
+          actionPlan: [
+            "Keep your current class routine and arrive before check-in closes.",
+          ],
+          priority: 30,
+        });
+      }
+    }
+
+    const overdue = course.assignments.filter(
+      (assignment) =>
+        !assignment.submitted &&
+        new Date(assignment.dueDate).getTime() < now
+    );
+    const dueSoon = course.assignments.filter((assignment) => {
+      if (assignment.submitted) return false;
+      const difference = new Date(assignment.dueDate).getTime() - now;
+      return difference >= 0 && difference <= 3 * 86400000;
+    });
+    const lateCount = course.assignments.filter(
+      (assignment) => assignment.isLate
+    ).length;
+
+    if (overdue.length > 0 || dueSoon.length > 0 || lateCount >= 2) {
+      const descriptionParts = [];
+      if (overdue.length > 0) {
+        descriptionParts.push(`${overdue.length} overdue`);
+      }
+      if (dueSoon.length > 0) {
+        descriptionParts.push(`${dueSoon.length} due within 3 days`);
+      }
+      if (lateCount >= 2) {
+        descriptionParts.push(`${lateCount} submitted late`);
+      }
+
+      insights.push({
+        id: `assignment-${course.id}`,
+        type: "assignment",
+        severity: overdue.length > 0 ? "critical" : "warning",
+        title: "Assignment Risk Detected",
+        description: `${course.code} currently has ${descriptionParts.join(
+          ", "
+        )}.`,
+        confidence: 96,
+        courseCode: course.code,
+        actionPlan: [
+          overdue.length > 0
+            ? `Contact your lecturer about ${overdue[0].title} and confirm whether a late submission is accepted.`
+            : `Begin ${dueSoon[0]?.title || "the nearest assignment"} today.`,
+          "Break the remaining work into small sections with a completion time for each.",
+          "Upload the completed work before the deadline instead of waiting for the final hour.",
+        ],
+        priority: overdue.length > 0 ? 110 : 95,
+      });
+    }
+  });
+
+  return insights
+    .sort((a, b) => b.priority - a.priority)
+    .map(({ priority: _priority, ...insight }) => insight);
+};
+
 export function StudentDashboard() {
   const { user, profile } = useAuth();
+  const userId = user?.id;
   const navigate = useNavigate();
   const [enrolledCourses, setEnrolledCourses] = useState<StudentCourse[]>([]);
   const [upcomingAssignments, setUpcomingAssignments] = useState<DashboardAssignment[]>([]);
@@ -228,15 +489,13 @@ export function StudentDashboard() {
     studyMaterials: Recommendation[];
     motivation: Recommendation[];
   }>({ recentCourses: [], studyMaterials: [], motivation: [] });
+  const [studyInsights, setStudyInsights] = useState<StudyInsight[]>([]);
+  const [isLoadingInsights, setIsLoadingInsights] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingAi, setIsLoadingAi] = useState(false);
   const [loadError, setLoadError] = useState("");
 
-  useEffect(() => {
-    if (user) loadDashboardData();
-  }, [user?.id]);
-
-  const getFallbackStudyMaterials = (courses: StudentCourse[]) => {
+  const getFallbackStudyMaterials = useCallback((courses: StudentCourse[]) => {
     const userInterests = courses.flatMap((course) => [
       course.code,
       ...course.name.split(/\s+/).filter(Boolean),
@@ -273,9 +532,11 @@ export function StudentDashboard() {
         }`,
       }))
       .slice(0, 3);
-  };
+  }, []);
 
-  const generateSmartRecommendations = async (courses: StudentCourse[]) => {
+  const generateSmartRecommendations = useCallback(async (
+    courses: StudentCourse[],
+  ) => {
     setIsLoadingAi(true);
 
     const motivationPicks = KNOWLEDGE_BASE.filter(
@@ -298,7 +559,7 @@ export function StudentDashboard() {
       motivation: motivationPicks,
     }));
 
-    if (courses.length === 0 || !user) {
+    if (courses.length === 0 || !userId) {
       setAiData({
         recentCourses: jumpBackIn,
         studyMaterials: [],
@@ -323,7 +584,7 @@ export function StudentDashboard() {
         : null,
     }));
     const courseSignature = JSON.stringify(courseContext);
-    const cacheKey = `student-study-recommendations:v2:${user.id}`;
+    const cacheKey = `student-study-recommendations:v2:${userId}`;
 
     try {
       const cachedValue = localStorage.getItem(cacheKey);
@@ -355,13 +616,7 @@ export function StudentDashboard() {
 
       const recommendations = Array.isArray(data?.recommendations)
         ? data.recommendations
-            .filter(
-              (item: any) =>
-                typeof item?.id === "string" &&
-                typeof item?.title === "string" &&
-                typeof item?.url === "string" &&
-                /^https?:\/\//i.test(item.url)
-            )
+            .filter(isRecommendation)
             .slice(0, 3)
         : [];
 
@@ -392,10 +647,117 @@ export function StudentDashboard() {
     } finally {
       setIsLoadingAi(false);
     }
-  };
+  }, [getFallbackStudyMaterials, userId]);
 
-  const loadDashboardData = async () => {
-    if (!user) return;
+  const generateStudyInsights = useCallback(async (
+    courseContext: StudyInsightCourseContext[]
+  ) => {
+    const ruleInsights = buildRuleBasedInsights(courseContext);
+    setStudyInsights(ruleInsights);
+
+    const coursesWithGrades = courseContext.filter(
+      (course) => course.grades.length > 0
+    );
+    if (!userId || coursesWithGrades.length === 0) {
+      setIsLoadingInsights(false);
+      return;
+    }
+
+    setIsLoadingInsights(true);
+    const anonymousContext = coursesWithGrades.map((course) => ({
+      code: course.code,
+      name: course.name,
+      grades: course.grades.slice(-8),
+      attendance: course.attendance.slice(0, 12),
+      assignments: course.assignments.slice(0, 12),
+    }));
+    const contextSignature = JSON.stringify(anonymousContext);
+    const cacheKey = `student-study-insights:v1:${userId}`;
+
+    try {
+      const cachedValue = localStorage.getItem(cacheKey);
+      if (cachedValue) {
+        const cached = JSON.parse(cachedValue);
+        if (
+          cached?.contextSignature === contextSignature &&
+          Date.now() - Number(cached?.createdAt || 0) <
+            STUDY_RECOMMENDATION_CACHE_TTL &&
+          Array.isArray(cached?.insights)
+        ) {
+          setStudyInsights([...ruleInsights, ...cached.insights]);
+          return;
+        }
+      }
+
+      const { data, error } = await supabase.functions.invoke(
+        "student-study-insights",
+        {
+          body: { courses: anonymousContext },
+        }
+      );
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const aiInsights: StudyInsight[] = Array.isArray(data?.insights)
+        ? data.insights
+            .map(asRecord)
+            .filter((insight) =>
+              (insight.type === "strength" || insight.type === "weakness")
+              && typeof insight.title === "string"
+              && typeof insight.description === "string"
+              && Array.isArray(insight.actionPlan)
+            )
+            .slice(0, 4)
+            .map((insight, index) => ({
+              id:
+                typeof insight.id === "string"
+                  ? insight.id
+                  : `ai-insight-${index}`,
+              type: insight.type,
+              severity:
+                insight.type === "strength"
+                  ? ("positive" as const)
+                  : ("warning" as const),
+              title: insight.title.slice(0, 90),
+              description: insight.description.slice(0, 260),
+              confidence: Math.min(
+                95,
+                Math.max(55, Number(insight.confidence) || 70)
+              ),
+              courseCode:
+                typeof insight.courseCode === "string"
+                  ? insight.courseCode.slice(0, 30)
+                  : undefined,
+              actionPlan: (insight.actionPlan as unknown[])
+                .filter((step: unknown) => typeof step === "string")
+                .slice(0, 4)
+                .map((step: string) => step.slice(0, 180)),
+            }))
+        : [];
+
+      localStorage.setItem(
+        cacheKey,
+        JSON.stringify({
+          createdAt: Date.now(),
+          contextSignature,
+          insights: aiInsights,
+        })
+      );
+      setStudyInsights([...ruleInsights, ...aiInsights]);
+    } catch (error) {
+      console.warn(
+        "AI strengths and weaknesses are unavailable; using calculated insights.",
+        error
+      );
+      setStudyInsights(ruleInsights);
+    } finally {
+      setIsLoadingInsights(false);
+    }
+  }, [userId]);
+
+  const loadDashboardData = useCallback(async () => {
+    if (!userId) return;
 
     setIsLoading(true);
     setLoadError("");
@@ -410,7 +772,7 @@ export function StudentDashboard() {
         supabase
           .from("course_enrollments")
           .select(`course_id, enrolled_at, course_offerings(${COURSE_OFFERING_SELECT})`)
-          .eq("student_id", user.id),
+          .eq("student_id", userId),
         supabase
           .from("announcements")
           .select("id, title, content, priority, attachments, created_at")
@@ -420,11 +782,11 @@ export function StudentDashboard() {
         supabase
           .from("announcement_reads")
           .select("announcement_id")
-          .eq("user_id", user.id),
+          .eq("user_id", userId),
         supabase
           .from("student_gpa")
           .select("gpa, total_credits")
-          .eq("student_id", user.id)
+          .eq("student_id", userId)
           .maybeSingle(),
       ]);
 
@@ -433,30 +795,46 @@ export function StudentDashboard() {
 
       const enrollmentRows = enrollmentResult.data || [];
       const courseIds = enrollmentRows
-        .map((row: any) => row.course_id)
+        .map((row) => row.course_id)
         .filter(Boolean);
 
-      let instructorRows: any[] = [];
-      let assignmentRows: any[] = [];
-      let submissionRows: any[] = [];
-      let gradeRows: any[] = [];
+      let instructorRows: InstructorRow[] = [];
+      let assignmentRows: AssignmentRow[] = [];
+      let submissionRows: SubmissionRow[] = [];
+      let gradeRows: GradeRow[] = [];
+      let attendanceRows: AttendanceRow[] = [];
 
       if (courseIds.length > 0) {
-        const [instructorResult, assignmentResult, gradeResult] = await Promise.all([
+        const [
+          instructorResult,
+          assignmentResult,
+          gradeResult,
+          attendanceResult,
+        ] = await Promise.all([
           supabase
             .from("course_instructors")
             .select("course_id, user_profiles(id, full_name, avatar_url)")
             .in("course_id", courseIds),
           supabase
             .from("assignments")
-            .select("id, course_id, title, due_date, max_score, created_at")
+            .select(
+              "id, course_id, title, description, rubric, due_date, max_score, created_at"
+            )
             .in("course_id", courseIds)
             .order("due_date", { ascending: true }),
           supabase
             .from("student_grades")
-            .select("course_id, score, max_score, graded_at")
-            .eq("student_id", user.id)
+            .select(
+              "course_id, assignment_id, score, max_score, feedback, graded_at"
+            )
+            .eq("student_id", userId)
             .in("course_id", courseIds),
+          supabase
+            .from("attendance")
+            .select("course_id, class_date, status, marked_present")
+            .eq("student_id", userId)
+            .in("course_id", courseIds)
+            .order("class_date", { ascending: false }),
         ]);
 
         if (instructorResult.error) throw instructorResult.error;
@@ -465,13 +843,18 @@ export function StudentDashboard() {
         instructorRows = instructorResult.data || [];
         assignmentRows = assignmentResult.data || [];
         gradeRows = gradeResult.data || [];
+        attendanceRows = attendanceResult.error
+          ? []
+          : attendanceResult.data || [];
 
-        const assignmentIds = assignmentRows.map((assignment: any) => assignment.id);
+        const assignmentIds = assignmentRows.map((assignment) => assignment.id);
         if (assignmentIds.length > 0) {
           const submissionResult = await supabase
             .from("assignment_submissions")
-            .select("id, assignment_id, submitted_at, grade")
-            .eq("student_id", user.id)
+            .select(
+              "id, assignment_id, submitted_at, is_late, grade, feedback"
+            )
+            .eq("student_id", userId)
             .in("assignment_id", assignmentIds);
 
           if (submissionResult.error) throw submissionResult.error;
@@ -480,7 +863,7 @@ export function StudentDashboard() {
       }
 
       const instructorsByCourse = new Map<string, string[]>();
-      instructorRows.forEach((row: any) => {
+      instructorRows.forEach((row) => {
         const instructor = row.user_profiles;
         if (!instructor?.full_name) return;
         const current = instructorsByCourse.get(row.course_id) || [];
@@ -489,17 +872,17 @@ export function StudentDashboard() {
       });
 
       const submissionsByAssignment = new Map(
-        submissionRows.map((submission: any) => [submission.assignment_id, submission])
+        submissionRows.map((submission) => [submission.assignment_id, submission])
       );
-      const assignmentsByCourse = new Map<string, any[]>();
-      assignmentRows.forEach((assignment: any) => {
+      const assignmentsByCourse = new Map<string, AssignmentRow[]>();
+      assignmentRows.forEach((assignment) => {
         const current = assignmentsByCourse.get(assignment.course_id) || [];
         current.push(assignment);
         assignmentsByCourse.set(assignment.course_id, current);
       });
 
-      const gradesByCourse = new Map<string, any[]>();
-      gradeRows.forEach((grade: any) => {
+      const gradesByCourse = new Map<string, GradeRow[]>();
+      gradeRows.forEach((grade) => {
         const current = gradesByCourse.get(grade.course_id) || [];
         current.push(grade);
         gradesByCourse.set(grade.course_id, current);
@@ -507,21 +890,21 @@ export function StudentDashboard() {
 
       const now = new Date();
       const courseList: StudentCourse[] = enrollmentRows
-        .map((row: any) => {
+        .map((row) => {
           const course = normalizeCourseOffering(row.course_offerings);
           if (!course.id) return null;
 
           const courseAssignments = assignmentsByCourse.get(course.id) || [];
-          const completed = courseAssignments.filter((assignment: any) =>
+          const completed = courseAssignments.filter((assignment) =>
             submissionsByAssignment.has(assignment.id)
           );
-          const pending = courseAssignments.filter((assignment: any) =>
+          const pending = courseAssignments.filter((assignment) =>
             !submissionsByAssignment.has(assignment.id)
           );
           const nextAssignment = pending
-            .filter((assignment: any) => new Date(assignment.due_date) >= now)
+            .filter((assignment) => new Date(assignment.due_date) >= now)
             .sort(
-              (a: any, b: any) =>
+              (a, b) =>
                 new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
             )[0];
 
@@ -530,14 +913,14 @@ export function StudentDashboard() {
 
           if (courseGrades.length > 0) {
             gradePercentage =
-              courseGrades.reduce((sum: number, grade: any) => {
+              courseGrades.reduce((sum, grade) => {
                 const maxScore = Number(grade.max_score) || 100;
                 return sum + (Number(grade.score) / maxScore) * 100;
               }, 0) / courseGrades.length;
           } else {
             const gradedSubmissions = completed
-              .map((assignment: any) => {
-                const submission: any = submissionsByAssignment.get(assignment.id);
+              .map((assignment) => {
+                const submission = submissionsByAssignment.get(assignment.id);
                 if (submission?.grade == null) return null;
                 return (Number(submission.grade) / (Number(assignment.max_score) || 100)) * 100;
               })
@@ -551,12 +934,12 @@ export function StudentDashboard() {
           }
 
           const lastSubmission = completed
-            .map((assignment: any) => submissionsByAssignment.get(assignment.id))
-            .filter(Boolean)
+            .map((assignment) => submissionsByAssignment.get(assignment.id))
+            .filter((submission): submission is SubmissionRow => Boolean(submission))
             .sort(
-              (a: any, b: any) =>
+              (a, b) =>
                 new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime()
-            )[0] as any;
+            )[0];
 
           return {
             id: course.id,
@@ -589,18 +972,73 @@ export function StudentDashboard() {
         })
         .filter(Boolean) as StudentCourse[];
 
+      const assignmentsById = new Map(
+        assignmentRows.map((assignment) => [assignment.id, assignment])
+      );
+      const attendanceByCourse = new Map<string, AttendanceRow[]>();
+      attendanceRows.forEach((record) => {
+        const current = attendanceByCourse.get(record.course_id) || [];
+        current.push(record);
+        attendanceByCourse.set(record.course_id, current);
+      });
+      const insightContext: StudyInsightCourseContext[] = courseList.map(
+        (course) => ({
+          id: course.id,
+          code: course.code,
+          name: course.name,
+          grades: (gradesByCourse.get(course.id) || []).map((grade) => {
+            const assignment = grade.assignment_id
+              ? assignmentsById.get(grade.assignment_id)
+              : null;
+            const maxScore = Number(grade.max_score) || 100;
+            return {
+              percentage: Math.round(
+                (Number(grade.score) / maxScore) * 100
+              ),
+              gradedAt: grade.graded_at,
+              feedback: String(grade.feedback || ""),
+              assignmentTitle: String(
+                assignment?.title || "Course assessment"
+              ),
+              rubric: String(assignment?.rubric || ""),
+            };
+          }),
+          attendance: (attendanceByCourse.get(course.id) || []).map(
+            (record) => ({
+              status:
+                record.status ||
+                (record.marked_present ? "present" : "absent"),
+              classDate: record.class_date,
+            })
+          ),
+          assignments: (assignmentsByCourse.get(course.id) || []).map(
+            (assignment) => {
+              const submission = submissionsByAssignment.get(
+                assignment.id
+              );
+              return {
+                title: assignment.title,
+                dueDate: assignment.due_date,
+                submitted: Boolean(submission),
+                isLate: Boolean(submission?.is_late),
+              };
+            }
+          ),
+        })
+      );
+
       const futureAssignments = assignmentRows
         .filter(
-          (assignment: any) =>
+          (assignment) =>
             !submissionsByAssignment.has(assignment.id) &&
             new Date(assignment.due_date) >= now
         )
         .sort(
-          (a: any, b: any) =>
+          (a, b) =>
             new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
         )
         .slice(0, 5)
-        .map((assignment: any) => {
+        .map((assignment) => {
           const course = courseList.find((item) => item.id === assignment.course_id);
           return {
             id: assignment.id,
@@ -613,16 +1051,21 @@ export function StudentDashboard() {
         });
 
       const readIds = new Set(
-        (announcementReadResult.data || []).map((row: any) => row.announcement_id)
+        (announcementReadResult.data || []).map((row) => row.announcement_id)
       );
-      const announcementList = (announcementResult.data || []).map((announcement: any) => ({
+      const announcementList: DashboardAnnouncement[] =
+        (announcementResult.data || []).map((announcement) => ({
         id: announcement.id,
         title: announcement.title,
         content: announcement.content,
-        priority: announcement.priority,
-        attachments: Array.isArray(announcement.attachments)
-          ? announcement.attachments
-          : [],
+        priority:
+          announcement.priority === "high"
+          || announcement.priority === "low"
+            ? announcement.priority
+            : "medium",
+        attachments: normalizeAnnouncementAttachments(
+          announcement.attachments,
+        ),
         createdAt: announcement.created_at,
         isRead: readIds.has(announcement.id),
       }));
@@ -632,7 +1075,7 @@ export function StudentDashboard() {
       setAnnouncements(announcementList);
       setStats({
         pendingAssignments: assignmentRows.filter(
-          (assignment: any) => !submissionsByAssignment.has(assignment.id)
+          (assignment) => !submissionsByAssignment.has(assignment.id)
         ).length,
         gpa:
           !gpaResult.error && gpaResult.data?.gpa != null
@@ -642,70 +1085,22 @@ export function StudentDashboard() {
         unreadAlerts: announcementList.filter((announcement) => !announcement.isRead).length,
       });
       void generateSmartRecommendations(courseList);
-    } catch (error: any) {
+      void generateStudyInsights(insightContext);
+    } catch (error: unknown) {
       console.error("Failed to load student dashboard:", error);
-      setLoadError(error?.message || "Could not load dashboard data.");
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Could not load dashboard data.",
+      );
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [generateSmartRecommendations, generateStudyInsights, userId]);
 
-  const getGradeColor = (grade: string | null) => {
-    if (!grade) return "text-gray-600 bg-gray-50";
-    if (grade.startsWith("A")) return "text-green-600 bg-green-50";
-    if (grade.startsWith("B")) return "text-blue-600 bg-blue-50";
-    if (grade.startsWith("C")) return "text-yellow-600 bg-yellow-50";
-    return "text-gray-600 bg-gray-50";
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "active":
-      case "open":
-        return "bg-green-100 text-green-800";
-      case "unavailable":
-        return "bg-red-100 text-red-800";
-      default:
-        return "bg-gray-100 text-gray-800";
-    }
-  };
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case "high":
-        return "bg-red-100 text-red-800 border-red-200";
-      case "medium":
-        return "bg-yellow-100 text-yellow-800 border-yellow-200";
-      default:
-        return "bg-blue-100 text-blue-800 border-blue-200";
-    }
-  };
-
-  const getResourceIcon = (type: string) => {
-    switch (type) {
-      case "video":
-        return <Youtube className="h-4 w-4" />;
-      case "music":
-        return <Music className="h-4 w-4" />;
-      case "article":
-        return <BookOpen className="h-4 w-4" />;
-      default:
-        return <PlayCircle className="h-4 w-4" />;
-    }
-  };
-
-  const getResourceColor = (type: string) => {
-    switch (type) {
-      case "video":
-        return "bg-red-100 text-red-600";
-      case "music":
-        return "bg-purple-100 text-purple-600";
-      case "article":
-        return "bg-blue-100 text-blue-600";
-      default:
-        return "bg-amber-100 text-amber-600";
-    }
-  };
+  useEffect(() => {
+    if (userId) void loadDashboardData();
+  }, [loadDashboardData, userId]);
 
   if (isLoading) {
     return (
@@ -755,393 +1150,54 @@ export function StudentDashboard() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="col-span-1 border-l-4 border-l-blue-500 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Clock className="h-5 w-5 text-blue-500" />
-              Jump Back In
-            </CardTitle>
-            <CardDescription>Pick up where you left off</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {aiData.recentCourses.length > 0 ? (
-              aiData.recentCourses.map((course) => (
-                <button
-                  type="button"
-                  key={course.courseCode}
-                  onClick={() => navigate("/courses")}
-                  className="group w-full p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors text-left"
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <h4 className="font-semibold text-sm">{course.courseName}</h4>
-                      <p className="text-[10px] text-muted-foreground">
-                        Last active: {course.lastAccessed.toLocaleDateString()}
-                      </p>
-                    </div>
-                    <Badge variant="outline" className="text-[10px]">
-                      {course.courseCode}
-                    </Badge>
-                  </div>
-                  <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-blue-500 rounded-full"
-                      style={{ width: `${course.progress}%` }}
-                    />
-                  </div>
-                </button>
-              ))
-            ) : (
-              <p className="p-3 text-center text-sm text-muted-foreground">
-                Enrol in a course to get started.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+      <StudentFocusPanels
+        recentCourses={aiData.recentCourses}
+        studyMaterials={aiData.studyMaterials}
+        motivation={aiData.motivation}
+        isLoading={isLoadingAi}
+        onOpenCourses={() => navigate("/courses")}
+      />
 
-        <Card className="col-span-1 border-l-4 border-l-purple-500 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <BrainCircuit className="h-5 w-5 text-purple-500" />
-              Smart Study Picks
-            </CardTitle>
-            <CardDescription>Curated external resources for you</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {isLoadingAi ? (
-              <div className="flex min-h-[120px] items-center justify-center">
-                <Loader2 className="h-5 w-5 animate-spin text-purple-500" />
-              </div>
-            ) : (
-              <>
-                {aiData.studyMaterials.map((item) => (
-                  <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    key={item.id}
-                    className="flex items-start gap-3 p-3 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/10 transition-colors border border-transparent hover:border-purple-100 group"
-                  >
-                    <div className={`p-2 rounded-md shrink-0 ${getResourceColor(item.type)}`}>
-                      {getResourceIcon(item.type)}
-                    </div>
-                    <div className="flex-1 space-y-1">
-                      <p className="text-sm font-medium leading-tight group-hover:underline decoration-purple-400 underline-offset-2">
-                        {item.title}
-                      </p>
-                      <p className="text-xs text-purple-600 dark:text-purple-400 font-medium">
-                        {item.reason}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">{item.source}</p>
-                    </div>
-                    <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </a>
-                ))}
-                {aiData.studyMaterials.length === 0 && (
-                  <p className="text-sm text-muted-foreground p-2">
-                    No specific recommendations found for your current courses.
-                  </p>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
+      <StudentStudyInsights
+        insights={studyInsights}
+        isLoading={isLoadingInsights}
+      />
 
-        <Card className="col-span-1 border-l-4 border-l-amber-500 shadow-sm hover:shadow-md transition-shadow bg-gradient-to-br from-amber-50/30 to-transparent dark:from-amber-950/10">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <GraduationCap className="h-5 w-5 text-amber-500" />
-              Motivation Zone
-            </CardTitle>
-            <CardDescription>Productivity boosters</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {aiData.motivation.map((item) => (
-              <a
-                href={item.url}
-                target="_blank"
-                rel="noreferrer"
-                key={item.id}
-                className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/60 dark:hover:bg-black/20 transition-all group"
-              >
-                <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 ${getResourceColor(item.type)}`}>
-                  {getResourceIcon(item.type)}
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold line-clamp-1 group-hover:text-amber-700">
-                    {item.title}
-                  </p>
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    {item.source}
-                  </p>
-                </div>
-                <ExternalLink className="h-3 w-3 text-muted-foreground" />
-              </a>
-            ))}
-            <div className="mt-4 p-3 bg-white/50 dark:bg-black/20 rounded-lg text-xs text-center italic text-muted-foreground border">
-              "Focus is not about saying yes. It's about saying no to the hundred other good ideas."
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <StudentStatsGrid
+        enrolledCount={enrolledCourses.length}
+        pendingAssignments={stats.pendingAssignments}
+        gpa={stats.gpa}
+        credits={stats.credits}
+        unreadAlerts={stats.unreadAlerts}
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <BookOpen className="h-6 w-6 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Enrolled</p>
-                <p className="text-2xl font-semibold">{enrolledCourses.length}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-2 bg-orange-100 rounded-lg">
-                <FileText className="h-6 w-6 text-orange-600" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Pending</p>
-                <p className="text-2xl font-semibold">{stats.pendingAssignments}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-2 bg-green-100 rounded-lg">
-                <TrendingUp className="h-6 w-6 text-green-600" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">GPA</p>
-                <p className="text-2xl font-semibold">
-                  {stats.gpa == null ? "--" : stats.gpa.toFixed(2)}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-2 bg-purple-100 rounded-lg">
-                <GraduationCap className="h-6 w-6 text-purple-600" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Credits</p>
-                <p className="text-2xl font-semibold">{stats.credits}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-2 bg-red-100 rounded-lg">
-                <Bell className="h-6 w-6 text-red-600" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Unread Alerts</p>
-                <p className="text-2xl font-semibold">{stats.unreadAlerts}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <SocialActivityFeed />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>My Courses</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {enrolledCourses.length > 0 ? (
-                enrolledCourses.map((course) => (
-                  <button
-                    type="button"
-                    key={course.id}
-                    onClick={() => navigate(`/courses?courseId=${course.id}`)}
-                    className="w-full p-4 border rounded-lg space-y-3 text-left hover:bg-muted/40 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">{course.code}</Badge>
-                          <h4 className="font-medium">{course.name}</h4>
-                        </div>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          Lecturer: {course.lecturer}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge className={getGradeColor(course.grade)}>
-                          {course.grade || "Not graded"}
-                        </Badge>
-                        <Badge className={getStatusColor(course.status)}>
-                          {course.status}
-                        </Badge>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span>
-                          {course.completedAssignments}/{course.assignments} assignments submitted
-                        </span>
-                        <span>{course.progress}%</span>
-                      </div>
-                      <Progress value={course.progress} />
-                    </div>
-                    <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-4">
-                        <span>{course.credits} credits</span>
-                        <span>{course.pendingAssignments} pending</span>
-                        {course.nextAssignment && (
-                          <span>
-                            Next: {course.nextAssignment.title} ·{" "}
-                            {formatRelativeDate(course.nextAssignment.dueDate)}
-                          </span>
-                        )}
-                      </div>
-                      <ChevronRight className="h-4 w-4" />
-                    </div>
-                  </button>
-                ))
-              ) : (
-                <div className="py-10 text-center">
-                  <BookOpen className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">
-                    You have not enrolled in any courses yet.
-                  </p>
-                  <Button className="mt-4" onClick={() => navigate("/courses")}>
-                    Browse Courses
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <StudentCoursesCard
+            courses={enrolledCourses}
+            onOpenCourse={(courseId) =>
+              navigate(`/courses?courseId=${courseId}`)
+            }
+            onBrowseCourses={() => navigate("/courses")}
+            formatRelativeDate={formatRelativeDate}
+          />
         </div>
 
         <div className="space-y-6">
           <OnlineActivity userRole="student" />
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Clock className="h-5 w-5" />
-                Upcoming Assignments
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {upcomingAssignments.length > 0 ? (
-                upcomingAssignments.map((assignment) => (
-                  <button
-                    type="button"
-                    key={assignment.id}
-                    onClick={() =>
-                      navigate(
-                        `/courses?courseId=${assignment.courseId}&assignmentId=${assignment.id}`
-                      )
-                    }
-                    className="w-full rounded-lg border p-3 text-left hover:bg-muted/40 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-medium">{assignment.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {assignment.courseCode} · {assignment.courseName}
-                        </p>
-                      </div>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    </div>
-                    <p className="mt-2 text-xs text-orange-600">
-                      {formatRelativeDate(assignment.dueDate)}
-                    </p>
-                  </button>
-                ))
-              ) : (
-                <p className="py-5 text-center text-sm text-muted-foreground">
-                  No upcoming assignments.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Bell className="h-5 w-5" />
-                Announcements
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {announcements.length > 0 ? (
-                announcements.map((announcement) => (
-                  <div key={announcement.id} className="space-y-2 border-b pb-4 last:border-0 last:pb-0">
-                    {announcement.attachments.map((attachment) =>
-                      attachment.type.startsWith("image/") ? (
-                        <a
-                          key={attachment.path}
-                          href={attachment.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-block overflow-hidden rounded-md border"
-                        >
-                          <img
-                            src={attachment.url}
-                            alt={attachment.name}
-                            className="block object-cover"
-                            style={{
-                              width: 180,
-                              height: 110,
-                              maxWidth: "100%",
-                            }}
-                          />
-                        </a>
-                      ) : (
-                        <a
-                          key={attachment.path}
-                          href={attachment.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex min-w-0 items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted/40"
-                        >
-                          <FileText className="h-4 w-4 shrink-0" />
-                          <span className="truncate">{attachment.name}</span>
-                        </a>
-                      )
-                    )}
-                    <div className="flex items-center justify-between gap-2">
-                      <Badge className={getPriorityColor(announcement.priority)}>
-                        {announcement.priority}
-                      </Badge>
-                      {!announcement.isRead && (
-                        <span className="h-2 w-2 rounded-full bg-blue-600" title="Unread" />
-                      )}
-                    </div>
-                    <h4 className="text-sm font-medium">{announcement.title}</h4>
-                    <p className="line-clamp-3 text-sm text-muted-foreground">
-                      {announcement.content}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {new Date(announcement.createdAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                ))
-              ) : (
-                <p className="py-5 text-center text-sm text-muted-foreground">
-                  No active announcements.
-                </p>
-              )}
-            </CardContent>
-          </Card>
+          <StudyGroupsDashboard />
+          <UpcomingAssignmentsCard
+            assignments={upcomingAssignments}
+            onOpenAssignment={(courseId, assignmentId) =>
+              navigate(
+                `/courses?courseId=${courseId}&assignmentId=${assignmentId}`
+              )
+            }
+            formatRelativeDate={formatRelativeDate}
+          />
+          <AnnouncementsCard announcements={announcements} />
         </div>
       </div>
     </div>

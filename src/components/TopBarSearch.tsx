@@ -4,10 +4,16 @@ import { Search, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase.ts";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Badge } from "./ui/badge";
+import type { Database } from "@/lib/database.types";
+
+type SearchUser = Pick<
+  Database["public"]["Tables"]["user_profiles"]["Row"],
+  "id" | "full_name" | "email" | "avatar_url" | "role"
+>;
 
 export function TopBarSearch() {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<SearchUser[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);

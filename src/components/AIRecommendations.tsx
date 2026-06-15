@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -35,7 +35,10 @@ import {
 interface AIRecommendationsProps {
   userRole: 'student' | 'lecturer';
   currentCourses?: string[];
-  performanceData?: any;
+  performanceData?: {
+    courses?: unknown[];
+    overview?: Record<string, unknown>;
+  };
 }
 
 interface Recommendation {
@@ -83,19 +86,15 @@ export function AIRecommendations({
     currentCourses,
   });
 
-  useEffect(() => {
-    if (!user?.id || userRole !== "lecturer") return;
-    loadPreferences();
-    loadRecommendations();
-  }, [user?.id, userRole, recommendationContext]);
+  const userId = user?.id;
 
-  const loadPreferences = async () => {
-    if (!user) return;
+  const loadPreferences = useCallback(async () => {
+    if (!userId) return;
 
     const { data, error } = await supabase
       .from("ai_recommendation_preferences")
       .select("recommendation_id, is_bookmarked, feedback")
-      .eq("user_id", user.id);
+      .eq("user_id", userId);
 
     if (error) {
       console.warn("Could not load AI recommendation preferences:", error);
@@ -103,17 +102,17 @@ export function AIRecommendations({
     }
 
     const nextPreferences: Record<string, RecommendationPreference> = {};
-    (data || []).forEach((row: any) => {
+    (data || []).forEach((row) => {
       nextPreferences[row.recommendation_id] = {
         isBookmarked: Boolean(row.is_bookmarked),
         feedback: row.feedback === "up" || row.feedback === "down" ? row.feedback : null,
       };
     });
     setPreferences(nextPreferences);
-  };
+  }, [userId]);
 
-  const loadRecommendations = async (forceRefresh = false) => {
-    if (!user || userRole !== "lecturer") return;
+  const loadRecommendations = useCallback(async (forceRefresh = false) => {
+    if (!userId || userRole !== "lecturer") return;
 
     const courses = performanceData?.courses || [];
     if (courses.length === 0) {
@@ -126,7 +125,7 @@ export function AIRecommendations({
     setLoadError("");
 
     try {
-      const cacheKey = `lecturer-ai-recommendations:v3:${user.id}`;
+      const cacheKey = `lecturer-ai-recommendations:v3:${userId}`;
       if (!forceRefresh) {
         try {
           const cachedValue = sessionStorage.getItem(cacheKey);
@@ -159,8 +158,19 @@ export function AIRecommendations({
       if (error) {
         let message = error.message;
         try {
-          const details = await (error as any)?.context?.json?.();
-          if (details?.error) message = details.error;
+          const context =
+            error && typeof error === "object" && "context" in error
+              ? (error as { context?: { json?: () => Promise<unknown> } }).context
+              : undefined;
+          const details = await context?.json?.();
+          if (
+            details &&
+            typeof details === "object" &&
+            "error" in details &&
+            typeof details.error === "string"
+          ) {
+            message = details.error;
+          }
         } catch {
           // The standard function error message is used when no JSON body exists.
         }
@@ -183,13 +193,23 @@ export function AIRecommendations({
       } catch {
         // Recommendations still work when browser storage is unavailable.
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Could not load lecturer AI recommendations:", error);
-      setLoadError(error?.message || "AI recommendations could not be loaded.");
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "AI recommendations could not be loaded.",
+      );
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [performanceData, recommendationContext, userId, userRole]);
+
+  useEffect(() => {
+    if (!userId || userRole !== "lecturer") return;
+    void loadPreferences();
+    void loadRecommendations();
+  }, [loadPreferences, loadRecommendations, userId, userRole]);
 
   const getTypeIcon = (type: string) => {
     switch (type) {

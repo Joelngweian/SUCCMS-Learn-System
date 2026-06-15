@@ -1,27 +1,109 @@
 import { supabase } from "@/lib/supabase";
+import type { Database } from "@/lib/database.types";
 
 export const COURSE_OFFERING_SELECT = "*, courses(*), academic_terms(*)";
 
-export function normalizeCourseOffering(row: any) {
-  const offering = row?.course_offerings || row;
-  const course = offering?.courses || {};
-  const term = offering?.academic_terms || {};
+type CourseRow = Database["public"]["Tables"]["courses"]["Row"];
+type CourseOfferingRow =
+  Database["public"]["Tables"]["course_offerings"]["Row"];
+type AcademicTermRow =
+  Database["public"]["Tables"]["academic_terms"]["Row"];
+
+export type NormalizedCourseOffering =
+  Partial<CourseRow>
+  & Partial<CourseOfferingRow>
+  & {
+    id: string;
+    template_id: string;
+    course_code: string;
+    code: string;
+    name: string;
+    chinese_name: string | null;
+    faculty: string;
+    programme: string;
+    course_type:
+      | "common_core"
+      | "discipline_core"
+      | "elective_open"
+      | "elective_core";
+    credit_hours: number;
+    max_capacity: number;
+    enrollment_key: string | null;
+    status: "active" | "unavailable" | "full" | "open";
+    semester: string;
+  };
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+
+const asString = (value: unknown, fallback = "") =>
+  typeof value === "string" ? value : fallback;
+
+const asCourseType = (
+  value: unknown,
+): NormalizedCourseOffering["course_type"] => {
+  if (
+    value === "common_core"
+    || value === "discipline_core"
+    || value === "elective_open"
+    || value === "elective_core"
+  ) {
+    return value;
+  }
+  return "elective_open";
+};
+
+const asOfferingStatus = (
+  value: unknown,
+): NormalizedCourseOffering["status"] => {
+  if (
+    value === "active"
+    || value === "unavailable"
+    || value === "full"
+    || value === "open"
+  ) {
+    return value;
+  }
+  return "active";
+};
+
+export function normalizeCourseOffering(
+  row: unknown,
+): NormalizedCourseOffering {
+  const root = asRecord(row);
+  const offeringRecord = Object.keys(asRecord(root.course_offerings)).length
+    ? asRecord(root.course_offerings)
+    : root;
+  const courseRecord = asRecord(offeringRecord.courses);
+  const termRecord = asRecord(offeringRecord.academic_terms);
+  const offering = offeringRecord as Partial<CourseOfferingRow>;
+  const course = courseRecord as Partial<CourseRow>;
+  const term = termRecord as Partial<AcademicTermRow>;
 
   return {
     ...course,
     ...offering,
-    id: offering?.id,
-    template_id: offering?.course_id,
-    course_code: course?.course_code || course?.code,
-    code: course?.code || course?.course_code,
-    name: course?.name,
-    chinese_name: course?.chinese_name,
-    faculty: course?.faculty,
-    programme: course?.programme,
-    course_type: course?.course_type,
-    credits: course?.credits,
-    credit_hours: course?.credit_hours ?? course?.credits,
-    semester: term?.code || term?.name || "Current",
+    id: asString(offering.id),
+    template_id: asString(offering.course_id),
+    course_code: asString(course.course_code || course.code),
+    code: asString(course.code || course.course_code),
+    name: asString(course.name),
+    chinese_name: course.chinese_name ?? null,
+    faculty: course.faculty || "",
+    programme: course.programme || "",
+    course_type: asCourseType(course.course_type),
+    credits: course.credits,
+    credit_hours: course.credit_hours ?? course.credits ?? 0,
+    max_capacity:
+      offering.max_capacity
+      ?? course.max_capacity
+      ?? course.max_students
+      ?? 0,
+    enrollment_key: offering.enrollment_key ?? course.enrollment_key ?? null,
+    status: asOfferingStatus(offering.status ?? course.status),
+    semester: term.code || term.name || "Current",
   };
 }
 
@@ -38,14 +120,23 @@ function extractStoragePath(value: unknown, bucket: string) {
   return value.replace(/^\/+/, "");
 }
 
-function collectAttachmentPaths(rows: any[], property: string, bucket: string) {
+function collectAttachmentPaths(
+  rows: unknown[],
+  property: string,
+  bucket: string,
+) {
   const paths: string[] = [];
 
   rows.forEach((row) => {
-    const attachments = Array.isArray(row?.[property]) ? row[property] : [];
-    attachments.forEach((attachment: any) => {
+    const record = asRecord(row);
+    const rawAttachments = record[property];
+    const attachments: unknown[] = Array.isArray(rawAttachments)
+      ? rawAttachments
+      : [];
+    attachments.forEach((attachment: unknown) => {
+      const attachmentRecord = asRecord(attachment);
       const path = extractStoragePath(
-        attachment?.path || attachment?.url || attachment,
+        attachmentRecord.path || attachmentRecord.url || attachment,
         bucket
       );
       if (path) paths.push(path);
@@ -90,30 +181,30 @@ export async function removeCourseOfferingFiles(offeringId: string) {
   ]);
 
   const assignments = assignmentsResult.data || [];
-  const assignmentIds = assignments.map((assignment: any) => assignment.id);
+  const assignmentIds = assignments.map(assignment => assignment.id);
   const threads = threadsResult.data || [];
-  const threadIds = threads.map((thread: any) => thread.id).filter(Boolean);
+  const threadIds = threads.map(thread => thread.id).filter(Boolean);
   const submissionsResult = assignmentIds.length
     ? await supabase
         .from("assignment_submissions")
         .select("files, submission_file_url")
         .in("assignment_id", assignmentIds)
-    : { data: [] as any[] };
+    : { data: [] };
   const repliesResult = threadIds.length
     ? await supabase
         .from("forum_replies")
         .select("image_url")
         .in("thread_id", threadIds)
-    : { data: [] as any[] };
+    : { data: [] };
 
   const materialPaths = (materialsResult.data || [])
-    .flatMap((material: any) => [
+    .flatMap(material => [
       extractStoragePath(material.file_path, "course_content"),
       extractStoragePath(material.file_url, "course_content"),
     ])
     .filter(Boolean) as string[];
 
-  const assignmentRubricPaths = assignments.flatMap((assignment: any) => {
+  const assignmentRubricPaths = assignments.flatMap(assignment => {
     try {
       const rubric = JSON.parse(assignment.rubric || "[]");
       return collectAttachmentPaths([{ rubric }], "rubric", "course_content");
@@ -126,7 +217,7 @@ export async function removeCourseOfferingFiles(offeringId: string) {
   const submissionPaths = [
     ...collectAttachmentPaths(submissionRows, "files", "course_content"),
     ...submissionRows
-      .map((submission: any) =>
+      .map(submission =>
         extractStoragePath(submission.submission_file_url, "course_content")
       )
       .filter(Boolean),
@@ -145,7 +236,7 @@ export async function removeCourseOfferingFiles(offeringId: string) {
       [
         ...collectAttachmentPaths(threads, "images", "forum-images"),
         ...(repliesResult.data || [])
-          .map((reply: any) => extractStoragePath(reply.image_url, "forum-images"))
+          .map(reply => extractStoragePath(reply.image_url, "forum-images"))
           .filter(Boolean),
       ] as string[]
     ),

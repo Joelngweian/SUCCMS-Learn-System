@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Progress } from "./ui/progress";
@@ -8,11 +8,13 @@ import { Button } from "./ui/button";
 import { AIRecommendations } from "./AIRecommendations";
 import { Stories } from "./Stories";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/lib/supabase";
 import {
-  COURSE_OFFERING_SELECT,
-  normalizeCourseOffering,
-} from "@/lib/courseOfferings";
+  getCourseOfferings,
+  getLecturerCourseIds,
+} from "@/data/courseRepository";
+import { getProfileSummaries } from "@/data/profileRepository";
+import { supabase } from "@/lib/supabase";
+import type { Database } from "@/lib/database.types";
 import {
   BookOpen,
   Users,
@@ -78,7 +80,31 @@ interface UpcomingDeadline {
   enrolledStudents: number;
 }
 
-const getCourseCode = (course: any) => course?.course_code || course?.code || "N/A";
+type AssignmentRow = Pick<
+  Database["public"]["Tables"]["assignments"]["Row"],
+  "id" | "course_id" | "title" | "due_date" | "max_score" | "created_at"
+>;
+type SubmissionRow = Pick<
+  Database["public"]["Tables"]["assignment_submissions"]["Row"],
+  "id" | "assignment_id" | "student_id" | "submitted_at" | "grade" | "is_late"
+>;
+type EnrollmentRow = Pick<
+  Database["public"]["Tables"]["course_enrollments"]["Row"],
+  "course_id" | "student_id" | "enrolled_at"
+>;
+type MaterialRow = Pick<
+  Database["public"]["Tables"]["course_materials"]["Row"],
+  "id" | "course_id"
+>;
+type ProfileSummary = Pick<
+  Database["public"]["Tables"]["user_profiles"]["Row"],
+  "id" | "full_name" | "avatar_url"
+>;
+
+const getCourseCode = (course?: {
+  course_code?: string | null;
+  code?: string | null;
+} | null) => course?.course_code || course?.code || "N/A";
 
 const percentageToGrade = (percentage: number | null) => {
   if (percentage == null) return null;
@@ -103,6 +129,7 @@ const formatDateTime = (value: string) =>
 
 export function LecturerDashboard() {
   const { user, profile } = useAuth();
+  const userId = user?.id;
   const navigate = useNavigate();
   const [myCourses, setMyCourses] = useState<LecturerCourse[]>([]);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
@@ -117,27 +144,14 @@ export function LecturerDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  useEffect(() => {
-    if (user) loadDashboardData();
-  }, [user?.id]);
-
-  const loadDashboardData = async () => {
-    if (!user) return;
+  const loadDashboardData = useCallback(async () => {
+    if (!userId) return;
 
     setIsLoading(true);
     setLoadError("");
 
     try {
-      const teachingResult = await supabase
-        .from("course_instructors")
-        .select("course_id")
-        .eq("user_id", user.id);
-
-      if (teachingResult.error) throw teachingResult.error;
-
-      const courseIds = Array.from(
-        new Set((teachingResult.data || []).map((row: any) => row.course_id).filter(Boolean))
-      );
+      const courseIds = await getLecturerCourseIds(userId);
 
       if (courseIds.length === 0) {
         setMyCourses([]);
@@ -157,16 +171,13 @@ export function LecturerDashboard() {
       startOfToday.setHours(0, 0, 0, 0);
 
       const [
-        courseResult,
+        courseRows,
         enrollmentResult,
         assignmentResult,
         materialResult,
         forumResult,
       ] = await Promise.all([
-        supabase
-          .from("course_offerings")
-          .select(COURSE_OFFERING_SELECT)
-          .in("id", courseIds),
+        getCourseOfferings(courseIds),
         supabase
           .from("course_enrollments")
           .select("course_id, student_id, enrolled_at")
@@ -187,17 +198,15 @@ export function LecturerDashboard() {
           .gte("created_at", startOfToday.toISOString()),
       ]);
 
-      if (courseResult.error) throw courseResult.error;
       if (enrollmentResult.error) throw enrollmentResult.error;
       if (assignmentResult.error) throw assignmentResult.error;
 
-      const courseRows = (courseResult.data || []).map(normalizeCourseOffering);
       const enrollmentRows = enrollmentResult.data || [];
       const assignmentRows = assignmentResult.data || [];
       const materialRows = materialResult.data || [];
-      const assignmentIds = assignmentRows.map((assignment: any) => assignment.id);
+      const assignmentIds = assignmentRows.map((assignment) => assignment.id);
 
-      let submissionRows: any[] = [];
+      let submissionRows: SubmissionRow[] = [];
       if (assignmentIds.length > 0) {
         const submissionResult = await supabase
           .from("assignment_submissions")
@@ -210,72 +219,66 @@ export function LecturerDashboard() {
       }
 
       const studentIds = Array.from(
-        new Set(submissionRows.map((submission: any) => submission.student_id).filter(Boolean))
+        new Set(submissionRows.map((submission) => submission.student_id).filter(Boolean))
       );
-      let profileRows: any[] = [];
+      let profileRows: ProfileSummary[] = [];
 
       if (studentIds.length > 0) {
-        const profileResult = await supabase
-          .from("user_profiles")
-          .select("id, full_name, avatar_url")
-          .in("id", studentIds);
-
-        if (profileResult.error) throw profileResult.error;
-        profileRows = profileResult.data || [];
+        profileRows = await getProfileSummaries(studentIds);
       }
 
-      const profilesById = new Map(profileRows.map((row: any) => [row.id, row]));
-      const courseById = new Map(courseRows.map((course: any) => [course.id, course]));
+      const profilesById = new Map(profileRows.map((row) => [row.id, row]));
+      const courseById = new Map(courseRows.map((course) => [course.id, course]));
       const assignmentById = new Map(
-        assignmentRows.map((assignment: any) => [assignment.id, assignment])
+        assignmentRows.map((assignment) => [assignment.id, assignment])
       );
 
-      const enrollmentsByCourse = new Map<string, any[]>();
-      enrollmentRows.forEach((enrollment: any) => {
+      const enrollmentsByCourse = new Map<string, EnrollmentRow[]>();
+      enrollmentRows.forEach((enrollment) => {
         const current = enrollmentsByCourse.get(enrollment.course_id) || [];
         current.push(enrollment);
         enrollmentsByCourse.set(enrollment.course_id, current);
       });
 
-      const assignmentsByCourse = new Map<string, any[]>();
-      assignmentRows.forEach((assignment: any) => {
+      const assignmentsByCourse = new Map<string, AssignmentRow[]>();
+      assignmentRows.forEach((assignment) => {
         const current = assignmentsByCourse.get(assignment.course_id) || [];
         current.push(assignment);
         assignmentsByCourse.set(assignment.course_id, current);
       });
 
-      const submissionsByAssignment = new Map<string, any[]>();
-      submissionRows.forEach((submission: any) => {
+      const submissionsByAssignment = new Map<string, SubmissionRow[]>();
+      submissionRows.forEach((submission) => {
         const current = submissionsByAssignment.get(submission.assignment_id) || [];
         current.push(submission);
         submissionsByAssignment.set(submission.assignment_id, current);
       });
 
       const materialsByCourse = new Map<string, number>();
-      materialRows.forEach((material: any) => {
+      materialRows.forEach((material: MaterialRow) => {
         materialsByCourse.set(
           material.course_id,
           (materialsByCourse.get(material.course_id) || 0) + 1
         );
       });
 
-      const courses: LecturerCourse[] = courseRows.map((course: any) => {
+      const courses: LecturerCourse[] = courseRows.map((course) => {
         const courseEnrollments = enrollmentsByCourse.get(course.id) || [];
         const courseAssignments = assignmentsByCourse.get(course.id) || [];
         const courseSubmissions = courseAssignments.flatMap(
-          (assignment: any) => submissionsByAssignment.get(assignment.id) || []
+          (assignment) => submissionsByAssignment.get(assignment.id) || []
         );
         const expectedSubmissions = courseEnrollments.length * courseAssignments.length;
         const uniqueSubmitters = new Set(
-          courseSubmissions.map((submission: any) => submission.student_id)
+          courseSubmissions.map((submission) => submission.student_id)
         ).size;
         const ungradedCount = courseSubmissions.filter(
-          (submission: any) => submission.grade == null
+          (submission) => submission.grade == null
         ).length;
         const gradedPercentages = courseSubmissions
-          .filter((submission: any) => submission.grade != null)
-          .map((submission: any) => {
-            const assignment: any = assignmentById.get(submission.assignment_id);
+          .filter((submission) => submission.grade != null)
+          .map((submission) => {
+            const assignment = assignmentById.get(submission.assignment_id);
             return (
               (Number(submission.grade) / (Number(assignment?.max_score) || 100)) *
               100
@@ -314,16 +317,16 @@ export function LecturerDashboard() {
       });
 
       const tasks: PendingTask[] = assignmentRows
-        .map((assignment: any) => {
+        .map((assignment) => {
           const submissions = submissionsByAssignment.get(assignment.id) || [];
           const ungraded = submissions.filter(
-            (submission: any) => submission.grade == null
+            (submission) => submission.grade == null
           ).length;
           if (ungraded === 0) return null;
 
           const dueDate = new Date(assignment.due_date);
           const daysUntilDue = Math.ceil((dueDate.getTime() - Date.now()) / 86400000);
-          const course: any = courseById.get(assignment.course_id);
+          const course = courseById.get(assignment.course_id);
 
           return {
             id: assignment.id,
@@ -348,10 +351,12 @@ export function LecturerDashboard() {
             new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
         );
 
-      const activity: RecentActivity[] = submissionRows.slice(0, 8).map((submission: any) => {
-        const assignment: any = assignmentById.get(submission.assignment_id);
-        const course: any = courseById.get(assignment?.course_id);
-        const student: any = profilesById.get(submission.student_id);
+      const activity: RecentActivity[] = submissionRows.slice(0, 8).map((submission) => {
+        const assignment = assignmentById.get(submission.assignment_id);
+        const course = assignment
+          ? courseById.get(assignment.course_id)
+          : undefined;
+        const student = profilesById.get(submission.student_id);
 
         return {
           id: submission.id,
@@ -367,14 +372,14 @@ export function LecturerDashboard() {
       });
 
       const deadlines: UpcomingDeadline[] = assignmentRows
-        .filter((assignment: any) => new Date(assignment.due_date) >= new Date())
+        .filter((assignment) => new Date(assignment.due_date) >= new Date())
         .sort(
-          (a: any, b: any) =>
+          (a, b) =>
             new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
         )
         .slice(0, 5)
-        .map((assignment: any) => {
-          const course: any = courseById.get(assignment.course_id);
+        .map((assignment) => {
+          const course = courseById.get(assignment.course_id);
           return {
             id: assignment.id,
             courseId: assignment.course_id,
@@ -387,7 +392,7 @@ export function LecturerDashboard() {
         });
 
       const uniqueStudents = new Set(
-        enrollmentRows.map((enrollment: any) => enrollment.student_id)
+        enrollmentRows.map((enrollment) => enrollment.student_id)
       ).size;
       const averageEngagement =
         courses.length > 0
@@ -404,18 +409,26 @@ export function LecturerDashboard() {
       setStats({
         totalStudents: uniqueStudents,
         pendingGrades: submissionRows.filter(
-          (submission: any) => submission.grade == null
+          (submission) => submission.grade == null
         ).length,
         forumPostsToday: forumResult.data?.length || 0,
         averageEngagement,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to load lecturer dashboard:", error);
-      setLoadError(error?.message || "Could not load dashboard data.");
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Could not load dashboard data.",
+      );
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    if (userId) void loadDashboardData();
+  }, [loadDashboardData, userId]);
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {

@@ -6,13 +6,13 @@ import { ActivitySection } from "./activity-section"
 import { Grid3x3, Heart, UserCheck, Users, ImageIcon } from "lucide-react"
 
 interface Course {
-  id: number
+  id: string
   name: string
   code: string
 }
 
 interface Activity {
-  id: number
+  id: string
   type: string
   content: string
   time: string

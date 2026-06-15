@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "next-themes";
-import { toast } from "sonner";
-import { Database } from "@/lib/database.types";
+import type { Database } from "@/lib/database.types";
+import { getNotifyMessage, notify } from "@/lib/notify";
 
 type UserSettings = Database["public"]["Tables"]["user_settings"]["Row"];
 export type SettingsConfig = Omit<UserSettings, "user_id" | "created_at" | "updated_at">;
@@ -51,6 +51,7 @@ const normalizeSettings = (config: Partial<SettingsConfig>): SettingsConfig => {
 
 export function useSettings() {
   const { user } = useAuth();
+  const userId = user?.id;
   const { theme, setTheme } = useTheme();
   
   const [settings, setSettings] = useState<SettingsConfig>(DEFAULT_SETTINGS);
@@ -76,8 +77,8 @@ export function useSettings() {
     root.classList.toggle("animations-disabled", !config.animations_enabled);
   };
 
-  const saveSettingsToDb = async (config: SettingsConfig) => {
-    if (!user) return;
+  const saveSettingsToDb = useCallback(async (config: SettingsConfig) => {
+    if (!userId) return;
 
     setIsSaving(true);
     setSaveStatus("saving");
@@ -85,7 +86,7 @@ export function useSettings() {
       const normalizedConfig = normalizeSettings(config);
       const { error } = await supabase
         .from("user_settings")
-        .upsert({ user_id: user.id, ...normalizedConfig }, { onConflict: "user_id" });
+        .upsert({ user_id: userId, ...normalizedConfig }, { onConflict: "user_id" });
         
       if (error) throw error;
       
@@ -93,19 +94,19 @@ export function useSettings() {
       setSaveStatus("saved");
       setErrorMessage(null);
       setLastSavedAt(new Date().toISOString());
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to save settings:", error);
       setSaveStatus("error");
-      const msg = error?.message || error?.details || JSON.stringify(error);
+      const msg = getNotifyMessage(error, "Settings could not be saved.");
       setErrorMessage(msg);
-      toast.error(`Failed to save settings: ${msg}`);
+      notify.error(error, "Settings could not be saved.");
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [userId]);
 
-  const fetchSettings = async () => {
-    if (!user) {
+  const fetchSettings = useCallback(async () => {
+    if (!userId) {
       setIsLoading(false);
       return;
     }
@@ -115,13 +116,13 @@ export function useSettings() {
       const { data, error } = await supabase
         .from("user_settings")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .maybeSingle();
         
       if (error) {
         console.error("Error fetching settings:", error);
-        const msg = error?.message || error?.details || JSON.stringify(error);
-        toast.error(`Failed to load settings: ${msg}`);
+        const msg = getNotifyMessage(error, "Settings could not be loaded.");
+        notify.error(error, "Settings could not be loaded.");
         setErrorMessage(msg);
         setSaveStatus("error");
         // Don't attempt to insert defaults when we can't even read the table
@@ -151,11 +152,11 @@ export function useSettings() {
     } finally {
       setIsLoading(false);
     }
-  }; // Removed useCallback
+  }, [saveSettingsToDb, setTheme, userId]);
 
   useEffect(() => {
-    fetchSettings();
-  }, [user?.id]); // Only run when the user changes
+    void fetchSettings();
+  }, [fetchSettings]);
 
   // Sync theme from next-themes if it changed externally (e.g., top-right button)
   useEffect(() => {
@@ -180,9 +181,9 @@ export function useSettings() {
     
     // Auto-save logic: save immediately
     if (isDifferent && !isLoading) {
-      saveSettingsToDb(settingsRef.current);
+      void saveSettingsToDb(settingsRef.current);
     }
-  }, [settings, dbSettings, isLoading]);
+  }, [settings, dbSettings, isLoading, saveSettingsToDb]);
 
   const updateSetting = useCallback(<K extends keyof SettingsConfig>(
     key: K, 
@@ -205,7 +206,7 @@ export function useSettings() {
     setTheme(DEFAULT_SETTINGS.theme);
     applyUiSettings(DEFAULT_SETTINGS);
     await saveSettingsToDb(DEFAULT_SETTINGS);
-    toast.success("Reset to default settings.");
+    notify.success("Reset to default settings.");
   };
 
   // Prevent accidental closure if unsaved (though auto-save makes this less critical, it's good UX)
