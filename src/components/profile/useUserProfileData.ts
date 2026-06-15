@@ -55,10 +55,12 @@ const normalizeConnections = (
     .filter((row): row is ConnectedProfile => row !== null);
 
 export function useUserProfileData({
+  currentUserEmail,
   currentUserId,
   isOwnProfile,
   viewId,
 }: {
+  currentUserEmail?: string | null;
   currentUserId?: string | null;
   isOwnProfile: boolean;
   viewId: string | null;
@@ -132,11 +134,17 @@ export function useUserProfileData({
     try {
       const { data: userProfile, error: profileError } = await supabase
         .from("user_profiles")
-        .select("*")
+        .select(
+          "id, full_name, username, role, program_or_department, avatar_url, bio, created_at, updated_at, is_active, cover_url, faculty, programme",
+        )
         .eq("id", viewId)
         .single();
 
       if (profileError) throw profileError;
+      const visibleProfile: ProfileData = {
+        ...userProfile,
+        email: isOwnProfile ? currentUserEmail || "" : "",
+      };
 
       if (!isOwnProfile) {
         const { data: visibility, error: visibilityError } =
@@ -146,7 +154,7 @@ export function useUserProfileData({
 
         if (visibilityError) throw visibilityError;
         if ((visibility || "everyone") === "nobody") {
-          setProfileData({ ...userProfile, _isPrivate: true });
+          setProfileData({ ...visibleProfile, _isPrivate: true });
           setCourses([]);
           setPosts([]);
           setFollowers([]);
@@ -158,7 +166,7 @@ export function useUserProfileData({
         }
       }
 
-      setProfileData(userProfile);
+      setProfileData(visibleProfile);
 
       const courseQuery =
         userProfile.role === "lecturer"
@@ -202,7 +210,7 @@ export function useUserProfileData({
     } finally {
       setIsLoading(false);
     }
-  }, [fetchFollowData, isOwnProfile, viewId]);
+  }, [currentUserEmail, fetchFollowData, isOwnProfile, viewId]);
 
   useEffect(() => {
     if (!viewId) {

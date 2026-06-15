@@ -39,6 +39,7 @@ export const UserProfile = () => {
     profileData,
     setProfileData,
   } = useUserProfileData({
+    currentUserEmail: me?.email,
     currentUserId: me?.id,
     isOwnProfile,
     viewId,
@@ -429,7 +430,7 @@ export const UserProfile = () => {
 
         <ProfileTabs
           bio={profileData.bio || ""}
-          email={profileData.email}
+          email={profileData.email || ""}
           faculty={profileData.faculty || ""}
           programme={profileData.programme || ""}
           courses={coursesProps}

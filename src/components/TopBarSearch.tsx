@@ -8,7 +8,7 @@ import type { Database } from "@/lib/database.types";
 
 type SearchUser = Pick<
   Database["public"]["Tables"]["user_profiles"]["Row"],
-  "id" | "full_name" | "email" | "avatar_url" | "role"
+  "id" | "full_name" | "avatar_url" | "role"
 >;
 
 export function TopBarSearch() {
@@ -44,7 +44,7 @@ export function TopBarSearch() {
       try {
         const { data, error } = await supabase
           .from("user_profiles")
-          .select("id, full_name, email, avatar_url, role")
+          .select("id, full_name, avatar_url, role")
           .ilike("full_name", `%${query}%`)
           .limit(5);
 
@@ -101,14 +101,13 @@ export function TopBarSearch() {
                     <AvatarImage src={user.avatar_url || ""} />
                     <AvatarFallback>{user.full_name?.charAt(0) || "U"}</AvatarFallback>
                   </Avatar>
-                  <div className="flex flex-col overflow-hidden w-full gap-0.5">
+                  <div className="flex flex-col overflow-hidden w-full">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium truncate">{user.full_name}</span>
                       <Badge variant="secondary" className="text-[10px] h-4 px-1 py-0 capitalize shrink-0 font-normal">
                         {user.role}
                       </Badge>
                     </div>
-                    <span className="text-xs text-muted-foreground truncate">{user.email}</span>
                   </div>
                 </li>
               ))}

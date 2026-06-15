@@ -1,9 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/ThemeProvider";
 import type { Database } from "@/lib/database.types";
 import { getNotifyMessage, notify } from "@/lib/notify";
+import {
+  isThemePreference,
+  type ThemePreference,
+} from "@/lib/themePreference";
 
 type UserSettings = Database["public"]["Tables"]["user_settings"]["Row"];
 export type SettingsConfig = Omit<UserSettings, "user_id" | "created_at" | "updated_at">;
@@ -62,10 +66,8 @@ export function useSettings() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const settingsRef = useRef(settings);
-  settingsRef.current = settings;
-  const pendingTheme = useRef<string | null>(null);
+  const pendingThemePreview = useRef<string | null>(null);
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const applyUiSettings = (config: SettingsConfig) => {
     const root = document.documentElement;
@@ -78,7 +80,7 @@ export function useSettings() {
   };
 
   const saveSettingsToDb = useCallback(async (config: SettingsConfig) => {
-    if (!userId) return;
+    if (!userId) return false;
 
     setIsSaving(true);
     setSaveStatus("saving");
@@ -94,12 +96,14 @@ export function useSettings() {
       setSaveStatus("saved");
       setErrorMessage(null);
       setLastSavedAt(new Date().toISOString());
+      return true;
     } catch (error: unknown) {
       console.error("Failed to save settings:", error);
       setSaveStatus("error");
       const msg = getNotifyMessage(error, "Settings could not be saved.");
       setErrorMessage(msg);
       notify.error(error, "Settings could not be saved.");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -135,7 +139,6 @@ export function useSettings() {
         const normalizedSettings = normalizeSettings(rest);
         setSettings(normalizedSettings);
         setDbSettings(normalizedSettings);
-        setTheme(normalizedSettings.theme);
         applyUiSettings(normalizedSettings);
         setSaveStatus("saved");
         setLastSavedAt(updated_at);
@@ -143,7 +146,6 @@ export function useSettings() {
         // No settings found, upsert defaults
         setSettings(DEFAULT_SETTINGS);
         setDbSettings(DEFAULT_SETTINGS);
-        setTheme(DEFAULT_SETTINGS.theme);
         applyUiSettings(DEFAULT_SETTINGS);
         await saveSettingsToDb(DEFAULT_SETTINGS);
       }
@@ -152,46 +154,70 @@ export function useSettings() {
     } finally {
       setIsLoading(false);
     }
-  }, [saveSettingsToDb, setTheme, userId]);
+  }, [saveSettingsToDb, userId]);
 
   useEffect(() => {
     void fetchSettings();
   }, [fetchSettings]);
 
-  // Sync theme from next-themes if it changed externally (e.g., top-right button)
+  // Keep the Settings selection synchronized with changes from the top bar.
   useEffect(() => {
-    if (!theme || !["light", "dark", "system"].includes(theme)) return;
+    if (isLoading || !isThemePreference(theme)) return;
 
-    if (pendingTheme.current === theme) {
-      // next-themes has caught up with our local change
-      pendingTheme.current = null;
+    if (pendingThemePreview.current === theme) {
+      pendingThemePreview.current = null;
       return;
     }
 
-    if (!pendingTheme.current && settings.theme !== theme) {
-      // Theme changed externally, sync our local state without triggering auto-save
-      setSettings((prev) => ({ ...prev, theme: theme as SettingsConfig["theme"] }));
-      setDbSettings((prev) => ({ ...prev, theme: theme as SettingsConfig["theme"] }));
-    }
-  }, [theme, settings.theme]);
+    setSettings((previous) =>
+      previous.theme === theme ? previous : { ...previous, theme },
+    );
+    setDbSettings((previous) =>
+      previous.theme === theme ? previous : { ...previous, theme },
+    );
+  }, [isLoading, theme]);
+
   // Check if changes exist
   useEffect(() => {
     const isDifferent = JSON.stringify(settings) !== JSON.stringify(dbSettings);
     setHasChanges(isDifferent);
-    
-    // Auto-save logic: save immediately
-    if (isDifferent && !isLoading) {
-      void saveSettingsToDb(settingsRef.current);
+  }, [settings, dbSettings]);
+
+  useEffect(() => {
+    if (autosaveTimer.current) {
+      clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = null;
     }
-  }, [settings, dbSettings, isLoading, saveSettingsToDb]);
+
+    if (isLoading || isSaving || !hasChanges || !userId) return;
+
+    autosaveTimer.current = setTimeout(() => {
+      autosaveTimer.current = null;
+      void saveSettingsToDb(settings);
+    }, 600);
+
+    return () => {
+      if (autosaveTimer.current) {
+        clearTimeout(autosaveTimer.current);
+        autosaveTimer.current = null;
+      }
+    };
+  }, [
+    hasChanges,
+    isLoading,
+    isSaving,
+    saveSettingsToDb,
+    settings,
+    userId,
+  ]);
 
   const updateSetting = useCallback(<K extends keyof SettingsConfig>(
     key: K, 
     value: SettingsConfig[K]
   ) => {
     if (key === 'theme') {
-      pendingTheme.current = value as string;
-      setTheme(value as string);
+      pendingThemePreview.current = value as string;
+      setTheme(value as ThemePreference);
     }
     setSettings(prev => {
       const next = { ...prev, [key]: value };
@@ -201,15 +227,16 @@ export function useSettings() {
     });
   }, [setTheme]);
 
-  const resetToDefaults = async () => {
+  const resetToDefaults = () => {
+    pendingThemePreview.current = DEFAULT_SETTINGS.theme;
     setSettings(DEFAULT_SETTINGS);
-    setTheme(DEFAULT_SETTINGS.theme);
+    setTheme(DEFAULT_SETTINGS.theme as ThemePreference);
     applyUiSettings(DEFAULT_SETTINGS);
-    await saveSettingsToDb(DEFAULT_SETTINGS);
-    notify.success("Reset to default settings.");
+    setSaveStatus("idle");
+    notify.success("Default settings applied.");
   };
 
-  // Prevent accidental closure if unsaved (though auto-save makes this less critical, it's good UX)
+  // Warn if the tab closes during the short autosave window.
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasChanges) {

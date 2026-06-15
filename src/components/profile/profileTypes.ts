@@ -4,7 +4,11 @@ import type { NormalizedCourseOffering } from "@/lib/courseOfferings";
 type TableRow<T extends keyof Database["public"]["Tables"]> =
   Database["public"]["Tables"][T]["Row"];
 
-export type ProfileData = TableRow<"user_profiles"> & {
+export type ProfileData = Omit<
+  TableRow<"user_profiles">,
+  "email" | "last_login_at"
+> & {
+  email?: string;
   _isPrivate?: boolean;
 };
 

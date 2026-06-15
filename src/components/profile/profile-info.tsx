@@ -4,7 +4,7 @@ import { Mail, Building2, GraduationCap } from "lucide-react"
 
 interface ProfileInfoProps {
   bio: string
-  email: string
+  email?: string
   faculty: string
   programme: string
   isEditing?: boolean
@@ -46,21 +46,22 @@ export function ProfileInfo({ bio, email, faculty, programme, isEditing = false,
         </CardContent>
       </Card>
 
-      {/* Contact Information */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Contact Information</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-start gap-3">
-            <Mail className="mt-0.5 h-5 w-5 text-muted-foreground" />
-            <div>
-              <p className="text-sm font-medium">Email</p>
-              <p className="text-sm text-muted-foreground">{email}</p>
+      {email && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Contact Information</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-start gap-3">
+              <Mail className="mt-0.5 h-5 w-5 text-muted-foreground" />
+              <div>
+                <p className="text-sm font-medium">Email</p>
+                <p className="text-sm text-muted-foreground">{email}</p>
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Academic Information */}
       <Card>

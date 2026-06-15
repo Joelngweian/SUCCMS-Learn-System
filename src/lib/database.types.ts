@@ -1077,6 +1077,7 @@ export type Database = {
           id: string
           email: string
           full_name: string
+          username: string | null
           role: string
           program_or_department: string | null
           avatar_url: string | null

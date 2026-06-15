@@ -30,7 +30,7 @@ interface ProfileConnection {
 
 interface ProfileTabsProps {
   bio: string
-  email: string
+  email?: string
   faculty: string
   programme: string
   courses: Course[]

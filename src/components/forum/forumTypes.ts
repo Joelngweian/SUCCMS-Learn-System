@@ -15,7 +15,7 @@ export type ForumAuthor = Pick<
 
 export type ForumMentionMember = Pick<
   UserProfileRow,
-  "id" | "full_name" | "email" | "role" | "avatar_url"
+  "id" | "full_name" | "role" | "avatar_url"
 >;
 
 export type ForumReaction = {

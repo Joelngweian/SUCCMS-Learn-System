@@ -2,10 +2,14 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase.ts';
 
+const AUTH_PROFILE_SELECT =
+  'id, full_name, username, role, faculty, programme, avatar_url, cover_url, bio, is_active';
+
 // Updated Profile to include all Database Fields
 export type UserProfile = {
   id: string;
   full_name: string;
+  username?: string | null;
   email: string;
   role: 'student' | 'lecturer' | 'admin';
   faculty?: string;   
@@ -16,15 +20,34 @@ export type UserProfile = {
   is_active?: boolean;
 };
 
+type EditableUserProfile = Partial<
+  Pick<
+    UserProfile,
+    | 'full_name'
+    | 'username'
+    | 'faculty'
+    | 'programme'
+    | 'avatar_url'
+    | 'cover_url'
+    | 'bio'
+  >
+>;
+
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   session: Session | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<AuthActionResult>;
-  signUp: (email: string, password: string, username: string, fullName: string, role: 'student' | 'lecturer' | 'admin') => Promise<AuthActionResult>;
+  signUp: (
+    email: string,
+    password: string,
+    username: string,
+    fullName: string,
+    role: 'student' | 'lecturer' | 'admin',
+  ) => Promise<AuthActionResult>;
   signOut: () => Promise<void>;
-  updateProfile: (updates: Partial<UserProfile>) => Promise<ProfileUpdateResult>;
+  updateProfile: (updates: EditableUserProfile) => Promise<ProfileUpdateResult>;
   refreshProfile: () => Promise<void>; 
 }
 
@@ -81,7 +104,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Fetch Profile
     const { data, error } = await supabase
       .from('user_profiles')
-      .select('*')
+      .select(AUTH_PROFILE_SELECT)
       .eq('id', session.user.id)
       .single();
 
@@ -91,7 +114,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(null);
       setProfile(null);
     } else if (data) {
-      setProfile(data as UserProfile);
+      setProfile({
+        ...data,
+        email: session.user.email || '',
+      } as UserProfile);
     } else {
       console.error("Profile load error:", error);
     }
@@ -196,12 +222,42 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return result;
   };
 
-  const signUp = async (email: string, password: string, username: string, fullName: string, role: 'student' | 'lecturer' | 'admin') => {
+  const signUp = async (
+    email: string,
+    password: string,
+    username: string,
+    fullName: string,
+    role: 'student' | 'lecturer' | 'admin',
+  ) => {
     try {
+      const normalizedEmail = email.trim().toLowerCase();
+      const normalizedUsername = username.trim();
+      const normalizedFullName = fullName.trim();
+
+      if (!normalizedUsername) {
+        return {
+          data: null,
+          error: { message: "Username is required." },
+        };
+      }
+
+      if (!normalizedFullName) {
+        return {
+          data: null,
+          error: { message: "Full name is required." },
+        };
+      }
+
       const { data, error } = await supabase.auth.signUp({
-        email,
+        email: normalizedEmail,
         password,
-        options: { data: { full_name: fullName, username, role } }
+        options: {
+          data: {
+            full_name: normalizedFullName,
+            username: normalizedUsername,
+            role,
+          },
+        },
       });
 
       if (error) throw error;
@@ -228,7 +284,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // --- NEW FUNCTIONS ---
 
   const updateProfile = async (
-    updates: Partial<UserProfile>,
+    updates: EditableUserProfile,
   ): Promise<ProfileUpdateResult> => {
     if (!user) {
       return { data: null, error: { message: "No authenticated user." } };
@@ -238,10 +294,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .from('user_profiles')
       .update(updates)
       .eq('id', user.id)
-      .select()
+      .select(AUTH_PROFILE_SELECT)
       .single();
 
-    const nextProfile = data ? data as UserProfile : null;
+    const nextProfile = data
+      ? {
+          ...data,
+          email: user.email || '',
+        } as UserProfile
+      : null;
     if (nextProfile) setProfile(nextProfile);
     return { data: nextProfile, error };
   };

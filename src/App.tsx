@@ -1,7 +1,11 @@
-import { lazy, Suspense, useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/ThemeProvider";
 import { supabase } from "@/lib/supabase.ts"; // Added Supabase import
+import {
+  loadThemePreference,
+  saveThemePreference,
+} from "@/lib/themePreference";
 import { useAuth } from "@/contexts/AuthContext.tsx";
 import { useOnlinePresence } from "@/hooks/useOnlinePresence";
 import { Login } from "./components/Login";
@@ -102,7 +106,7 @@ type NavigationItem = {
 
 export default function App() {
   const { user, profile, isLoading, signOut } = useAuth();
-  const { resolvedTheme, setTheme } = useTheme();
+  const { theme, resolvedTheme, setTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation(); 
   
@@ -112,6 +116,44 @@ export default function App() {
   
   // Notification State
   const [crucialCount, setCrucialCount] = useState(0);
+  const themeRef = useRef(theme);
+  const themeLoadRequestRef = useRef(0);
+
+  useEffect(() => {
+    themeRef.current = theme;
+  }, [theme]);
+
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId) return;
+
+    let cancelled = false;
+    const requestId = ++themeLoadRequestRef.current;
+    const themeAtRequestStart = themeRef.current;
+
+    const syncSavedTheme = async () => {
+      try {
+        const savedTheme = await loadThemePreference(userId);
+        if (
+          !cancelled &&
+          requestId === themeLoadRequestRef.current &&
+          themeRef.current === themeAtRequestStart &&
+          savedTheme &&
+          savedTheme !== themeRef.current
+        ) {
+          setTheme(savedTheme);
+        }
+      } catch (error) {
+        console.error("Error loading theme:", error);
+      }
+    };
+
+    void syncSavedTheme();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setTheme, user?.id]);
 
   // Derived State
   const userRole = (profile?.role as UserRole) || 'student';
@@ -229,21 +271,15 @@ export default function App() {
 
   const toggleTheme = async () => {
     const nextTheme = isDarkMode ? "light" : "dark";
+    themeLoadRequestRef.current += 1;
+    themeRef.current = nextTheme;
     setTheme(nextTheme);
 
     if (!user) return;
 
-    const { error } = await supabase
-      .from("user_settings")
-      .upsert(
-        {
-          user_id: user.id,
-          theme: nextTheme,
-        },
-        { onConflict: "user_id" }
-      );
-
-    if (error) {
+    try {
+      await saveThemePreference(user.id, nextTheme);
+    } catch (error) {
       console.error("Error saving theme:", error);
     }
   };

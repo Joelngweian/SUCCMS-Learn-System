@@ -45,7 +45,7 @@ export function useCoursePeople(courseId: string) {
       let query = supabase
         .from("user_profiles")
         .select(
-          "id, email, full_name, role, program_or_department, avatar_url, bio, created_at, updated_at, is_active, last_login_at, cover_url, faculty, programme",
+          "id, full_name, username, role, program_or_department, avatar_url, bio, created_at, updated_at, is_active, cover_url, faculty, programme",
         )
         .eq("role", "student");
 

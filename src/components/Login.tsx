@@ -27,7 +27,6 @@ export function Login() {
   const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
   const [signupFullName, setSignupFullName] = useState('');
   const [signupRole, setSignupRole] = useState<'student' | 'lecturer' | 'admin'>('student');
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -65,7 +64,7 @@ export function Login() {
       signupEmail, 
       signupPassword, 
       signupUsername, 
-      signupFullName, 
+      signupFullName,
       signupRole
     );
 
@@ -225,25 +224,25 @@ export function Login() {
                 <div className="space-y-2">
                   <Label>I am a...</Label>
                   <div className="grid grid-cols-3 gap-2">
-                    <Button 
-                      type="button" 
-                      variant={signupRole === 'student' ? 'default' : 'outline'} 
+                    <Button
+                      type="button"
+                      variant={signupRole === 'student' ? 'default' : 'outline'}
                       onClick={() => setSignupRole('student')}
                       className={signupRole === 'student' ? 'bg-blue-600 hover:bg-blue-700' : ''}
                     >
                       Student
                     </Button>
-                    <Button 
-                      type="button" 
-                      variant={signupRole === 'lecturer' ? 'default' : 'outline'} 
+                    <Button
+                      type="button"
+                      variant={signupRole === 'lecturer' ? 'default' : 'outline'}
                       onClick={() => setSignupRole('lecturer')}
                       className={signupRole === 'lecturer' ? 'bg-blue-600 hover:bg-blue-700' : ''}
                     >
                       Lecturer
                     </Button>
-                    <Button 
-                      type="button" 
-                      variant={signupRole === 'admin' ? 'default' : 'outline'} 
+                    <Button
+                      type="button"
+                      variant={signupRole === 'admin' ? 'default' : 'outline'}
                       onClick={() => setSignupRole('admin')}
                       className={signupRole === 'admin' ? 'bg-blue-600 hover:bg-blue-700' : ''}
                     >

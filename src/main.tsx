@@ -14,7 +14,7 @@ import { GlobalConfirmDialog } from '@/components/GlobalConfirmDialog'
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+      <ThemeProvider defaultTheme="system" enableSystem>
         <AuthProvider>
           <OnlinePresenceProvider>
             <App />

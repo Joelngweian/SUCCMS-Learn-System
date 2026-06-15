@@ -3,22 +3,40 @@ import { supabase } from "@/lib/supabase";
 import { cachedRequest, invalidateRequestCache } from "./requestCache";
 
 type ProfileRow = Database["public"]["Tables"]["user_profiles"]["Row"];
+export type ProfileDirectoryRow = Pick<
+  ProfileRow,
+  | "id"
+  | "full_name"
+  | "username"
+  | "role"
+  | "program_or_department"
+  | "avatar_url"
+  | "bio"
+  | "created_at"
+  | "updated_at"
+  | "is_active"
+  | "cover_url"
+  | "faculty"
+  | "programme"
+>;
 export type ProfileSummary = Pick<
   ProfileRow,
   "id" | "full_name" | "avatar_url"
 >;
 export type MentionProfile = Pick<
   ProfileRow,
-  "id" | "full_name" | "email" | "role" | "avatar_url"
+  "id" | "full_name" | "role" | "avatar_url"
 >;
 
 const PROFILE_SELECT =
-  "id, email, full_name, role, program_or_department, avatar_url, bio, created_at, updated_at, is_active, last_login_at, cover_url, faculty, programme";
+  "id, full_name, username, role, program_or_department, avatar_url, bio, created_at, updated_at, is_active, cover_url, faculty, programme";
 
 const normalizeIds = (ids: string[]) =>
   Array.from(new Set(ids.filter(Boolean))).sort();
 
-export async function getProfilesByIds(ids: string[]): Promise<ProfileRow[]> {
+export async function getProfilesByIds(
+  ids: string[],
+): Promise<ProfileDirectoryRow[]> {
   const profileIds = normalizeIds(ids);
   if (profileIds.length === 0) return [];
 
@@ -62,7 +80,7 @@ export async function getMentionProfiles(
   return cachedRequest(cacheKey, async () => {
     let query = supabase
       .from("user_profiles")
-      .select("id, full_name, email, role, avatar_url")
+      .select("id, full_name, role, avatar_url")
       .in("role", ["student", "lecturer"])
       .or("is_active.eq.true,is_active.is.null")
       .order("full_name", { ascending: true });

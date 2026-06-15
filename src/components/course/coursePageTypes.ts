@@ -3,7 +3,22 @@ import type { Database, Json } from "@/lib/database.types";
 type TableRow<T extends keyof Database["public"]["Tables"]> =
   Database["public"]["Tables"][T]["Row"];
 
-export type CoursePerson = TableRow<"user_profiles">;
+export type CoursePerson = Pick<
+  TableRow<"user_profiles">,
+  | "id"
+  | "full_name"
+  | "username"
+  | "role"
+  | "program_or_department"
+  | "avatar_url"
+  | "bio"
+  | "created_at"
+  | "updated_at"
+  | "is_active"
+  | "cover_url"
+  | "faculty"
+  | "programme"
+>;
 export type CourseMaterial = TableRow<"course_materials">;
 export type CourseProfileDisplay = {
   full_name: string;
