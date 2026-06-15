@@ -8,8 +8,8 @@ import { Pencil, Camera, Trash2 } from "lucide-react"
 interface ProfileHeaderProps {
   name: string
   role: "student" | "lecturer" | "admin"
-  profileImage: string
-  backgroundImage: string
+  profileImage?: string
+  backgroundImage?: string
   bio: string
   stats: {
     posts: number
@@ -59,7 +59,7 @@ export function ProfileHeader({ name, role, profileImage, backgroundImage, bio, 
         onMouseEnter={() => setIsHoveringBg(true)}
         onMouseLeave={() => setIsHoveringBg(false)}
       >
-        {backgroundImage && backgroundImage !== '/placeholder.svg' ? (
+        {backgroundImage ? (
           <img
             src={backgroundImage}
             alt="Cover"
@@ -77,7 +77,7 @@ export function ProfileHeader({ name, role, profileImage, backgroundImage, bio, 
                 Change Cover
               </Button>
             )}
-            {backgroundImage && backgroundImage !== '/placeholder.svg' && onCoverRemove && (
+            {backgroundImage && onCoverRemove && (
               <Button variant="destructive" size="sm" onClick={onCoverRemove}>
                 <Trash2 className="mr-2 h-4 w-4" />
                 Remove
@@ -97,7 +97,9 @@ export function ProfileHeader({ name, role, profileImage, backgroundImage, bio, 
             onMouseLeave={() => setIsHoveringProfile(false)}
           >
             <Avatar className="h-32 w-32 border-4 border-card shadow-xl">
-              <AvatarImage src={profileImage} className="object-cover" />
+              {profileImage && (
+                <AvatarImage src={profileImage} className="object-cover" />
+              )}
               <AvatarFallback className="text-4xl font-bold">
                 {name?.charAt(0)?.toUpperCase() || 'U'}
               </AvatarFallback>

@@ -350,8 +350,8 @@ export const UserProfile = () => {
               ? profileData.role
               : "student"
           }
-          profileImage={getDisplayUrl(previewAvatar) || "/placeholder.svg"}
-          backgroundImage={getDisplayUrl(previewCover) || "/placeholder.svg"}
+          profileImage={getDisplayUrl(previewAvatar)}
+          backgroundImage={getDisplayUrl(previewCover)}
           bio={profileData.bio || ""}
           stats={{
             posts: posts.length,
