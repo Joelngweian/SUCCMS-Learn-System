@@ -94,7 +94,7 @@ const PageLoadingFallback = () => (
 );
 
 // Types
-type UserRole = 'student' | 'lecturer' | 'admin';
+type UserRole = 'student' | 'lecturer' | 'staff' | 'admin';
 
 type NavigationItem = {
   id: string; // Used as the URL path
@@ -256,7 +256,16 @@ export default function App() {
     { id: '', label: 'Dashboard', icon: LayoutDashboard, description: 'Overview & AI insights' }
   ];
 
-  const navigationItems = userRole === 'student' ? studentNavigationItems : userRole === 'lecturer' ? lecturerNavigationItems : adminNavigationItems;
+  const staffNavigationItems: NavigationItem[] = [];
+
+  const navigationItems =
+    userRole === 'student'
+      ? studentNavigationItems
+      : userRole === 'lecturer'
+        ? lecturerNavigationItems
+        : userRole === 'admin'
+          ? adminNavigationItems
+          : staffNavigationItems;
   const isDarkMode = resolvedTheme === "dark";
   
   const isActive = (path: string) => {
@@ -284,8 +293,15 @@ export default function App() {
     }
   };
 
-  const RoleIcon = userRole === 'student' ? GraduationCap : userRole === 'lecturer' ? UserCog : Shield;
-  const roleLabel = userRole === 'student' ? 'Student' : userRole === 'lecturer' ? 'Lecturer' : 'Admin';
+  const RoleIcon = userRole === 'student' ? GraduationCap : userRole === 'admin' ? Shield : UserCog;
+  const roleLabel =
+    userRole === 'student'
+      ? 'Student'
+      : userRole === 'lecturer'
+        ? 'Lecturer'
+        : userRole === 'admin'
+          ? 'Admin'
+          : 'Staff';
 
   return (
     <div className="min-h-screen bg-background">
@@ -433,6 +449,10 @@ export default function App() {
                 {/* Admin Routes */}
                 {userRole === 'admin' && (
                   <Route path="/" element={<AdminDashboard />} />
+                )}
+
+                {userRole === 'staff' && (
+                  <Route path="/" element={<Navigate to="/settings" replace />} />
                 )}
 
                 {/* Fallback */}

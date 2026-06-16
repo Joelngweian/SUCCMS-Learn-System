@@ -5,6 +5,32 @@ import { supabase } from '@/lib/supabase.ts';
 const AUTH_PROFILE_SELECT =
   'id, full_name, username, role, faculty, programme, avatar_url, cover_url, bio, is_active';
 
+type PublicSignupRole = 'student' | 'lecturer' | 'staff';
+
+const SUC_EMAIL_DOMAIN = '@sc.edu.my';
+
+const resolveSignupRoleFromEmail = (email: string): PublicSignupRole | null => {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!normalizedEmail.endsWith(SUC_EMAIL_DOMAIN)) {
+    return null;
+  }
+
+  const emailPrefix = normalizedEmail.slice(0, -SUC_EMAIL_DOMAIN.length);
+
+  if (emailPrefix.startsWith('st')) return 'staff';
+  if (emailPrefix.startsWith('lc')) return 'lecturer';
+  if (
+    emailPrefix.startsWith('d') ||
+    emailPrefix.startsWith('b') ||
+    emailPrefix.startsWith('p')
+  ) {
+    return 'student';
+  }
+
+  return null;
+};
+
 // Updated Profile to include all Database Fields
 export type UserProfile = {
   id: string;
@@ -44,7 +70,6 @@ interface AuthContextType {
     password: string,
     username: string,
     fullName: string,
-    role: 'student' | 'lecturer' | 'admin',
   ) => Promise<AuthActionResult>;
   signOut: () => Promise<void>;
   updateProfile: (updates: EditableUserProfile) => Promise<ProfileUpdateResult>;
@@ -227,12 +252,31 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     password: string,
     username: string,
     fullName: string,
-    role: 'student' | 'lecturer' | 'admin',
   ) => {
     try {
       const normalizedEmail = email.trim().toLowerCase();
       const normalizedUsername = username.trim();
       const normalizedFullName = fullName.trim();
+      const assignedRole = resolveSignupRoleFromEmail(normalizedEmail);
+
+      if (!normalizedEmail.endsWith(SUC_EMAIL_DOMAIN)) {
+        return {
+          data: null,
+          error: {
+            message: "Only SUC email addresses ending in @sc.edu.my can register.",
+          },
+        };
+      }
+
+      if (!assignedRole) {
+        return {
+          data: null,
+          error: {
+            message:
+              "We could not identify your account type from this SUC email. Staff emails must start with ST, lecturer emails with LC, and student emails with D, B, or P.",
+          },
+        };
+      }
 
       if (!normalizedUsername) {
         return {
@@ -255,7 +299,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           data: {
             full_name: normalizedFullName,
             username: normalizedUsername,
-            role,
           },
         },
       });

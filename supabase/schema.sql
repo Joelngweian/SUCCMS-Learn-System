@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT NOT NULL,
   full_name TEXT NOT NULL UNIQUE, -- Username must be unique for login
-  role TEXT NOT NULL CHECK (role IN ('student', 'lecturer', 'admin')),
+  role TEXT NOT NULL CHECK (role IN ('student', 'lecturer', 'staff', 'admin')),
   program_or_department TEXT, -- e.g., "Computer Science" or "Faculty of Engineering"
   faculty TEXT,
   programme TEXT,
@@ -1347,17 +1347,46 @@ CREATE TRIGGER update_announcements_updated_at
 -- Function to handle user creation (auto-insert into user_profiles)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  normalized_email TEXT;
+  email_prefix TEXT;
+  assigned_role TEXT;
 BEGIN
+  normalized_email := LOWER(TRIM(COALESCE(NEW.email, '')));
+
+  IF normalized_email !~ '^[^@]+@sc\.edu\.my$' THEN
+    RAISE EXCEPTION 'Only SUC email addresses ending in @sc.edu.my can register.'
+      USING ERRCODE = '22023';
+  END IF;
+
+  email_prefix := SPLIT_PART(normalized_email, '@', 1);
+
+  IF email_prefix LIKE 'st%' THEN
+    assigned_role := 'staff';
+  ELSIF email_prefix LIKE 'lc%' THEN
+    assigned_role := 'lecturer';
+  ELSIF email_prefix LIKE 'd%'
+    OR email_prefix LIKE 'b%'
+    OR email_prefix LIKE 'p%' THEN
+    assigned_role := 'student';
+  ELSE
+    RAISE EXCEPTION 'Unable to identify account type from this SUC email. Staff emails must start with ST, lecturer emails with LC, and student emails with D, B, or P.'
+      USING ERRCODE = '22023';
+  END IF;
+
   INSERT INTO public.user_profiles (id, email, full_name, role)
   VALUES (
     NEW.id,
-    NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email),
-    COALESCE(NEW.raw_user_meta_data->>'role', 'student')
+    normalized_email,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', normalized_email),
+    assigned_role
   );
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog;
+
+REVOKE EXECUTE ON FUNCTION public.handle_new_user()
+  FROM PUBLIC, anon, authenticated;
 
 -- Trigger to create user profile on signup
 CREATE TRIGGER on_auth_user_created
