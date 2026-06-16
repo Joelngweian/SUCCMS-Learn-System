@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getNotifyMessage, notify } from "@/lib/notify";
 import { confirmAction } from "@/lib/confirm";
-import { supabase } from "@/lib/supabase";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -48,9 +47,20 @@ import type {
   StudySession,
 } from "./study-groups/StudyGroupTypes";
 import {
+  createStudyGroup,
+  createStudyGroupPost,
+  createStudySession,
+  deleteStudyGroup,
+  deleteStudyGroupPost,
+  deleteStudySession,
+  dispatchStudySessionReminders,
+  joinStudyGroup,
+  leaveStudyGroup,
   loadEnrolledStudyGroupCourses,
   loadStudyGroupDetails as loadStudyGroupDetailsData,
   loadStudyGroupPage,
+  removeStudyGroupMember,
+  setStudySessionAttendance,
 } from "./study-groups/studyGroupData";
 
 const GROUP_PAGE_SIZE = 12;
@@ -187,7 +197,7 @@ export function StudyGroupsPage() {
     void loadCourses().catch((error) => {
       console.error("Failed to load enrolled courses:", error);
     });
-    void supabase.rpc("dispatch_study_session_reminders");
+    void dispatchStudySessionReminders();
   }, [loadCourses, userId]);
 
   useEffect(() => {
@@ -240,14 +250,12 @@ export function StudyGroupsPage() {
     setIsCreating(true);
     setCreateError("");
     try {
-      const { error } = await supabase.rpc("create_study_group", {
-        p_course_id: newGroup.courseId,
-        p_name: newGroup.name.trim(),
-        p_description: newGroup.description.trim(),
-        p_max_members: newGroup.maxMembers,
+      await createStudyGroup({
+        courseId: newGroup.courseId,
+        description: newGroup.description.trim(),
+        maxMembers: newGroup.maxMembers,
+        name: newGroup.name.trim(),
       });
-
-      if (error) throw error;
 
       setIsCreateOpen(false);
       setNewGroup({
@@ -271,10 +279,7 @@ export function StudyGroupsPage() {
   const handleJoinGroup = async (group: StudyGroupSummary) => {
     setIsGroupActionLoading(true);
     try {
-      const { error } = await supabase.rpc("join_study_group", {
-        p_group_id: group.id,
-      });
-      if (error) throw error;
+      await joinStudyGroup(group.id);
 
       const updatedGroup = {
         ...group,
@@ -306,10 +311,7 @@ export function StudyGroupsPage() {
 
     setIsGroupActionLoading(true);
     try {
-      const { error } = await supabase.rpc("leave_study_group", {
-        p_group_id: group.id,
-      });
-      if (error) throw error;
+      await leaveStudyGroup(group.id);
 
       setSelectedGroup(null);
       await refreshGroups();
@@ -334,30 +336,7 @@ export function StudyGroupsPage() {
 
     setIsGroupActionLoading(true);
     try {
-      const { data: attachmentRows, error: attachmentError } = await supabase
-        .from("study_group_posts")
-        .select("attachment_path")
-        .eq("group_id", group.id)
-        .not("attachment_path", "is", null);
-
-      if (attachmentError) throw attachmentError;
-
-      const attachmentPaths = (attachmentRows || [])
-        .map((row) => row.attachment_path)
-        .filter((path): path is string => Boolean(path));
-
-      if (attachmentPaths.length > 0) {
-        const { error: storageError } = await supabase.storage
-          .from("study-group-files")
-          .remove(attachmentPaths);
-        if (storageError) throw storageError;
-      }
-
-      const { error } = await supabase
-        .from("study_groups")
-        .delete()
-        .eq("id", group.id);
-      if (error) throw error;
+      await deleteStudyGroup(group.id);
 
       setSelectedGroup(null);
       await refreshGroups();
@@ -382,13 +361,13 @@ export function StudyGroupsPage() {
       }))
     ) return;
 
-    const { error } = await supabase.rpc("remove_study_group_member", {
-      p_group_id: selectedGroup.id,
-      p_user_id: member.user_id,
-    });
-
-    if (error) {
-      setDetailError(error.message);
+    try {
+      await removeStudyGroupMember({
+        groupId: selectedGroup.id,
+        userId: member.user_id,
+      });
+    } catch (error) {
+      setDetailError(getNotifyMessage(error, "Failed to remove member."));
       return;
     }
 
@@ -431,28 +410,26 @@ export function StudyGroupsPage() {
     setIsSavingSession(true);
     setSessionError("");
     try {
-      const { error } = await supabase.from("study_group_sessions").insert({
-        group_id: selectedGroup.id,
-        created_by: user.id,
+      await createStudySession({
+        groupId: selectedGroup.id,
+        createdBy: user.id,
         title: newSession.title.trim(),
         description: newSession.description.trim(),
-        starts_at: startsAt.toISOString(),
-        ends_at: endsAt.toISOString(),
-        location_type: newSession.locationType,
-        location_text:
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+        locationType: newSession.locationType,
+        locationText:
           newSession.locationType === "in_person"
             ? newSession.locationText.trim()
             : null,
-        meeting_url:
+        meetingUrl:
           newSession.locationType === "online"
             ? newSession.meetingUrl.trim()
             : null,
-        max_attendees: newSession.maxAttendees
+        maxAttendees: newSession.maxAttendees
           ? Number(newSession.maxAttendees)
           : null,
       });
-
-      if (error) throw error;
 
       setIsSessionOpen(false);
       setNewSession({
@@ -479,12 +456,13 @@ export function StudyGroupsPage() {
   const toggleSessionAttendance = async (session: StudySession) => {
     if (!user || !selectedGroup) return;
 
-    const { error } = await supabase.rpc("set_study_session_attendance", {
-      p_session_id: session.id,
-      p_attending: !session.isGoing,
-    });
-    if (error) {
-      setDetailError(error.message);
+    try {
+      await setStudySessionAttendance({
+        attending: !session.isGoing,
+        sessionId: session.id,
+      });
+    } catch (error) {
+      setDetailError(getNotifyMessage(error, "Failed to update attendance."));
       return;
     }
 
@@ -505,12 +483,10 @@ export function StudyGroupsPage() {
       }))
     ) return;
 
-    const { error } = await supabase
-      .from("study_group_sessions")
-      .delete()
-      .eq("id", session.id);
-    if (error) {
-      setDetailError(error.message);
+    try {
+      await deleteStudySession(session.id);
+    } catch (error) {
+      setDetailError(getNotifyMessage(error, "Failed to delete study session."));
       return;
     }
     await loadGroupDetails(selectedGroup);
@@ -542,35 +518,20 @@ export function StudyGroupsPage() {
 
     setIsSavingPost(true);
     setPostError("");
-    let uploadedPath: string | null = null;
 
     try {
-      if (postFile) {
-        const safeName = postFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-        uploadedPath = `${selectedGroup.id}/${user.id}/${Date.now()}_${safeName}`;
-        const { error: uploadError } = await supabase.storage
-          .from("study-group-files")
-          .upload(uploadedPath, postFile);
-        if (uploadError) throw uploadError;
-      }
-
-      const { error } = await supabase.from("study_group_posts").insert({
-        group_id: selectedGroup.id,
-        author_id: user.id,
-        post_type: postType,
-        title: postTitle.trim() || null,
+      await createStudyGroupPost({
+        authorId: user.id,
         content: postContent.trim(),
-        resource_url:
+        file: postFile,
+        groupId: selectedGroup.id,
+        postType,
+        resourceUrl:
           postType === "resource" && resourceUrl.trim()
             ? resourceUrl.trim()
             : null,
-        attachment_name: postFile?.name || null,
-        attachment_path: uploadedPath,
-        attachment_type: postFile?.type || null,
-        attachment_size: postFile?.size || null,
+        title: postTitle.trim() || null,
       });
-
-      if (error) throw error;
 
       setPostTitle("");
       setPostContent("");
@@ -579,11 +540,6 @@ export function StudyGroupsPage() {
       await loadGroupDetails(selectedGroup);
       notify.success("Group post published.");
     } catch (error: unknown) {
-      if (uploadedPath) {
-        await supabase.storage
-          .from("study-group-files")
-          .remove([uploadedPath]);
-      }
       setPostError(
         getNotifyMessage(error, "Failed to publish group post."),
       );
@@ -603,19 +559,11 @@ export function StudyGroupsPage() {
       }))
     ) return;
 
-    const { error } = await supabase
-      .from("study_group_posts")
-      .delete()
-      .eq("id", post.id);
-    if (error) {
-      setDetailError(error.message);
+    try {
+      await deleteStudyGroupPost(post);
+    } catch (error) {
+      setDetailError(getNotifyMessage(error, "Failed to delete group post."));
       return;
-    }
-
-    if (post.attachment_path) {
-      await supabase.storage
-        .from("study-group-files")
-        .remove([post.attachment_path]);
     }
     await loadGroupDetails(selectedGroup);
     notify.success("Group post deleted.");

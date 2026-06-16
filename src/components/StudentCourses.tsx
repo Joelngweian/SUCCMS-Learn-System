@@ -7,6 +7,7 @@ import {
   type NormalizedCourseOffering,
 } from "@/lib/courseOfferings";
 import {
+  enrollStudentInCourse,
   getActiveCourseOfferings,
   getCourseInstructorSummaries,
   getStudentCourseOfferings,
@@ -286,13 +287,20 @@ export function StudentCourses() {
       if (!actualKey) throw new Error("System Error: Course has no key set. Contact your lecturer.");
       if (inputKey !== actualKey) throw new Error("Invalid Enrollment Key.");
 
-      const { error } = await supabase.from('course_enrollments').insert({
-        student_id: profile.id,
-        course_id: selectedCourseForEnrollment.id
-      });
-
-      if (error) {
-        if (error.code === '23505') throw new Error("Already enrolled.");
+      try {
+        await enrollStudentInCourse({
+          courseId: selectedCourseForEnrollment.id,
+          studentId: profile.id,
+        });
+      } catch (error) {
+        if (
+          error
+          && typeof error === "object"
+          && "code" in error
+          && error.code === "23505"
+        ) {
+          throw new Error("Already enrolled.", { cause: error });
+        }
         throw error;
       }
 

@@ -77,6 +77,214 @@ export async function loadStudyGroupPage({
   };
 }
 
+export async function dispatchStudySessionReminders() {
+  const { error } = await supabase.rpc("dispatch_study_session_reminders");
+  if (error) throw error;
+}
+
+export async function createStudyGroup({
+  courseId,
+  description,
+  maxMembers,
+  name,
+}: {
+  courseId: string;
+  description: string;
+  maxMembers: number;
+  name: string;
+}) {
+  const { error } = await supabase.rpc("create_study_group", {
+    p_course_id: courseId,
+    p_name: name,
+    p_description: description,
+    p_max_members: maxMembers,
+  });
+  if (error) throw error;
+}
+
+export async function joinStudyGroup(groupId: string) {
+  const { error } = await supabase.rpc("join_study_group", {
+    p_group_id: groupId,
+  });
+  if (error) throw error;
+}
+
+export async function leaveStudyGroup(groupId: string) {
+  const { error } = await supabase.rpc("leave_study_group", {
+    p_group_id: groupId,
+  });
+  if (error) throw error;
+}
+
+export async function deleteStudyGroup(groupId: string) {
+  const { data: attachmentRows, error: attachmentError } = await supabase
+    .from("study_group_posts")
+    .select("attachment_path")
+    .eq("group_id", groupId)
+    .not("attachment_path", "is", null);
+
+  if (attachmentError) throw attachmentError;
+
+  const attachmentPaths = (attachmentRows || [])
+    .map((row) => row.attachment_path)
+    .filter((path): path is string => Boolean(path));
+
+  if (attachmentPaths.length > 0) {
+    const { error } = await supabase.storage
+      .from("study-group-files")
+      .remove(attachmentPaths);
+    if (error) throw error;
+  }
+
+  const { error } = await supabase
+    .from("study_groups")
+    .delete()
+    .eq("id", groupId);
+  if (error) throw error;
+}
+
+export async function removeStudyGroupMember({
+  groupId,
+  userId,
+}: {
+  groupId: string;
+  userId: string;
+}) {
+  const { error } = await supabase.rpc("remove_study_group_member", {
+    p_group_id: groupId,
+    p_user_id: userId,
+  });
+  if (error) throw error;
+}
+
+export async function createStudySession({
+  createdBy,
+  description,
+  endsAt,
+  groupId,
+  locationText,
+  locationType,
+  maxAttendees,
+  meetingUrl,
+  startsAt,
+  title,
+}: {
+  createdBy: string;
+  description: string;
+  endsAt: string;
+  groupId: string;
+  locationText: string | null;
+  locationType: string;
+  maxAttendees: number | null;
+  meetingUrl: string | null;
+  startsAt: string;
+  title: string;
+}) {
+  const { error } = await supabase.from("study_group_sessions").insert({
+    group_id: groupId,
+    created_by: createdBy,
+    title,
+    description,
+    starts_at: startsAt,
+    ends_at: endsAt,
+    location_type: locationType,
+    location_text: locationText,
+    meeting_url: meetingUrl,
+    max_attendees: maxAttendees,
+  });
+
+  if (error) throw error;
+}
+
+export async function setStudySessionAttendance({
+  attending,
+  sessionId,
+}: {
+  attending: boolean;
+  sessionId: string;
+}) {
+  const { error } = await supabase.rpc("set_study_session_attendance", {
+    p_session_id: sessionId,
+    p_attending: attending,
+  });
+  if (error) throw error;
+}
+
+export async function deleteStudySession(sessionId: string) {
+  const { error } = await supabase
+    .from("study_group_sessions")
+    .delete()
+    .eq("id", sessionId);
+  if (error) throw error;
+}
+
+export async function createStudyGroupPost({
+  authorId,
+  content,
+  file,
+  groupId,
+  postType,
+  resourceUrl,
+  title,
+}: {
+  authorId: string;
+  content: string;
+  file: File | null;
+  groupId: string;
+  postType: string;
+  resourceUrl: string | null;
+  title: string | null;
+}) {
+  let uploadedPath: string | null = null;
+
+  try {
+    if (file) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      uploadedPath = `${groupId}/${authorId}/${Date.now()}_${safeName}`;
+      const { error } = await supabase.storage
+        .from("study-group-files")
+        .upload(uploadedPath, file);
+      if (error) throw error;
+    }
+
+    const { error } = await supabase.from("study_group_posts").insert({
+      group_id: groupId,
+      author_id: authorId,
+      post_type: postType,
+      title,
+      content,
+      resource_url: resourceUrl,
+      attachment_name: file?.name || null,
+      attachment_path: uploadedPath,
+      attachment_type: file?.type || null,
+      attachment_size: file?.size || null,
+    });
+
+    if (error) throw error;
+  } catch (error) {
+    if (uploadedPath) {
+      await supabase.storage
+        .from("study-group-files")
+        .remove([uploadedPath]);
+    }
+    throw error;
+  }
+}
+
+export async function deleteStudyGroupPost(post: StudyGroupPost) {
+  const { error } = await supabase
+    .from("study_group_posts")
+    .delete()
+    .eq("id", post.id);
+  if (error) throw error;
+
+  if (post.attachment_path) {
+    await supabase.storage
+      .from("study-group-files")
+      .remove([post.attachment_path]);
+  }
+}
+
 export async function loadStudyGroupDetails(
   groupId: string,
   userId: string,

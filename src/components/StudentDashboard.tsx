@@ -3,6 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import {
+  fetchStudentStudyInsights,
+  fetchStudentStudyRecommendations,
+} from "@/data/studentAiRepository";
+import {
   COURSE_OFFERING_SELECT,
   normalizeCourseOffering,
 } from "@/lib/courseOfferings";
@@ -249,6 +253,11 @@ const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+
+const asStringList = (value: unknown) =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 
 const isRecommendation = (value: unknown): value is Recommendation => {
   const item = asRecord(value);
@@ -604,15 +613,10 @@ export function StudentDashboard() {
         }
       }
 
-      const { data, error } = await supabase.functions.invoke(
-        "student-study-recommendations",
-        {
-          body: { courses: courseContext },
-        }
+      const data = asRecord(
+        await fetchStudentStudyRecommendations(courseContext),
       );
-
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (typeof data.error === "string") throw new Error(data.error);
 
       const recommendations = Array.isArray(data?.recommendations)
         ? data.recommendations
@@ -689,15 +693,8 @@ export function StudentDashboard() {
         }
       }
 
-      const { data, error } = await supabase.functions.invoke(
-        "student-study-insights",
-        {
-          body: { courses: anonymousContext },
-        }
-      );
-
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      const data = asRecord(await fetchStudentStudyInsights(anonymousContext));
+      if (typeof data.error === "string") throw new Error(data.error);
 
       const aiInsights: StudyInsight[] = Array.isArray(data?.insights)
         ? data.insights
@@ -709,31 +706,41 @@ export function StudentDashboard() {
               && Array.isArray(insight.actionPlan)
             )
             .slice(0, 4)
-            .map((insight, index) => ({
-              id:
-                typeof insight.id === "string"
-                  ? insight.id
-                  : `ai-insight-${index}`,
-              type: insight.type,
-              severity:
-                insight.type === "strength"
-                  ? ("positive" as const)
-                  : ("warning" as const),
-              title: insight.title.slice(0, 90),
-              description: insight.description.slice(0, 260),
-              confidence: Math.min(
-                95,
-                Math.max(55, Number(insight.confidence) || 70)
-              ),
-              courseCode:
-                typeof insight.courseCode === "string"
-                  ? insight.courseCode.slice(0, 30)
-                  : undefined,
-              actionPlan: (insight.actionPlan as unknown[])
-                .filter((step: unknown) => typeof step === "string")
-                .slice(0, 4)
-                .map((step: string) => step.slice(0, 180)),
-            }))
+            .map((insight, index) => {
+              const insightType =
+                insight.type === "strength" ? "strength" : "weakness";
+              const title = typeof insight.title === "string"
+                ? insight.title
+                : "Study insight";
+              const description = typeof insight.description === "string"
+                ? insight.description
+                : "";
+
+              return {
+                id:
+                  typeof insight.id === "string"
+                    ? insight.id
+                    : `ai-insight-${index}`,
+                type: insightType,
+                severity:
+                  insightType === "strength"
+                    ? ("positive" as const)
+                    : ("warning" as const),
+                title: title.slice(0, 90),
+                description: description.slice(0, 260),
+                confidence: Math.min(
+                  95,
+                  Math.max(55, Number(insight.confidence) || 70)
+                ),
+                courseCode:
+                  typeof insight.courseCode === "string"
+                    ? insight.courseCode.slice(0, 30)
+                    : undefined,
+                actionPlan: asStringList(insight.actionPlan)
+                  .slice(0, 4)
+                  .map((step) => step.slice(0, 180)),
+              };
+            })
         : [];
 
       localStorage.setItem(
@@ -890,9 +897,9 @@ export function StudentDashboard() {
 
       const now = new Date();
       const courseList: StudentCourse[] = enrollmentRows
-        .map((row) => {
+        .flatMap((row) => {
           const course = normalizeCourseOffering(row.course_offerings);
-          if (!course.id) return null;
+          if (!course.id) return [];
 
           const courseAssignments = assignmentsByCourse.get(course.id) || [];
           const completed = courseAssignments.filter((assignment) =>
@@ -941,7 +948,7 @@ export function StudentDashboard() {
                 new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime()
             )[0];
 
-          return {
+          return [{
             id: course.id,
             code: getCourseCode(course),
             name: course.name,
@@ -966,11 +973,10 @@ export function StudentDashboard() {
                   id: nextAssignment.id,
                   title: nextAssignment.title,
                   dueDate: nextAssignment.due_date,
-                }
+              }
               : undefined,
-          };
-        })
-        .filter(Boolean) as StudentCourse[];
+          }];
+        });
 
       const assignmentsById = new Map(
         assignmentRows.map((assignment) => [assignment.id, assignment])

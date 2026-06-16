@@ -9,12 +9,13 @@ import { AIRecommendations } from "./AIRecommendations";
 import { Stories } from "./Stories";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  getCourseOfferings,
-  getLecturerCourseIds,
-} from "@/data/courseRepository";
-import { getProfileSummaries } from "@/data/profileRepository";
-import { supabase } from "@/lib/supabase";
-import type { Database } from "@/lib/database.types";
+  loadLecturerDashboardRawData,
+  type LecturerAssignmentRow as AssignmentRow,
+  type LecturerEnrollmentRow as EnrollmentRow,
+  type LecturerMaterialRow as MaterialRow,
+  type LecturerProfileSummary as ProfileSummary,
+  type LecturerSubmissionRow as SubmissionRow,
+} from "@/data/lecturerDashboardRepository";
 import {
   BookOpen,
   Users,
@@ -80,27 +81,6 @@ interface UpcomingDeadline {
   enrolledStudents: number;
 }
 
-type AssignmentRow = Pick<
-  Database["public"]["Tables"]["assignments"]["Row"],
-  "id" | "course_id" | "title" | "due_date" | "max_score" | "created_at"
->;
-type SubmissionRow = Pick<
-  Database["public"]["Tables"]["assignment_submissions"]["Row"],
-  "id" | "assignment_id" | "student_id" | "submitted_at" | "grade" | "is_late"
->;
-type EnrollmentRow = Pick<
-  Database["public"]["Tables"]["course_enrollments"]["Row"],
-  "course_id" | "student_id" | "enrolled_at"
->;
-type MaterialRow = Pick<
-  Database["public"]["Tables"]["course_materials"]["Row"],
-  "id" | "course_id"
->;
-type ProfileSummary = Pick<
-  Database["public"]["Tables"]["user_profiles"]["Row"],
-  "id" | "full_name" | "avatar_url"
->;
-
 const getCourseCode = (course?: {
   course_code?: string | null;
   code?: string | null;
@@ -151,9 +131,17 @@ export function LecturerDashboard() {
     setLoadError("");
 
     try {
-      const courseIds = await getLecturerCourseIds(userId);
+      const {
+        assignmentRows,
+        courseRows,
+        enrollmentRows,
+        forumPostsToday,
+        materialRows,
+        profileRows,
+        submissionRows,
+      } = await loadLecturerDashboardRawData(userId);
 
-      if (courseIds.length === 0) {
+      if (courseRows.length === 0) {
         setMyCourses([]);
         setPendingTasks([]);
         setRecentActivity([]);
@@ -165,66 +153,6 @@ export function LecturerDashboard() {
           averageEngagement: 0,
         });
         return;
-      }
-
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-
-      const [
-        courseRows,
-        enrollmentResult,
-        assignmentResult,
-        materialResult,
-        forumResult,
-      ] = await Promise.all([
-        getCourseOfferings(courseIds),
-        supabase
-          .from("course_enrollments")
-          .select("course_id, student_id, enrolled_at")
-          .in("course_id", courseIds),
-        supabase
-          .from("assignments")
-          .select("id, course_id, title, due_date, max_score, created_at")
-          .in("course_id", courseIds)
-          .order("due_date", { ascending: true }),
-        supabase
-          .from("course_materials")
-          .select("id, course_id")
-          .in("course_id", courseIds),
-        supabase
-          .from("forum_threads")
-          .select("id, course_id, created_at")
-          .in("course_id", courseIds)
-          .gte("created_at", startOfToday.toISOString()),
-      ]);
-
-      if (enrollmentResult.error) throw enrollmentResult.error;
-      if (assignmentResult.error) throw assignmentResult.error;
-
-      const enrollmentRows = enrollmentResult.data || [];
-      const assignmentRows = assignmentResult.data || [];
-      const materialRows = materialResult.data || [];
-      const assignmentIds = assignmentRows.map((assignment) => assignment.id);
-
-      let submissionRows: SubmissionRow[] = [];
-      if (assignmentIds.length > 0) {
-        const submissionResult = await supabase
-          .from("assignment_submissions")
-          .select("id, assignment_id, student_id, submitted_at, grade, is_late")
-          .in("assignment_id", assignmentIds)
-          .order("submitted_at", { ascending: false });
-
-        if (submissionResult.error) throw submissionResult.error;
-        submissionRows = submissionResult.data || [];
-      }
-
-      const studentIds = Array.from(
-        new Set(submissionRows.map((submission) => submission.student_id).filter(Boolean))
-      );
-      let profileRows: ProfileSummary[] = [];
-
-      if (studentIds.length > 0) {
-        profileRows = await getProfileSummaries(studentIds);
       }
 
       const profilesById = new Map(profileRows.map((row) => [row.id, row]));
@@ -411,7 +339,7 @@ export function LecturerDashboard() {
         pendingGrades: submissionRows.filter(
           (submission) => submission.grade == null
         ).length,
-        forumPostsToday: forumResult.data?.length || 0,
+        forumPostsToday,
         averageEngagement,
       });
     } catch (error: unknown) {

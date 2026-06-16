@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext.tsx";
-import { supabase } from "@/lib/supabase.ts";
 import { notify } from "@/lib/notify";
 import { confirmAction } from "@/lib/confirm";
+import {
+  createForumReply,
+  createForumThread,
+  deleteForumReply,
+  deleteForumThread,
+  getForumReplyCounts,
+  setForumReaction,
+  toForumImagesJson,
+  updateForumReply,
+  updateForumThread,
+  uploadForumImage,
+} from "@/data/forumRepository";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Badge } from "./ui/badge";
 import {
   Search, Plus, MessageCircle,
   Loader2, Coffee, Layers, Smile, ArrowLeft,
@@ -40,47 +50,19 @@ import type {
 import {
   normalizeForumReply,
 } from "./forum/forumTypes";
-import { useForumFeed } from "./forum/useForumFeed";
 import {
-  FORUM_REPLY_SELECT,
-  useForumThreadDetails,
-} from "./forum/useForumThreadDetails";
+  COMMENT_EMOJIS,
+  formatForumDate,
+  getActiveMentionQuery,
+  getErrorMessage,
+  getMentionToken,
+  getThreadCategory,
+  renderCourseBadge,
+  renderMentionedText,
+} from "./forum/forumUtils";
+import { useForumFeed } from "./forum/useForumFeed";
+import { useForumThreadDetails } from "./forum/useForumThreadDetails";
 import "./Forum.css";
-
-/* ================= CONFIGURATION ================= */
-
-const COMMENT_EMOJIS = [
-  '\u{1F600}', '\u{1F602}', '\u{1F60A}', '\u{1F60D}',
-  '\u{1F914}', '\u{1F44D}', '\u{1F44F}', '\u{1F64C}',
-  '\u2764\uFE0F', '\u{1F389}', '\u{1F525}', '\u2705',
-];
-
-const getMentionToken = (name: string) => `@${name.trim().replace(/\s+/g, "")}`;
-
-const getActiveMentionQuery = (value: string) => {
-    const match = value.match(/(^|\s)@([^\s@]*)$/);
-    return match ? match[2].toLowerCase() : null;
-};
-
-const renderMentionedText = (content: string) => {
-    const parts = content.split(/(@everyone|@[\w\u00C0-\uFFFF-]+)/g);
-
-    return parts.map((part, index) => {
-        if (!part) return null;
-        if (part.startsWith("@")) {
-            return (
-                <span key={`${part}-${index}`} className="rounded bg-blue-50 px-1 font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300">
-                    {part}
-                </span>
-            );
-        }
-
-        return <span key={`${part}-${index}`}>{part}</span>;
-    });
-};
-
-const getErrorMessage = (error: unknown, fallback: string) =>
-  error instanceof Error ? error.message : fallback;
 
 export function Forum() {
   const { user, profile } = useAuth();
@@ -208,37 +190,23 @@ export function Forum() {
   /* ================= IMAGE UPLOAD ================= */
 
   const uploadFileToSupabase = async (file: File) => {
-      try {
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${Math.random()}.${fileExt}`;
-        const selectedCourseId =
-          selectedThread?.course_id ||
-          (newThread.course_id !== "general" ? newThread.course_id : null);
-        const filePath = selectedCourseId
-          ? `${selectedCourseId}/${user?.id}/${fileName}`
-          : `${user?.id}/${fileName}`;
-        
-        const { error } = await supabase.storage.from('forum-images').upload(filePath, file);
-        if (error) {
-            console.error("Upload error (make sure bucket exists):", error);
-            return null;
-        }
-        const { data } = supabase.storage.from('forum-images').getPublicUrl(filePath);
-        return data.publicUrl;
-      } catch (e) {
-          console.error("Upload failed", e);
-          return null;
-      }
+    if (!userId) return null;
+    try {
+      const selectedCourseId =
+        selectedThread?.course_id ||
+        (newThread.course_id !== "general" ? newThread.course_id : null);
+      return await uploadForumImage({
+        courseId: selectedCourseId,
+        file,
+        userId,
+      });
+    } catch (error) {
+      console.error("Upload failed", error);
+      return null;
+    }
   };
 
   /* ================= ACTIONS ================= */
-
-  const getThreadCategory = (title: string, content: string) => {
-    const hashtagRegex = /#(\w+)/;
-    const contentMatch = content.match(hashtagRegex);
-    const titleMatch = title.match(hashtagRegex);
-    return contentMatch ? contentMatch[1] : (titleMatch ? titleMatch[1] : "General");
-  };
 
   const handleCreateThread = async () => {
     if (!newThread.title || !newThread.content) return;
@@ -263,16 +231,14 @@ export function Forum() {
         const extractedCategory = getThreadCategory(newThread.title, newThread.content);
         const finalCourseId = newThread.course_id === "general" ? null : newThread.course_id;
 
-        const { error } = await supabase.from('forum_threads').insert({
+        await createForumThread({
             course_id: finalCourseId,
-            author_id: userId,
+            author_id: user.id,
             title: newThread.title.trim(),
             content: newThread.content.trim(),
             category: extractedCategory,
-            images: uploadedUrls
+            images: toForumImagesJson(uploadedUrls),
         });
-
-        if (error) throw error;
 
         setIsCreateOpen(false);
         setNewThread({ title: "", content: "", course_id: "general" });
@@ -301,7 +267,12 @@ export function Forum() {
   };
 
   const handleSaveThreadEdit = async () => {
-    if (!editingThread || !editThread.title.trim() || !editThread.content.trim()) return;
+    if (
+      !editingThread
+      || !userId
+      || !editThread.title.trim()
+      || !editThread.content.trim()
+    ) return;
     setIsSavingThreadEdit(true);
     setEditThreadError("");
 
@@ -318,21 +289,23 @@ export function Forum() {
         title: editThread.title.trim(),
         content: editThread.content.trim(),
         category: getThreadCategory(editThread.title, editThread.content),
-        images: nextImages,
+        images: toForumImagesJson(nextImages),
       };
 
-      const { error } = await supabase
-        .from('forum_threads')
-        .update(updates)
-        .eq('id', editingThread.id)
-        .eq('author_id', user?.id);
-
-      if (error) throw error;
+      await updateForumThread({
+        authorId: userId,
+        threadId: editingThread.id,
+        updates,
+      });
 
       const applyThreadUpdate = (thread: ForumThread): ForumThread =>
-        thread.id === editingThread.id ? { ...thread, ...updates } : thread;
+        thread.id === editingThread.id
+          ? { ...thread, ...updates, images: nextImages }
+          : thread;
       setThreads(prev => prev.map(applyThreadUpdate));
-      setSelectedThread(prev => prev?.id === editingThread.id ? { ...prev, ...updates } : prev);
+      setSelectedThread(prev => prev?.id === editingThread.id
+        ? { ...prev, ...updates, images: nextImages }
+        : prev);
       setEditingThread(null);
       notify.success("Discussion updated.");
     } catch (error: unknown) {
@@ -356,16 +329,11 @@ export function Forum() {
         destructive: true,
       }))
     ) return;
+    if (!userId) return;
     setDeletingThreadId(threadId);
 
     try {
-      const { error } = await supabase
-        .from('forum_threads')
-        .delete()
-        .eq('id', threadId)
-        .eq('author_id', user?.id);
-
-      if (error) throw error;
+      await deleteForumThread({ authorId: userId, threadId });
 
       setThreads(prev => prev.filter(thread => thread.id !== threadId));
       if (selectedThread?.id === threadId) setSelectedThread(null);
@@ -385,6 +353,7 @@ export function Forum() {
         if (
           isPostingReply
           || !selectedThread
+          || !userId
           || (!replyText.trim() && !replyImage)
         ) return;
 
@@ -398,19 +367,13 @@ export function Forum() {
 
         const resolvedParent = parentId ?? replyTargetId ?? null;
     
-        const { data: createdReply, error } = await supabase.from('forum_replies').insert({
-                thread_id: selectedThread.id,
-                author_id: user?.id,
-                content: replyText.trim(),
-                parent_id: resolvedParent,
-                image_url: imageUrl
-        }).select(FORUM_REPLY_SELECT).single();
-
-        if (error) {
-          console.error('Failed to post reply:', error);
-          notify.error(error, "Comment could not be posted.");
-          return;
-        }
+        const createdReply = await createForumReply({
+          thread_id: selectedThread.id,
+          author_id: userId,
+          content: replyText.trim(),
+          parent_id: resolvedParent,
+          image_url: imageUrl,
+        });
 
         const newReply = normalizeForumReply(createdReply);
 
@@ -490,18 +453,16 @@ export function Forum() {
   };
 
   const handleSaveReplyEdit = async (replyId: string) => {
-    if (!editingReplyText.trim()) return;
+    if (!editingReplyText.trim() || !userId) return;
     setSavingReplyId(replyId);
 
     try {
       const nextContent = editingReplyText.trim();
-      const { error } = await supabase
-        .from('forum_replies')
-        .update({ content: nextContent })
-        .eq('id', replyId)
-        .eq('author_id', user?.id);
-
-      if (error) throw error;
+      await updateForumReply({
+        authorId: userId,
+        content: nextContent,
+        replyId,
+      });
 
       setSelectedThread(prev => prev ? {
         ...prev,
@@ -522,7 +483,7 @@ export function Forum() {
   };
 
   const handleDeleteReply = async (comment: ForumReply) => {
-    if (!selectedThread) return;
+    if (!selectedThread || !userId) return;
     if (
       !(await confirmAction({
         title: "Delete comment?",
@@ -535,37 +496,15 @@ export function Forum() {
     setDeletingReplyId(comment.id);
 
     try {
-      const { error } = await supabase
-        .from('forum_replies')
-        .delete()
-        .eq('id', comment.id)
-        .eq('author_id', user?.id);
-
-      if (error) throw error;
-
-      const [totalReplyResult, rootReplyResult, parentReplyResult] = await Promise.all([
-        supabase
-          .from('forum_replies')
-          .select('id', { count: 'exact', head: true })
-          .eq('thread_id', selectedThread.id),
-        supabase
-          .from('forum_replies')
-          .select('id', { count: 'exact', head: true })
-          .eq('thread_id', selectedThread.id)
-          .is('parent_id', null),
-        comment.parent_id
-          ? supabase
-              .from('forum_replies')
-              .select('id', { count: 'exact', head: true })
-              .eq('parent_id', comment.parent_id)
-          : Promise.resolve({ count: null, error: null }),
-      ]);
-
-      if (totalReplyResult.error) throw totalReplyResult.error;
-      if (rootReplyResult.error) throw rootReplyResult.error;
-      if (parentReplyResult.error) throw parentReplyResult.error;
-
-      const rootReplyCount = rootReplyResult.count || 0;
+      await deleteForumReply({ authorId: userId, replyId: comment.id });
+      const {
+        parentReplyCount,
+        rootReplyCount,
+        totalReplyCount,
+      } = await getForumReplyCounts({
+        parentId: comment.parent_id,
+        threadId: selectedThread.id,
+      });
       const loadedRootCount = Math.max(
         0,
         (selectedThread.structuredReplies || []).length - (comment.parent_id ? 0 : 1),
@@ -577,11 +516,10 @@ export function Forum() {
         let nextReplies = removeReplyTreeNode(current.structuredReplies || [], comment.id);
         if (comment.parent_id) {
           nextReplies = updateReplyTreeNode(nextReplies, comment.parent_id, parent => {
-            const childCount = parentReplyResult.count || 0;
             return {
               ...parent,
-              childCount,
-              hasMoreChildren: (parent.children || []).length < childCount,
+              childCount: parentReplyCount,
+              hasMoreChildren: (parent.children || []).length < parentReplyCount,
             };
           });
         }
@@ -589,7 +527,7 @@ export function Forum() {
         return {
           ...current,
           structuredReplies: nextReplies,
-          replyCount: totalReplyResult.count || 0,
+          replyCount: totalReplyCount,
           rootReplyCount,
         };
       });
@@ -639,39 +577,13 @@ export function Forum() {
       updateLocalReaction(targetId, currentType, nextType, isThread);
 
       try {
-          if (isThread) {
-              if (currentType) {
-                  const { error: deleteError } = await supabase
-                      .from('forum_reactions')
-                      .delete()
-                      .eq('thread_id', targetId)
-                      .eq('user_id', user.id);
-                  if (deleteError) throw deleteError;
-              }
-
-              if (nextType) {
-                  const { error: insertError } = await supabase
-                      .from('forum_reactions')
-                      .insert({ thread_id: targetId, user_id: user.id, type: nextType });
-                  if (insertError) throw insertError;
-              }
-          } else {
-              if (currentType) {
-                  const { error: deleteError } = await supabase
-                      .from('forum_reply_reactions')
-                      .delete()
-                      .eq('reply_id', targetId)
-                      .eq('user_id', user.id);
-                  if (deleteError) throw deleteError;
-              }
-
-              if (nextType) {
-                  const { error: insertError } = await supabase
-                      .from('forum_reply_reactions')
-                      .insert({ reply_id: targetId, user_id: user.id, type: nextType });
-                  if (insertError) throw insertError;
-              }
-          }
+          await setForumReaction({
+            currentType,
+            isThread,
+            nextType,
+            targetId,
+            userId: user.id,
+          });
       } catch (error) {
           console.error("Failed to update reaction:", error);
           notify.error(error, "Reaction could not be updated.");
@@ -701,17 +613,8 @@ export function Forum() {
     navigate(`/profile/${userId}`);
   };
 
-  const getCourseBadge = (courseId: string | null) => {
-    if (!courseId) return <Badge className="border-none" style={{ backgroundColor: 'rgba(147, 51, 234, 0.2)', color: '#d8b4fe' }}><Coffee className="h-3 w-3 mr-1"/> Campus Life</Badge>;
-    const course = courses.find(c => c.id === courseId);
-    return <Badge variant="outline" className="bg-white border-gray-300 text-gray-700 dark:bg-zinc-800 dark:border-zinc-700 dark:text-gray-300">{course?.name || "Unknown Course"}</Badge>;
-  };
-
-  const formatDate = (dateString: string) => {
-    try {
-        return new Date(dateString).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    } catch (e) { return ""; }
-  };
+  const getCourseBadge = (courseId: string | null) =>
+    renderCourseBadge(courseId, courses);
 
   const mentionOptions = [
     { id: "everyone", label: "Everyone", detail: "All course members", token: "@everyone" },
@@ -846,7 +749,7 @@ export function Forum() {
       openReactionPicker={openReactionPicker}
       expandedReplyIds={expandedReplyIds}
       loadingReplyBranches={loadingReplyBranches}
-      formatDate={formatDate}
+      formatDate={formatForumDate}
       renderMentionedText={renderMentionedText}
       renderEmojiPicker={renderEmojiPicker}
       renderMentionSuggestions={(value, onSelect) => (
@@ -974,7 +877,7 @@ export function Forum() {
                             onReact={handleReaction}
                           />
                         }
-                        formatDate={formatDate}
+                        formatDate={formatForumDate}
                         onOpen={fetchThreadDetails}
                         onOpenProfile={navigateToProfile}
                         onEdit={openEditThread}
@@ -1020,7 +923,7 @@ export function Forum() {
                       currentUserId={user?.id}
                       deletingThreadId={deletingThreadId}
                       courseBadge={getCourseBadge(selectedThread?.course_id || null)}
-                      formatDate={formatDate}
+                      formatDate={formatForumDate}
                       renderMentionedText={renderMentionedText}
                       onOpenProfile={navigateToProfile}
                       onEdit={openEditThread}

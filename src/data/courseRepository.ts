@@ -138,6 +138,21 @@ export async function getStudentCourseIds(userId: string): Promise<string[]> {
   });
 }
 
+export async function enrollStudentInCourse({
+  courseId,
+  studentId,
+}: {
+  courseId: string;
+  studentId: string;
+}) {
+  const { error } = await supabase.from("course_enrollments").insert({
+    course_id: courseId,
+    student_id: studentId,
+  });
+
+  if (error) throw error;
+}
+
 export async function getUserCourseOfferings(
   userId: string,
   role?: string | null,

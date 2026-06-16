@@ -1,9 +1,12 @@
 import React, { memo, useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/lib/supabase";
 import { useSettings } from "@/hooks/useSettings";
 import type { SettingsConfig } from "@/hooks/useSettings";
 import { useLoginHistory } from "@/hooks/useLoginHistory";
+import {
+  deleteCurrentUserAccount,
+  updateAccountPassword,
+} from "@/data/settingsRepository";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -650,8 +653,7 @@ const SecurityTab = memo(({ settings, updateSetting }: SettingsTabProps) => {
 
     setIsChangingPwd(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password: pwdForm.new });
-      if (error) throw error;
+      await updateAccountPassword(pwdForm.new);
       notify.success("Password updated successfully.");
       setPwdForm({ new: "", confirm: "" });
     } catch (err) {
@@ -668,9 +670,7 @@ const SecurityTab = memo(({ settings, updateSetting }: SettingsTabProps) => {
     }
 
     try {
-      const { error } = await supabase.rpc("delete_user_account");
-      if (error) throw error;
-      await supabase.auth.signOut();
+      await deleteCurrentUserAccount();
       window.location.href = "/login";
     } catch (err) {
       notify.error(err, "Failed to delete account.");

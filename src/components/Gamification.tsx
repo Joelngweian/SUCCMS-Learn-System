@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { loadGamificationRpcData } from "@/data/gamificationRepository";
 import {
   COURSE_OFFERING_SELECT,
   normalizeCourseOffering,
@@ -202,9 +203,6 @@ export function Gamification() {
         threadResult,
         replyResult,
         loginResult,
-        leaderboardResult,
-        xpProgressResult,
-        benchmarkResult,
       ] = await Promise.all([
         supabase
           .from("course_enrollments")
@@ -236,10 +234,15 @@ export function Gamification() {
           .eq("user_id", userId)
           .order("login_time", { ascending: false })
           .limit(100),
-        supabase.rpc("get_weekly_xp_leaderboard", { p_limit: 50 }),
-        supabase.rpc("get_my_xp_progress"),
-        supabase.rpc("get_assignment_peer_benchmarks"),
       ]);
+      const {
+        assignmentBenchmarkError,
+        assignmentBenchmarkRows,
+        leaderboardError,
+        leaderboardRows,
+        xpProgressError,
+        xpProgressRow,
+      } = await loadGamificationRpcData();
 
       if (enrollmentResult.error) throw enrollmentResult.error;
       if (gradeResult.error) throw gradeResult.error;
@@ -251,21 +254,18 @@ export function Gamification() {
       const threadRows = threadResult.data || [];
       const replyRows = replyResult.data || [];
       const loginRows = loginResult.data || [];
-      const leaderboardRows = leaderboardResult.data || [];
-      const xpProgressRow = xpProgressResult.data?.[0];
-
-      if (leaderboardResult.error) {
+      if (leaderboardError) {
         console.warn(
           "Weekly XP leaderboard could not be loaded:",
-          leaderboardResult.error
+          leaderboardError
         );
         setLeaderboard([]);
       }
 
-      if (xpProgressResult.error) {
+      if (xpProgressError) {
         console.warn(
           "XP progress could not be loaded:",
-          xpProgressResult.error
+          xpProgressError
         );
         setXpProgress(null);
       } else {
@@ -280,15 +280,15 @@ export function Gamification() {
         });
       }
 
-      if (benchmarkResult.error) {
+      if (assignmentBenchmarkError) {
         console.warn(
           "Assignment peer benchmarks could not be loaded:",
-          benchmarkResult.error
+          assignmentBenchmarkError
         );
         setAssignmentBenchmarks([]);
       } else {
         setAssignmentBenchmarks(
-          (benchmarkResult.data || []).map((row) => ({
+          assignmentBenchmarkRows.map((row) => ({
             courseId: row.course_id,
             courseCode: row.course_code,
             courseName: row.course_name,

@@ -1,6 +1,6 @@
 
   import { defineConfig } from 'vite';
-  import react from '@vitejs/plugin-react-swc';
+  import react from '@vitejs/plugin-react';
   import tailwindcss from '@tailwindcss/vite';
   import path from 'path';
 
@@ -55,7 +55,9 @@
       outDir: 'build',
     },
     server: {
-      port: 3000,
+      host: 'localhost',
+      port: 5173,
+      strictPort: false,
       open: true,
     },
   });

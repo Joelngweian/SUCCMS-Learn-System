@@ -25,7 +25,8 @@ export function CourseManagement() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState("my-teaching");
-  type CourseTemplate = Database["public"]["Tables"]["courses"]["Row"];
+  type CourseTemplate =
+    Database["public"]["Functions"]["get_course_catalog_summary"]["Returns"][number];
   const [courses, setCourses] = useState<CourseTemplate[]>([]);
   const [myCourses, setMyCourses] = useState<NormalizedCourseOffering[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -57,9 +58,27 @@ export function CourseManagement() {
   const fetchData = useCallback(async () => {
     if (!profileId) return;
     setIsLoading(true);
-    // 1. Fetch All Courses
-    const { data: allData } = await supabase.from('courses').select('*');
-    setCourses(allData || []);
+    // 1. Fetch lightweight course catalog fields only
+    const { data: allData, error: catalogError } = await supabase.rpc(
+      "get_course_catalog_summary",
+    );
+    if (catalogError) {
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from("courses")
+        .select(
+          "id, code, name, course_code, chinese_name, faculty, programme, course_type, credits, credit_hours, status",
+        )
+        .order("code");
+
+      if (fallbackError) {
+        notify.error(catalogError, "Failed to load course catalog.");
+        setCourses([]);
+      } else {
+        setCourses((fallbackData || []) as CourseTemplate[]);
+      }
+    } else {
+      setCourses(allData || []);
+    }
 
     // 2. Fetch the lecturer's course instances
     const { data: myData } = await supabase

@@ -1319,6 +1319,22 @@ export type Database = {
           joined_at: string
         }[]
       }
+      get_course_catalog_summary: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          code: string
+          name: string
+          course_code: string | null
+          chinese_name: string | null
+          faculty: string | null
+          programme: string | null
+          course_type: string | null
+          credits: number | null
+          credit_hours: number | null
+          status: string | null
+        }[]
+      }
       get_assignment_peer_benchmarks: {
         Args: Record<PropertyKey, never>
         Returns: {

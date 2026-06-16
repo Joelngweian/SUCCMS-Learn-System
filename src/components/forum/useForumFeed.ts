@@ -3,8 +3,11 @@ import {
   getCourseMemberIds,
   getUserCourseOfferings,
 } from "@/data/courseRepository";
+import {
+  getForumThreadsPage,
+  getUserForumReactions,
+} from "@/data/forumRepository";
 import { getMentionProfiles } from "@/data/profileRepository";
-import { supabase } from "@/lib/supabase";
 import {
   normalizeForumThread,
   type ForumCourse,
@@ -77,36 +80,12 @@ export function useForumFeed({
 
   const fetchUserReactions = useCallback(async () => {
     if (!userId) return;
-    const [threadResult, replyResult] = await Promise.all([
-      supabase
-        .from("forum_reactions")
-        .select("thread_id, type")
-        .eq("user_id", userId),
-      supabase
-        .from("forum_reply_reactions")
-        .select("reply_id, type")
-        .eq("user_id", userId),
-    ]);
-
-    if (!threadResult.error) {
-      setUserReactions(
-        Object.fromEntries(
-          (threadResult.data || []).map(reaction => [
-            reaction.thread_id,
-            reaction.type,
-          ]),
-        ),
-      );
-    }
-    if (!replyResult.error) {
-      setReplyReactions(
-        Object.fromEntries(
-          (replyResult.data || []).map(reaction => [
-            reaction.reply_id,
-            reaction.type,
-          ]),
-        ),
-      );
+    try {
+      const reactions = await getUserForumReactions(userId);
+      setUserReactions(reactions.threadReactions);
+      setReplyReactions(reactions.replyReactions);
+    } catch (error) {
+      console.error("Failed to load forum reactions:", error);
     }
   }, [userId]);
 
@@ -124,57 +103,16 @@ export function useForumFeed({
         loadingMoreRef.current = true;
       }
 
-      const start = reset ? 0 : threadsRef.current.length;
-      let query = supabase
-        .from("forum_threads")
-        .select(`
-          *,
-          author:user_profiles!author_id(id, full_name, avatar_url, role),
-          replies:forum_replies(count),
-          reactions:forum_reactions(type)
-        `)
-        .order("is_pinned", { ascending: false })
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
-        .range(start, start + THREAD_PAGE_SIZE);
+      try {
+        const rows = await getForumThreadsPage({
+          courseIds: courses.map(course => course.id),
+          filter: selectedFilter,
+          search: debouncedSearchQuery,
+          start: reset ? 0 : threadsRef.current.length,
+        });
+        if (requestId !== requestIdRef.current) return;
 
-      if (selectedFilter === "general") {
-        query = query.is("course_id", null);
-      } else if (selectedFilter !== "all") {
-        query = query.eq("course_id", selectedFilter);
-      } else if (courses.length > 0) {
-        query = query.or(
-          `course_id.in.(${courses.map(course => course.id).join(",")}),course_id.is.null`,
-        );
-      } else {
-        query = query.is("course_id", null);
-      }
-
-      const normalizedSearch = debouncedSearchQuery
-        .replace(/[,%_()]/g, " ")
-        .trim();
-      if (normalizedSearch) {
-        query = query.or(
-          `title.ilike.%${normalizedSearch}%,content.ilike.%${normalizedSearch}%,category.ilike.%${normalizedSearch}%`,
-        );
-      }
-
-      const { data, error } = await query;
-      if (requestId !== requestIdRef.current) return;
-
-      if (error) {
-        console.error("Error fetching forum threads:", error);
-        if (reset) {
-          threadsRef.current = [];
-          setThreads([]);
-        }
-        hasMoreRef.current = false;
-        setHasMoreThreads(false);
-      } else {
-        const rows = data || [];
-        const page = rows
-          .slice(0, THREAD_PAGE_SIZE)
-          .map(normalizeForumThread);
+        const page = rows.slice(0, THREAD_PAGE_SIZE).map(normalizeForumThread);
         const hasMore = rows.length > THREAD_PAGE_SIZE;
         hasMoreRef.current = hasMore;
         setHasMoreThreads(hasMore);
@@ -185,12 +123,23 @@ export function useForumFeed({
                 ...current,
                 ...page.filter(
                   thread =>
-                    !current.some(currentThread => currentThread.id === thread.id),
+                    !current.some(
+                      currentThread => currentThread.id === thread.id,
+                    ),
                 ),
               ];
           threadsRef.current = next;
           return next;
         });
+      } catch (error) {
+        if (requestId !== requestIdRef.current) return;
+        console.error("Error fetching forum threads:", error);
+        if (reset) {
+          threadsRef.current = [];
+          setThreads([]);
+        }
+        hasMoreRef.current = false;
+        setHasMoreThreads(false);
       }
 
       if (reset) setLoading(false);

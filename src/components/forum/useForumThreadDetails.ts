@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
+import {
+  getChildReplyPage,
+  getForumThreadDetail,
+  getReplyChildCounts,
+  getRootCommentPage,
+  getThreadReplyCount,
+} from "@/data/forumRepository";
 import { notify } from "@/lib/notify";
 import { findReplyNode, updateReplyTreeNode } from "./forumTree";
 import {
@@ -11,11 +17,6 @@ import {
 
 const ROOT_COMMENT_PAGE_SIZE = 10;
 const CHILD_REPLY_PAGE_SIZE = 5;
-export const FORUM_REPLY_SELECT = `
-  *,
-  author:user_profiles!author_id(id, full_name, avatar_url, role),
-  reactions:forum_reply_reactions(type)
-`;
 
 export function useForumThreadDetails() {
   const [selectedThread, setSelectedThread] =
@@ -34,20 +35,9 @@ export function useForumThreadDetails() {
   ) => {
     if (replies.length === 0) return [];
 
-    const replyIds = replies.map((reply) => reply.id);
-    const { data: childRows, error } = await supabase
-      .from("forum_replies")
-      .select("parent_id")
-      .in("parent_id", replyIds);
-
-    if (error) throw error;
-
-    const childCounts: Record<string, number> = {};
-    (childRows || []).forEach((row) => {
-      if (row.parent_id) {
-        childCounts[row.parent_id] = (childCounts[row.parent_id] || 0) + 1;
-      }
-    });
+    const childCounts = await getReplyChildCounts(
+      replies.map((reply) => reply.id),
+    );
 
     return replies.map((reply) =>
       normalizeForumReply(reply, childCounts[reply.id] || 0),
@@ -55,48 +45,32 @@ export function useForumThreadDetails() {
   };
 
   const fetchRootCommentPage = async (threadId: string, start: number) => {
-    const { data, error, count } = await supabase
-      .from("forum_replies")
-      .select(FORUM_REPLY_SELECT, { count: "exact" })
-      .eq("thread_id", threadId)
-      .is("parent_id", null)
-      .order("created_at", { ascending: false })
-      .range(start, start + ROOT_COMMENT_PAGE_SIZE - 1);
-
-    if (error) throw error;
+    const page = await getRootCommentPage({ start, threadId });
 
     return {
-      replies: await attachChildMetadata(data || []),
-      rootCount: count || 0,
+      replies: await attachChildMetadata(
+        page.rows.slice(0, ROOT_COMMENT_PAGE_SIZE),
+      ),
+      rootCount: page.rootCount,
     };
   };
 
   const fetchThreadDetails = async (threadId: string) => {
     try {
       const [threadResult, totalReplyResult, rootPage] = await Promise.all([
-        supabase
-          .from("forum_threads")
-          .select("*, author:user_profiles!author_id(id, full_name, avatar_url, role)")
-          .eq("id", threadId)
-          .single(),
-        supabase
-          .from("forum_replies")
-          .select("id", { count: "exact", head: true })
-          .eq("thread_id", threadId),
+        getForumThreadDetail(threadId),
+        getThreadReplyCount(threadId),
         fetchRootCommentPage(threadId, 0),
       ]);
 
-      if (threadResult.error) throw threadResult.error;
-      if (totalReplyResult.error) throw totalReplyResult.error;
-
-      const thread = normalizeForumThread(threadResult.data);
+      const thread = normalizeForumThread(threadResult);
       setExpandedReplyIds({});
       setLoadingReplyBranches({});
       setHasMoreRootComments(rootPage.replies.length < rootPage.rootCount);
       setSelectedThread({
         ...thread,
         structuredReplies: rootPage.replies,
-        replyCount: totalReplyResult.count || 0,
+        replyCount: totalReplyResult,
         rootReplyCount: rootPage.rootCount,
       });
     } catch (error) {
@@ -147,17 +121,14 @@ export function useForumThreadDetails() {
     setLoadingReplyBranches((current) => ({ ...current, [parentId]: true }));
 
     try {
-      const { data, error, count } = await supabase
-        .from("forum_replies")
-        .select(FORUM_REPLY_SELECT, { count: "exact" })
-        .eq("thread_id", selectedThread.id)
-        .eq("parent_id", parentId)
-        .order("created_at", { ascending: false })
-        .range(start, start + CHILD_REPLY_PAGE_SIZE - 1);
-
-      if (error) throw error;
-
-      const replies = await attachChildMetadata(data || []);
+      const page = await getChildReplyPage({
+        parentId,
+        start,
+        threadId: selectedThread.id,
+      });
+      const replies = await attachChildMetadata(
+        page.rows.slice(0, CHILD_REPLY_PAGE_SIZE),
+      );
       setSelectedThread((current) => {
         if (!current) return current;
 
@@ -175,7 +146,7 @@ export function useForumThreadDetails() {
                 (child) => !existingIds.has(child.id),
               );
               const nextChildren = [...existingChildren, ...newChildren];
-              const childCount = count || 0;
+              const childCount = page.childCount;
 
               return {
                 ...node,
