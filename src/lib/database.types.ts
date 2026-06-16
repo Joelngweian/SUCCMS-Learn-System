@@ -281,6 +281,49 @@ export type Database = {
           },
         ]
       >
+      course_creation_requests: Table<
+        {
+          id: string
+          requested_by: string
+          subject_code: string
+          subject_name: string
+          faculty: string | null
+          programme: string | null
+          credits: number | null
+          reason: string
+          status: string
+          admin_notes: string | null
+          reviewed_by: string | null
+          reviewed_at: string | null
+          generated_course_id: string | null
+          created_at: string
+          updated_at: string
+        },
+        "requested_by" | "subject_code" | "subject_name" | "reason",
+        [
+          {
+            foreignKeyName: "course_creation_requests_generated_course_id_fkey"
+            columns: ["generated_course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_creation_requests_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_creation_requests_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
       course_instructors: Table<
         {
           id: string
@@ -1227,6 +1270,10 @@ export type Database = {
         Args: { target_course_id: string }
         Returns: boolean
       }
+      approve_course_creation_request: {
+        Args: { p_request_id: string; p_admin_notes?: string | null }
+        Returns: string
+      }
       check_in_attendance: {
         Args: { p_course_id: string; p_code: string }
         Returns: Json
@@ -1444,6 +1491,10 @@ export type Database = {
           attendee_count: number
           is_going: boolean
         }[]
+      }
+      reject_course_creation_request: {
+        Args: { p_request_id: string; p_admin_notes?: string | null }
+        Returns: boolean
       }
       handle_new_user: {
         Args: Record<PropertyKey, never>

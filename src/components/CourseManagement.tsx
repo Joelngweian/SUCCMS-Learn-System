@@ -19,6 +19,7 @@ import { Search, Plus, Loader2, ChevronLeft, ChevronRight, Trash2 } from "lucide
 import { confirmAction } from "@/lib/confirm";
 import { notify } from "@/lib/notify";
 import { invalidateCourseCache } from "@/data/courseRepository";
+import { CourseCreationRequestDialog } from "./course/CourseCreationRequestDialog";
 
 export function CourseManagement() {
   const { profile } = useAuth();
@@ -32,6 +33,7 @@ export function CourseManagement() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [droppingCourseId, setDroppingCourseId] = useState<string | null>(null);
+  const [isRequestDialogOpen, setIsRequestDialogOpen] = useState(false);
   
   // View Switching
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
@@ -188,8 +190,16 @@ export function CourseManagement() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">Lecturer Dashboard</h1>
-        <Button disabled variant="outline">Request New Course Creation</Button>
+        <Button variant="outline" onClick={() => setIsRequestDialogOpen(true)}>
+          Request New Course Creation
+        </Button>
       </div>
+
+      <CourseCreationRequestDialog
+        open={isRequestDialogOpen}
+        requesterId={profileId || null}
+        onOpenChange={setIsRequestDialogOpen}
+      />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>

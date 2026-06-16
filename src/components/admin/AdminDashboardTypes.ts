@@ -35,6 +35,23 @@ export interface AdminAnnouncement {
   expires_at: string | null;
 }
 
+export interface CourseCreationRequest {
+  id: string;
+  requestedBy: string;
+  requesterName: string;
+  subjectCode: string;
+  subjectName: string;
+  faculty: string | null;
+  programme: string | null;
+  credits: number | null;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  adminNotes: string | null;
+  reviewedAt: string | null;
+  generatedCourseId: string | null;
+  createdAt: string;
+}
+
 export interface AdminStats {
   totalUsers: number;
   activeReports: number;
@@ -42,6 +59,7 @@ export interface AdminStats {
   suspendedUsers: number;
   totalStories: number;
   announcements: number;
+  pendingCourseRequests: number;
 }
 
 export const EMPTY_ADMIN_STATS: AdminStats = {
@@ -51,4 +69,5 @@ export const EMPTY_ADMIN_STATS: AdminStats = {
   suspendedUsers: 0,
   totalStories: 0,
   announcements: 0,
+  pendingCourseRequests: 0,
 };

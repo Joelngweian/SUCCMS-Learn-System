@@ -193,7 +193,7 @@ export function Login() {
                   <Label>SUC Email</Label>
                   <Input 
                     type="email" 
-                    placeholder="ST12345@sc.edu.my" 
+                    placeholder="D240106B@sc.edu.my" 
                     value={signupEmail} 
                     onChange={(e) => setSignupEmail(e.target.value)} 
                     required 

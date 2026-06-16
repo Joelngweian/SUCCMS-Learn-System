@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT NOT NULL,
   full_name TEXT NOT NULL UNIQUE, -- Username must be unique for login
-  role TEXT NOT NULL CHECK (role IN ('student', 'lecturer', 'staff', 'admin')),
+  role TEXT NOT NULL CHECK (role IN ('student', 'lecturer', 'admin')),
   program_or_department TEXT, -- e.g., "Computer Science" or "Faculty of Engineering"
   faculty TEXT,
   programme TEXT,
@@ -60,6 +60,31 @@ CREATE TABLE IF NOT EXISTS public.courses (
   max_capacity INTEGER,
   enrollment_key TEXT,
   status TEXT DEFAULT 'open',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.course_creation_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  requested_by UUID NOT NULL
+    CONSTRAINT course_creation_requests_requested_by_fkey
+    REFERENCES public.user_profiles(id) ON DELETE CASCADE,
+  subject_code TEXT NOT NULL,
+  subject_name TEXT NOT NULL,
+  faculty TEXT,
+  programme TEXT,
+  credits INTEGER CHECK (credits IS NULL OR credits > 0),
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'approved', 'rejected')),
+  admin_notes TEXT,
+  reviewed_by UUID
+    CONSTRAINT course_creation_requests_reviewed_by_fkey
+    REFERENCES public.user_profiles(id) ON DELETE SET NULL,
+  reviewed_at TIMESTAMPTZ,
+  generated_course_id UUID
+    CONSTRAINT course_creation_requests_generated_course_id_fkey
+    REFERENCES public.courses(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -392,6 +417,13 @@ CREATE TABLE IF NOT EXISTS public.weekly_xp_summary (
 CREATE INDEX IF NOT EXISTS idx_user_profiles_role ON public.user_profiles(role);
 CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON public.user_profiles(email);
 CREATE INDEX IF NOT EXISTS idx_courses_lecturer_id ON public.courses(lecturer_id);
+CREATE INDEX IF NOT EXISTS idx_course_creation_requests_requested_by
+  ON public.course_creation_requests(requested_by, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_course_creation_requests_status_created
+  ON public.course_creation_requests(status, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_course_creation_requests_pending_code
+  ON public.course_creation_requests(LOWER(subject_code))
+  WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS idx_course_enrollments_student_id ON public.course_enrollments(student_id);
 CREATE INDEX IF NOT EXISTS idx_course_enrollments_course_id ON public.course_enrollments(course_id);
 CREATE INDEX IF NOT EXISTS idx_follows_follower_created ON public.follows(follower_id, created_at DESC);
@@ -604,6 +636,7 @@ CREATE TRIGGER protect_course_material_descendants
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.follows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.courses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.course_creation_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.course_enrollments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.course_instructors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.course_materials ENABLE ROW LEVEL SECURITY;
@@ -701,6 +734,61 @@ CREATE POLICY "Allow lecturers to manage their courses"
     auth.uid() = lecturer_id OR
     auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin')
   );
+
+-- COURSE_CREATION_REQUESTS RLS Policies
+CREATE POLICY "Lecturers can create course creation requests"
+  ON public.course_creation_requests FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    requested_by = auth.uid()
+    AND status = 'pending'
+    AND EXISTS (
+      SELECT 1
+      FROM public.user_profiles profile
+      WHERE profile.id = auth.uid()
+        AND profile.role = 'lecturer'
+        AND COALESCE(profile.is_active, TRUE)
+    )
+  );
+
+CREATE POLICY "Request owners and admins can view course creation requests"
+  ON public.course_creation_requests FOR SELECT
+  TO authenticated
+  USING (
+    requested_by = auth.uid()
+    OR EXISTS (
+      SELECT 1
+      FROM public.user_profiles profile
+      WHERE profile.id = auth.uid()
+        AND profile.role = 'admin'
+        AND COALESCE(profile.is_active, TRUE)
+    )
+  );
+
+CREATE POLICY "Admins can update course creation requests"
+  ON public.course_creation_requests FOR UPDATE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.user_profiles profile
+      WHERE profile.id = auth.uid()
+        AND profile.role = 'admin'
+        AND COALESCE(profile.is_active, TRUE)
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1
+      FROM public.user_profiles profile
+      WHERE profile.id = auth.uid()
+        AND profile.role = 'admin'
+        AND COALESCE(profile.is_active, TRUE)
+    )
+  );
+
+GRANT SELECT, INSERT, UPDATE ON public.course_creation_requests
+  TO authenticated;
 
 -- COURSE_ENROLLMENTS RLS Policies
 -- Students can view their own enrollments
@@ -1319,6 +1407,11 @@ CREATE TRIGGER update_courses_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
+CREATE TRIGGER update_course_creation_requests_updated_at
+  BEFORE UPDATE ON public.course_creation_requests
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
 CREATE TRIGGER update_assignments_updated_at
   BEFORE UPDATE ON public.assignments
   FOR EACH ROW
@@ -1362,7 +1455,7 @@ BEGIN
   email_prefix := SPLIT_PART(normalized_email, '@', 1);
 
   IF email_prefix LIKE 'st%' THEN
-    assigned_role := 'staff';
+    assigned_role := 'admin';
   ELSIF email_prefix LIKE 'lc%' THEN
     assigned_role := 'lecturer';
   ELSIF email_prefix LIKE 'd%'
@@ -1370,7 +1463,7 @@ BEGIN
     OR email_prefix LIKE 'p%' THEN
     assigned_role := 'student';
   ELSE
-    RAISE EXCEPTION 'Unable to identify account type from this SUC email. Staff emails must start with ST, lecturer emails with LC, and student emails with D, B, or P.'
+    RAISE EXCEPTION 'Unable to identify account type from this SUC email. Admin staff emails must start with ST, lecturer emails with LC, and student emails with D, B, or P.'
       USING ERRCODE = '22023';
   END IF;
 
@@ -1387,6 +1480,157 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog;
 
 REVOKE EXECUTE ON FUNCTION public.handle_new_user()
   FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.approve_course_creation_request(
+  p_request_id UUID,
+  p_admin_notes TEXT DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  actor_id UUID := auth.uid();
+  request_row public.course_creation_requests%ROWTYPE;
+  normalized_code TEXT;
+  new_course_id UUID;
+BEGIN
+  IF actor_id IS NULL OR NOT EXISTS (
+    SELECT 1
+    FROM public.user_profiles profile
+    WHERE profile.id = actor_id
+      AND profile.role = 'admin'
+      AND COALESCE(profile.is_active, TRUE)
+  ) THEN
+    RAISE EXCEPTION 'Only active administrators can approve course creation requests';
+  END IF;
+
+  SELECT *
+  INTO request_row
+  FROM public.course_creation_requests
+  WHERE id = p_request_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Course creation request not found';
+  END IF;
+
+  IF request_row.status <> 'pending' THEN
+    RAISE EXCEPTION 'Only pending course creation requests can be approved';
+  END IF;
+
+  normalized_code := UPPER(TRIM(request_row.subject_code));
+
+  IF normalized_code = '' THEN
+    RAISE EXCEPTION 'Subject code is required';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.courses course_row
+    WHERE LOWER(course_row.code) = LOWER(normalized_code)
+       OR LOWER(COALESCE(course_row.course_code, '')) = LOWER(normalized_code)
+  ) THEN
+    RAISE EXCEPTION 'A course with this subject code already exists';
+  END IF;
+
+  INSERT INTO public.courses (
+    code,
+    course_code,
+    name,
+    description,
+    faculty,
+    programme,
+    credits,
+    credit_hours,
+    course_type,
+    status
+  )
+  VALUES (
+    normalized_code,
+    normalized_code,
+    TRIM(request_row.subject_name),
+    NULLIF(TRIM(request_row.reason), ''),
+    NULLIF(TRIM(COALESCE(request_row.faculty, '')), ''),
+    NULLIF(TRIM(COALESCE(request_row.programme, '')), ''),
+    request_row.credits,
+    request_row.credits,
+    'requested',
+    'open'
+  )
+  RETURNING id INTO new_course_id;
+
+  UPDATE public.course_creation_requests
+  SET
+    status = 'approved',
+    admin_notes = NULLIF(TRIM(COALESCE(p_admin_notes, '')), ''),
+    reviewed_by = actor_id,
+    reviewed_at = NOW(),
+    generated_course_id = new_course_id
+  WHERE id = p_request_id;
+
+  RETURN new_course_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.reject_course_creation_request(
+  p_request_id UUID,
+  p_admin_notes TEXT DEFAULT NULL
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  actor_id UUID := auth.uid();
+  request_status TEXT;
+BEGIN
+  IF actor_id IS NULL OR NOT EXISTS (
+    SELECT 1
+    FROM public.user_profiles profile
+    WHERE profile.id = actor_id
+      AND profile.role = 'admin'
+      AND COALESCE(profile.is_active, TRUE)
+  ) THEN
+    RAISE EXCEPTION 'Only active administrators can reject course creation requests';
+  END IF;
+
+  SELECT status
+  INTO request_status
+  FROM public.course_creation_requests
+  WHERE id = p_request_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Course creation request not found';
+  END IF;
+
+  IF request_status <> 'pending' THEN
+    RAISE EXCEPTION 'Only pending course creation requests can be rejected';
+  END IF;
+
+  UPDATE public.course_creation_requests
+  SET
+    status = 'rejected',
+    admin_notes = NULLIF(TRIM(COALESCE(p_admin_notes, '')), ''),
+    reviewed_by = actor_id,
+    reviewed_at = NOW()
+  WHERE id = p_request_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.approve_course_creation_request(UUID, TEXT)
+  FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.reject_course_creation_request(UUID, TEXT)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.approve_course_creation_request(UUID, TEXT)
+  TO authenticated;
+GRANT EXECUTE ON FUNCTION public.reject_course_creation_request(UUID, TEXT)
+  TO authenticated;
 
 -- Trigger to create user profile on signup
 CREATE TRIGGER on_auth_user_created

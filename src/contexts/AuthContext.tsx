@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase.ts';
 const AUTH_PROFILE_SELECT =
   'id, full_name, username, role, faculty, programme, avatar_url, cover_url, bio, is_active';
 
-type PublicSignupRole = 'student' | 'lecturer' | 'staff';
+type PublicSignupRole = 'student' | 'lecturer' | 'admin';
 
 const SUC_EMAIL_DOMAIN = '@sc.edu.my';
 
@@ -18,7 +18,7 @@ const resolveSignupRoleFromEmail = (email: string): PublicSignupRole | null => {
 
   const emailPrefix = normalizedEmail.slice(0, -SUC_EMAIL_DOMAIN.length);
 
-  if (emailPrefix.startsWith('st')) return 'staff';
+  if (emailPrefix.startsWith('st')) return 'admin';
   if (emailPrefix.startsWith('lc')) return 'lecturer';
   if (
     emailPrefix.startsWith('d') ||
@@ -273,7 +273,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           data: null,
           error: {
             message:
-              "We could not identify your account type from this SUC email. Staff emails must start with ST, lecturer emails with LC, and student emails with D, B, or P.",
+              "We could not identify your account type from this SUC email. Admin staff emails must start with ST, lecturer emails with LC, and student emails with D, B, or P.",
           },
         };
       }

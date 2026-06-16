@@ -94,7 +94,7 @@ const PageLoadingFallback = () => (
 );
 
 // Types
-type UserRole = 'student' | 'lecturer' | 'staff' | 'admin';
+type UserRole = 'student' | 'lecturer' | 'admin';
 
 type NavigationItem = {
   id: string; // Used as the URL path
@@ -256,16 +256,12 @@ export default function App() {
     { id: '', label: 'Dashboard', icon: LayoutDashboard, description: 'Overview & AI insights' }
   ];
 
-  const staffNavigationItems: NavigationItem[] = [];
-
   const navigationItems =
     userRole === 'student'
       ? studentNavigationItems
       : userRole === 'lecturer'
         ? lecturerNavigationItems
-        : userRole === 'admin'
-          ? adminNavigationItems
-          : staffNavigationItems;
+        : adminNavigationItems;
   const isDarkMode = resolvedTheme === "dark";
   
   const isActive = (path: string) => {
@@ -299,9 +295,7 @@ export default function App() {
       ? 'Student'
       : userRole === 'lecturer'
         ? 'Lecturer'
-        : userRole === 'admin'
-          ? 'Admin'
-          : 'Staff';
+          : 'Admin';
 
   return (
     <div className="min-h-screen bg-background">
@@ -449,10 +443,6 @@ export default function App() {
                 {/* Admin Routes */}
                 {userRole === 'admin' && (
                   <Route path="/" element={<AdminDashboard />} />
-                )}
-
-                {userRole === 'staff' && (
-                  <Route path="/" element={<Navigate to="/settings" replace />} />
                 )}
 
                 {/* Fallback */}

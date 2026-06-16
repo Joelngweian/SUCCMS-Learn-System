@@ -8,7 +8,7 @@ Commit pushed: `070d5b1 Harden signup role assignment`
 
 This update removes public role selection from SUCCMS registration and makes role assignment controlled by verified school email patterns and the database trigger.
 
-The main goal is to prevent users from choosing `Student`, `Lecturer`, `Staff`, or `Admin` during public signup. Admin accounts must not be obtainable through public registration.
+The main goal is to prevent users from manually choosing `Student`, `Lecturer`, or `Admin` during public signup. Admin accounts can only be created automatically from verified `ST...@sc.edu.my` school staff emails or assigned manually by an existing administrator.
 
 ## User-Facing Registration Changes
 
@@ -28,7 +28,7 @@ Only school email addresses ending with `@sc.edu.my` are allowed to register.
 
 Role assignment is based on the email prefix, ignoring case:
 
-- `ST...@sc.edu.my` -> `staff`
+- `ST...@sc.edu.my` -> `admin`
 - `LC...@sc.edu.my` -> `lecturer`
 - `D...@sc.edu.my` -> `student`
 - `B...@sc.edu.my` -> `student`
@@ -63,9 +63,7 @@ The final role assignment is handled by the database.
 
 ### `src/App.tsx`
 
-Added minimal `staff` awareness so a newly registered staff account is not accidentally treated as Admin by the old fallback logic.
-
-Staff users display as `Staff` and are redirected from `/` to `/settings`. No new staff dashboard or staff feature access was added.
+The app routes `admin` accounts to the Admin Dashboard. `ST...@sc.edu.my` accounts are created directly as `admin`, so no separate `staff` route is used.
 
 ### `src/components/ProtectedRoute.tsx`
 
@@ -83,7 +81,7 @@ File:
 
 This migration:
 
-- Updates `public.user_profiles.role` check constraint to allow `staff`
+- Updates `public.user_profiles.role` check constraint to allow `student`, `lecturer`, and `admin`
 - Replaces `public.handle_new_user()` with database-side email validation and role assignment
 - Ignores any user-provided `role` metadata during signup
 - Revokes direct execution of `public.handle_new_user()` from `PUBLIC`, `anon`, and `authenticated`
@@ -112,7 +110,7 @@ Because these already existed, they were not recreated.
 
 Only the missing pieces were applied:
 
-- Add `staff` to the role check constraint
+- Keep the role check constraint aligned with `student`, `lecturer`, and `admin`
 - Replace `handle_new_user()` role assignment logic
 - Revoke public direct execution of `handle_new_user()`
 
@@ -123,21 +121,21 @@ Remote Supabase migrations applied:
 
 Remote verification confirmed:
 
-- `user_profiles_role_check` now allows `student`, `lecturer`, `staff`, and `admin`
+- `user_profiles_role_check` now allows `student`, `lecturer`, and `admin`
 - `handle_new_user()` now assigns roles from the school email prefix
 - `handle_new_user()` can only be executed by `postgres` and `service_role`
 
 ## Admin Account Rule
 
-Admin accounts cannot be created through public registration.
+Users cannot manually choose Admin during public registration.
 
-Public signup can only create:
+Public signup can create:
 
 - `student`
 - `lecturer`
-- `staff`
+- `admin` for ST-prefixed school staff emails
 
-Admin roles must be assigned by an existing Admin through management functionality, or manually by a system/database administrator.
+Non-ST accounts cannot become Admin through public registration. Admin roles can also be assigned by an existing Admin through management functionality, or manually by a system/database administrator.
 
 ## Existing Users
 
@@ -154,6 +152,10 @@ For another database that has not received this change, the SQL is:
 ```sql
 BEGIN;
 
+UPDATE public.user_profiles
+SET role = 'admin'
+WHERE role = 'staff';
+
 DO $$
 DECLARE
   current_role_check TEXT;
@@ -164,13 +166,13 @@ BEGIN
   WHERE conrelid = 'public.user_profiles'::regclass
     AND conname = 'user_profiles_role_check';
 
-  IF current_role_check IS NULL OR current_role_check NOT LIKE '%staff%' THEN
+  IF current_role_check IS NULL OR current_role_check LIKE '%staff%' THEN
     ALTER TABLE public.user_profiles
       DROP CONSTRAINT IF EXISTS user_profiles_role_check;
 
     ALTER TABLE public.user_profiles
       ADD CONSTRAINT user_profiles_role_check
-      CHECK (role IN ('student', 'lecturer', 'staff', 'admin'));
+      CHECK (role IN ('student', 'lecturer', 'admin'));
   END IF;
 END $$;
 
@@ -195,7 +197,7 @@ BEGIN
   email_prefix := SPLIT_PART(normalized_email, '@', 1);
 
   IF email_prefix LIKE 'st%' THEN
-    assigned_role := 'staff';
+    assigned_role := 'admin';
   ELSIF email_prefix LIKE 'lc%' THEN
     assigned_role := 'lecturer';
   ELSIF email_prefix LIKE 'd%'
@@ -203,7 +205,7 @@ BEGIN
     OR email_prefix LIKE 'p%' THEN
     assigned_role := 'student';
   ELSE
-    RAISE EXCEPTION 'Unable to identify account type from this SUC email. Staff emails must start with ST, lecturer emails with LC, and student emails with D, B, or P.'
+    RAISE EXCEPTION 'Unable to identify account type from this SUC email. Admin staff emails must start with ST, lecturer emails with LC, and student emails with D, B, or P.'
       USING ERRCODE = '22023';
   END IF;
 
