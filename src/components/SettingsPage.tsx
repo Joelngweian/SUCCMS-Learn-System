@@ -171,13 +171,10 @@ export function SettingsPage() {
     : "Auto-save enabled";
 
   return (
-    <div className="min-w-0 overflow-hidden bg-background" style={{ height: "calc(100vh - 2rem)" }}>
-      <div
-        className="h-full min-w-0"
-        style={{ display: "grid", gridTemplateColumns: "220px minmax(0, 1fr)" }}
-      >
-        <aside className="min-w-0 border-r bg-background/95">
-          <div className="flex h-full flex-col">
+    <div className="min-w-0 bg-background lg:h-[calc(100vh-2rem)] lg:overflow-hidden">
+      <div className="grid min-w-0 gap-4 lg:h-full lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-0">
+        <aside className="min-w-0 rounded-xl border bg-background/95 lg:rounded-none lg:border-y-0 lg:border-l-0 lg:border-r">
+          <div className="flex flex-col lg:h-full">
             <div className="border-b px-4 py-4">
               <div>
                 <h1 className="text-2xl font-bold">Settings</h1>
@@ -185,14 +182,14 @@ export function SettingsPage() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-3 py-4">
-              <div className="space-y-5">
+            <div className="px-3 py-4 lg:flex-1 lg:overflow-y-auto">
+              <div className="space-y-4 lg:space-y-5">
                 {MENU_GROUPS.map((group) => (
                   <div key={group.title} className="space-y-2">
                     <p className="px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                       {group.title}
                     </p>
-                    <div className="space-y-1">
+                    <div className="grid grid-cols-2 gap-2 lg:block lg:space-y-1">
                       {group.items.map((item) => {
                         const Icon = item.icon;
                         const isActive = activeSection === item.id;
@@ -208,7 +205,7 @@ export function SettingsPage() {
                             }`}
                           >
                             <Icon className="h-3.5 w-3.5 shrink-0" />
-                            <span>{item.label}</span>
+                            <span className="min-w-0 truncate">{item.label}</span>
                           </button>
                         );
                       })}
@@ -226,9 +223,9 @@ export function SettingsPage() {
           </div>
         </aside>
 
-        <main className="h-full min-h-0 min-w-0 overflow-y-auto bg-muted/20">
-          <div className="mx-auto w-full px-6 py-6" style={{ maxWidth: 1040 }}>
-            <div className="mb-5 flex flex-wrap items-center justify-end gap-2">
+        <main className="min-w-0 rounded-xl bg-muted/20 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:rounded-none">
+          <div className="mx-auto w-full max-w-[1040px] px-0 py-4 sm:px-2 lg:px-6 lg:py-6">
+            <div className="mb-4 flex flex-wrap items-center justify-start gap-2 sm:mb-5 sm:justify-end">
               <Badge
                 variant="outline"
                 className={
@@ -327,19 +324,19 @@ const ProfileSettings = memo(() => {
   const roleLabel = getRoleLabel(profile?.role);
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500 sm:space-y-6">
       <Card className="shadow-sm">
-        <CardHeader className="!px-8 !pt-7">
+        <CardHeader className="!px-4 !pt-5 sm:!px-8 sm:!pt-7">
           <CardTitle className="flex items-center gap-2 text-lg">
             <User className="h-5 w-5 text-primary" /> Edit Profile
           </CardTitle>
           <CardDescription>Update the information shown on your profile.</CardDescription>
         </CardHeader>
-        <CardContent className="!px-8 !pb-8 pt-1">
-          <form onSubmit={handleProfileSubmit} className="space-y-8">
-            <div className="rounded-xl border bg-muted/30 p-5">
-              <div className="flex min-w-0 items-center gap-4">
-                <Avatar className="h-16 w-16 border">
+        <CardContent className="!px-4 !pb-5 pt-1 sm:!px-8 sm:!pb-8">
+          <form onSubmit={handleProfileSubmit} className="space-y-6 sm:space-y-8">
+            <div className="rounded-xl border bg-muted/30 p-4 sm:p-5">
+              <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
+                <Avatar className="h-16 w-16 shrink-0 border">
                   <AvatarImage src={profileForm.avatar_url} />
                   <AvatarFallback className="text-base font-semibold !bg-white !text-black">
                     {getInitials(displayName)}
@@ -347,7 +344,7 @@ const ProfileSettings = memo(() => {
                 </Avatar>
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="truncate font-semibold">{displayName}</p>
+                    <p className="max-w-full truncate font-semibold">{displayName}</p>
                     <Badge variant="secondary">{roleLabel}</Badge>
                   </div>
                   <p className="text-sm text-muted-foreground">{roleLabel} Account</p>
@@ -355,7 +352,7 @@ const ProfileSettings = memo(() => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-x-10 gap-y-9 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-x-10 gap-y-6 md:grid-cols-2 md:gap-y-9">
                 <div className="min-w-0 space-y-3">
                   <Label htmlFor="display-name" className="text-sm font-semibold leading-5">Display Name</Label>
                   <Input
@@ -406,7 +403,7 @@ const ProfileSettings = memo(() => {
                 <Label htmlFor="bio" className="text-sm font-semibold leading-5">Bio</Label>
                 <Textarea
                   id="bio"
-                  className="min-h-32 rounded-xl px-4 py-3 leading-relaxed"
+                  className="min-h-28 rounded-xl px-4 py-3 leading-relaxed sm:min-h-32"
                   value={profileForm.bio}
                   onChange={(e) => updateProfileField("bio", e.target.value)}
                   placeholder="Write something about yourself"
@@ -415,7 +412,7 @@ const ProfileSettings = memo(() => {
             </div>
 
             <div className="flex justify-end border-t pt-5">
-              <Button type="submit" disabled={!profile || isSavingProfile}>
+              <Button type="submit" disabled={!profile || isSavingProfile} className="w-full sm:w-auto">
                 {isSavingProfile ? "Saving..." : "Save Profile"}
               </Button>
             </div>
@@ -798,12 +795,12 @@ const SettingSwitch = ({ title, desc, checked, onChange, icon, bg = "bg-muted", 
   const switchId = id ?? title.toLowerCase().replace(/\s+/g, "-");
 
   return (
-    <div className="flex items-start justify-between gap-5 rounded-lg p-3 transition-colors hover:bg-muted/40">
-      <div className="flex min-w-0 flex-1 items-start gap-4">
-        {icon && <span className={`shrink-0 rounded-xl p-2.5 ${bg}`}>{icon}</span>}
+    <div className="flex items-start justify-between gap-3 rounded-lg p-2.5 transition-colors hover:bg-muted/40 sm:gap-5 sm:p-3">
+      <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
+        {icon && <span className={`shrink-0 rounded-xl p-2 sm:p-2.5 ${bg}`}>{icon}</span>}
         <div className="min-w-0 space-y-1">
-          <Label htmlFor={switchId} className="cursor-pointer text-base font-medium leading-5">{title}</Label>
-          <p className="text-sm leading-relaxed text-muted-foreground">{desc}</p>
+          <Label htmlFor={switchId} className="cursor-pointer text-sm font-medium leading-5 sm:text-base">{title}</Label>
+          <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm">{desc}</p>
         </div>
       </div>
       <div 
@@ -837,12 +834,9 @@ const SettingSwitch = ({ title, desc, checked, onChange, icon, bg = "bg-muted", 
 };
 
 const SettingsSkeleton = () => (
-  <div className="min-w-0 overflow-hidden bg-background" style={{ height: "calc(100vh - 2rem)" }}>
-    <div
-      className="h-full min-w-0"
-      style={{ display: "grid", gridTemplateColumns: "220px minmax(0, 1fr)" }}
-    >
-      <div className="min-w-0 border-r p-4">
+  <div className="min-w-0 bg-background lg:h-[calc(100vh-2rem)] lg:overflow-hidden">
+    <div className="grid min-w-0 gap-4 lg:h-full lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-0">
+      <div className="min-w-0 rounded-xl border p-4 lg:rounded-none lg:border-y-0 lg:border-l-0 lg:border-r">
         <div className="space-y-4">
           <Skeleton className="h-7 w-28" />
           <Skeleton className="h-3 w-40" />
@@ -852,7 +846,7 @@ const SettingsSkeleton = () => (
         </div>
       </div>
 
-      <div className="min-w-0 p-6">
+      <div className="min-w-0 rounded-xl bg-muted/20 p-4 sm:p-6 lg:rounded-none">
         <div className="space-y-6">
           <Skeleton className="h-8 w-48" />
           <Card>
