@@ -18,6 +18,9 @@ export type CourseFolderPathItem = {
   name: string;
 };
 
+const COURSE_MATERIAL_SELECT =
+  "id, course_id, title, description, file_url, file_type, uploaded_by, uploaded_at, downloads_count, ms_drive_id, ms_drive_item_id, ms_web_url, ms_edit_url, ms_last_synced_at, parent_id, file_path, size, created_by";
+
 export function useCourseFiles({
   courseId,
   userId,
@@ -36,7 +39,7 @@ export function useCourseFiles({
   const fetchMaterials = useCallback(async () => {
     let query = supabase
       .from("course_materials")
-      .select("*")
+      .select(COURSE_MATERIAL_SELECT)
       .eq("course_id", courseId)
       .order("file_type", { ascending: false })
       .order("title", { ascending: true });

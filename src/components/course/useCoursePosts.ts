@@ -21,6 +21,9 @@ import {
   removeCourseContentPaths,
 } from "./courseStorage";
 
+const COURSE_POST_SELECT =
+  "id, course_id, author_id, author_name, content, attachments, created_at, updated_at";
+
 export function useCoursePosts({
   authorName,
   courseId,
@@ -50,7 +53,7 @@ export function useCoursePosts({
   const fetchPosts = useCallback(async () => {
     const { data, error } = await supabase
       .from("course_posts")
-      .select("*")
+      .select(COURSE_POST_SELECT)
       .eq("course_id", courseId)
       .order("created_at", { ascending: false });
 

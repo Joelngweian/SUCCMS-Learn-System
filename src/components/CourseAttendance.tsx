@@ -29,6 +29,12 @@ type CourseAttendanceProps = {
 
 const PAGE_SIZE = 25;
 
+const ATTENDANCE_SELECT =
+  "id, course_id, student_id, class_date, marked_present, marked_at, marked_by, session_id, status, check_in_at, check_in_method";
+
+const ATTENDANCE_SESSION_SELECT =
+  "id, course_id, class_date, check_in_code, status, starts_at, ends_at, closed_at, created_by, created_at, updated_at";
+
 const getLocalDateValue = () => {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60_000;
@@ -112,7 +118,7 @@ export function CourseAttendance({
 
     let attendanceQuery = supabase
       .from("attendance")
-      .select("*")
+      .select(ATTENDANCE_SELECT)
       .eq("course_id", courseId)
       .order("class_date", { ascending: false });
 
@@ -124,7 +130,7 @@ export function CourseAttendance({
     const sessionResult = isLecturer
       ? await supabase
           .from("attendance_sessions")
-          .select("*")
+          .select(ATTENDANCE_SESSION_SELECT)
           .eq("course_id", courseId)
           .order("class_date", { ascending: false })
       : { data: [] as AttendanceSession[], error: null };

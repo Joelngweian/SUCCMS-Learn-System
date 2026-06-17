@@ -13,6 +13,9 @@ type UserSettings = Database["public"]["Tables"]["user_settings"]["Row"];
 export type SettingsConfig = Omit<UserSettings, "user_id" | "created_at" | "updated_at">;
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+const USER_SETTINGS_SELECT =
+  "user_id, theme, compact_mode, animations_enabled, email_notifications, assignment_reminders, forum_replies, grade_updates, course_announcements, achievement_alerts, sound_enabled, profile_visibility, show_online_status, show_progress, show_leaderboard, language, timezone, date_format, high_contrast, large_text, reduce_motion, push_notifications, sms_notifications, weekly_summary, marketing_emails, created_at, updated_at";
+
 const DEFAULT_SETTINGS: SettingsConfig = {
   theme: "system",
   compact_mode: false,
@@ -119,7 +122,7 @@ export function useSettings() {
     try {
       const { data, error } = await supabase
         .from("user_settings")
-        .select("*")
+        .select(USER_SETTINGS_SELECT)
         .eq("user_id", userId)
         .maybeSingle();
         

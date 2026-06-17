@@ -71,6 +71,12 @@ const emptyAssignmentDraft = {
   due_date: "",
 };
 
+const ASSIGNMENT_SELECT =
+  "id, course_id, title, description, created_by, due_date, max_score, created_at, updated_at, attachments, rubric";
+
+const SUBMISSION_SELECT =
+  "id, assignment_id, student_id, submission_file_url, submission_text, submitted_at, is_late, grade, feedback, files";
+
 export function useCourseAssignments({
   courseId,
   isLecturer,
@@ -102,7 +108,7 @@ export function useCourseAssignments({
   const fetchAssignments = useCallback(async () => {
     const { data, error } = await supabase
       .from("assignments")
-      .select("*")
+      .select(ASSIGNMENT_SELECT)
       .eq("course_id", courseId)
       .order("due_date", { ascending: true });
 
@@ -115,7 +121,7 @@ export function useCourseAssignments({
     if (!isLecturer && userId) {
       const { data: submissions, error: submissionError } = await supabase
         .from("assignment_submissions")
-        .select("*")
+        .select(SUBMISSION_SELECT)
         .eq("student_id", userId);
       if (submissionError) {
         console.error("Failed to load submissions:", submissionError);
@@ -129,7 +135,7 @@ export function useCourseAssignments({
     async (assignmentId: string) => {
       const { data, error } = await supabase
         .from("assignment_submissions")
-        .select("*")
+        .select(SUBMISSION_SELECT)
         .eq("assignment_id", assignmentId);
       if (error) {
         console.error("Failed to load assignment submissions:", error);
@@ -157,7 +163,7 @@ export function useCourseAssignments({
     let active = true;
     void supabase
       .from("assignment_submissions")
-      .select("*")
+      .select(SUBMISSION_SELECT)
       .eq("assignment_id", selectedAssignment.id)
       .eq("student_id", userId)
       .maybeSingle()

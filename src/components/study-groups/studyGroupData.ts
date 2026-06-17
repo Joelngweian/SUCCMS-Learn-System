@@ -28,6 +28,12 @@ const getNullableString = (value: unknown) =>
 const getNumber = (value: unknown, fallback = 0) =>
   typeof value === "number" ? value : fallback;
 
+const STUDY_GROUP_SESSION_SELECT =
+  "id, group_id, created_by, title, description, starts_at, ends_at, location_type, location_text, meeting_url, max_attendees, reminder_sent_at, created_at, updated_at";
+
+const STUDY_GROUP_POST_SELECT =
+  "id, group_id, author_id, post_type, title, content, resource_url, attachment_name, attachment_path, attachment_type, attachment_size, created_at, updated_at";
+
 export async function loadEnrolledStudyGroupCourses(
   userId: string,
 ): Promise<EnrolledCourse[]> {
@@ -303,13 +309,13 @@ export async function loadStudyGroupDetails(
       .order("joined_at"),
     supabase
       .from("study_group_sessions")
-      .select("*")
+      .select(STUDY_GROUP_SESSION_SELECT)
       .eq("group_id", groupId)
       .order("starts_at"),
     supabase
       .from("study_group_posts")
       .select(
-        "*, user_profiles!study_group_posts_author_id_fkey(id, full_name, avatar_url)",
+        `${STUDY_GROUP_POST_SELECT}, user_profiles!study_group_posts_author_id_fkey(id, full_name, avatar_url)`,
       )
       .eq("group_id", groupId)
       .order("created_at", { ascending: false })

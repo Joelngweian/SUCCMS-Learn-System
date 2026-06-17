@@ -5,6 +5,9 @@ import { Database } from "@/lib/database.types";
 
 type LoginHistoryRow = Database["public"]["Tables"]["login_history"]["Row"];
 
+const LOGIN_HISTORY_SELECT =
+  "id, user_id, device, browser, ip_address, login_time, location";
+
 export function useLoginHistory() {
   const { user } = useAuth();
   const [history, setHistory] = useState<LoginHistoryRow[]>([]);
@@ -16,7 +19,7 @@ export function useLoginHistory() {
     try {
       const { data, error } = await supabase
         .from("login_history")
-        .select("*")
+        .select(LOGIN_HISTORY_SELECT)
         .eq("user_id", user.id)
         .order("login_time", { ascending: false })
         .limit(10);

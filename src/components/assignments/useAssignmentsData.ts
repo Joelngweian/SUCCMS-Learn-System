@@ -18,6 +18,12 @@ type AssignmentQueryRow = AssignmentRow & {
   course_offerings?: unknown;
 };
 
+const ASSIGNMENT_SELECT =
+  "id, course_id, title, description, created_by, due_date, max_score, created_at, updated_at, attachments, rubric";
+
+const SUBMISSION_SELECT =
+  "id, assignment_id, student_id, submission_file_url, submission_text, submitted_at, is_late, grade, feedback, files";
+
 const emptyStudentBuckets: StudentAssignmentBuckets = {
   upcoming: [],
   pastDue: [],
@@ -76,12 +82,12 @@ export function useAssignmentsData({
       await Promise.all([
         supabase
           .from("assignments")
-          .select(`*, course_offerings(${COURSE_OFFERING_SELECT})`)
+          .select(`${ASSIGNMENT_SELECT}, course_offerings(${COURSE_OFFERING_SELECT})`)
           .in("course_id", courseIds)
           .order("due_date", { ascending: true }),
         supabase
           .from("assignment_submissions")
-          .select("*")
+          .select(SUBMISSION_SELECT)
           .eq("student_id", userId),
       ]);
 
@@ -147,7 +153,7 @@ export function useAssignmentsData({
 
     const { data: assignments, error } = await supabase
       .from("assignments")
-      .select(`*, course_offerings(${COURSE_OFFERING_SELECT})`)
+      .select(`${ASSIGNMENT_SELECT}, course_offerings(${COURSE_OFFERING_SELECT})`)
       .in("course_id", courseIds)
       .order("due_date", { ascending: true });
 
@@ -162,7 +168,7 @@ export function useAssignmentsData({
     );
     const { data: submissions, error: submissionError } = await supabase
       .from("assignment_submissions")
-      .select("*")
+      .select(SUBMISSION_SELECT)
       .in(
         "assignment_id",
         normalizedAssignments.map(assignment => assignment.id),
