@@ -542,6 +542,10 @@ export function useCourseAssignments({
             );
           }
 
+          if (job?.error_message) {
+            throw new Error(job.error_message);
+          }
+
           // Re-kick the pull-based worker at most once per minute. The queue's
           // visibility timeout prevents another worker from grading the same
           // message while an active worker still owns it.
