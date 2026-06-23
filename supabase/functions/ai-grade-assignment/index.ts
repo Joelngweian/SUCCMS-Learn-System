@@ -43,6 +43,7 @@ const gradingSchema = {
 };
 
 type StoredFile = {
+  bucket?: string;
   name: string;
   path: string;
   type?: string;
@@ -353,6 +354,7 @@ const normalizeFiles = (value: unknown): StoredFile[] => {
 
   return value
     .map((file: any) => ({
+      bucket: cleanText(file?.bucket, "", 120) || undefined,
       name: cleanText(file?.name, "Attached file", 240),
       path: cleanText(file?.path || file?.url, "", 1800),
       type: cleanText(file?.type, "", 160),
@@ -399,7 +401,7 @@ const resolveFileUrl = async (
 
   const normalizedPath = file.path.replace(/^\/+/, "");
   const { data, error } = await serviceClient.storage
-    .from("course_content")
+    .from(file.bucket || "course_content")
     .createSignedUrl(normalizedPath, 300);
 
   if (error || !data?.signedUrl) {
@@ -528,24 +530,248 @@ const callGemini = async (
   model: string,
   requestBody: Record<string, unknown>,
 ) => {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify(requestBody),
       },
-      body: JSON.stringify(requestBody),
-    },
-  );
+    );
 
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(payload?.error?.message || "Gemini could not grade the submission.");
+    const payload = await response.json();
+    if (response.ok) return payload;
+
+    const retryable = response.status === 429 || response.status >= 500;
+    if (retryable && attempt < 2) {
+      await new Promise(resolve =>
+        setTimeout(resolve, 750 * 2 ** attempt),
+      );
+      continue;
+    }
+
+    throw new Error(
+      payload?.error?.message || "Gemini could not grade the submission.",
+    );
   }
 
-  return payload;
+  throw new Error("Gemini could not grade the submission.");
+};
+
+type AiGradingJob = {
+  id: string;
+  assignment_id: string;
+  student_id: string;
+  requested_by: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  attempts: number;
+  max_attempts: number;
+  started_at: string | null;
+};
+
+type QueueMessage = {
+  msg_id: number | string;
+  read_ct: number;
+  message: { jobId?: string } | null;
+};
+
+const gradeJob = async ({
+  job,
+  supabaseUrl,
+  serviceClient,
+  geminiApiKey,
+  model,
+}: {
+  job: AiGradingJob;
+  supabaseUrl: string;
+  serviceClient: any;
+  geminiApiKey: string;
+  model: string;
+}) => {
+  const { data: profile, error: profileError } = await serviceClient
+    .from("user_profiles")
+    .select("role, is_active")
+    .eq("id", job.requested_by)
+    .single();
+
+  if (
+    profileError ||
+    !["lecturer", "admin"].includes(profile?.role) ||
+    profile?.is_active === false
+  ) {
+    throw new Error("The requesting lecturer is no longer authorized.");
+  }
+
+  const { data: assignment, error: assignmentError } = await serviceClient
+    .from("assignments")
+    .select("id, course_id, title, description, max_score, rubric")
+    .eq("id", job.assignment_id)
+    .single();
+
+  if (assignmentError || !assignment) {
+    throw new Error("Assignment not found.");
+  }
+
+  if (profile.role !== "admin") {
+    const { data: instructor } = await serviceClient
+      .from("course_instructors")
+      .select("user_id")
+      .eq("course_id", assignment.course_id)
+      .eq("user_id", job.requested_by)
+      .maybeSingle();
+
+    if (!instructor) {
+      throw new Error("The requester is not an instructor for this course.");
+    }
+  }
+
+  const { data: submission, error: submissionError } = await serviceClient
+    .from("assignment_submissions")
+    .select("id, student_id, submission_text, files, submitted_at")
+    .eq("assignment_id", job.assignment_id)
+    .eq("student_id", job.student_id)
+    .maybeSingle();
+
+  if (submissionError || !submission) {
+    throw new Error("The student has not submitted this assignment.");
+  }
+
+  const rubric = parseRubric(assignment.rubric);
+  if (!rubric.text && rubric.files.length === 0) {
+    throw new Error("Add a grading rubric before using AI grading.");
+  }
+
+  const submissionFiles = normalizeFiles(submission.files);
+  const submissionText = cleanText(submission.submission_text, "", 40000);
+  if (!submissionText && submissionFiles.length === 0) {
+    throw new Error("This submission has no readable text or attached files.");
+  }
+
+  const maxScore = cleanNumber(assignment.max_score ?? 100, 1, 100000);
+  const promptParts: Array<Record<string, unknown>> = [
+    {
+      text: [
+        "You are an assessment assistant for a college lecturer.",
+        "Evaluate the student's submitted work strictly against the lecturer-provided rubric and assignment instructions.",
+        "Return a suggested grade only. The lecturer will review and decide the final grade.",
+        "Do not reward content that is not present in the submission.",
+        "If a file is unreadable, incomplete, suspicious, or the rubric is ambiguous, explain that in warnings and lower confidence.",
+        "The suggestedScore and all criterion scores must be within their stated maximum values.",
+        "Write constructive, specific feedback that cites strengths and improvements visible in the work.",
+        "Write the main feedback as one concise paragraph below 120 words.",
+        "Mention only the most important strengths and improvements.",
+        "Keep each rubric criterion reason below 25 words and return no more than 6 criteria.",
+        "Keep every warning below 20 words and return no more than 4 warnings.",
+        "",
+        `Assignment title: ${cleanText(assignment.title, "Assignment", 300)}`,
+        `Assignment instructions: ${cleanText(assignment.description, "No additional instructions.", 12000)}`,
+        `Maximum score: ${maxScore}`,
+        rubric.text
+          ? `Rubric text: ${rubric.text}`
+          : "Rubric is supplied as attached file(s).",
+        submissionText
+          ? `Student submission text: ${submissionText}`
+          : "Student work is supplied as attached file(s).",
+      ].join("\n"),
+    },
+  ];
+
+  promptParts.push(
+    ...(await loadFileParts(
+      rubric.files,
+      "Lecturer rubric file",
+      supabaseUrl,
+      serviceClient,
+    )),
+  );
+  promptParts.push(
+    ...(await loadFileParts(
+      submissionFiles,
+      "Student submission file",
+      supabaseUrl,
+      serviceClient,
+    )),
+  );
+
+  let parsed: any = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const attemptParts =
+      attempt === 0
+        ? promptParts
+        : [
+            ...promptParts,
+            {
+              text: [
+                "Return a shorter grading response.",
+                "Use at most 100 words for feedback, at most 5 rubric criteria, and one short sentence per reason.",
+                "Return complete valid JSON only.",
+              ].join("\n"),
+            },
+          ];
+    const payload = await callGemini(geminiApiKey, model, {
+      contents: [{ role: "user", parts: attemptParts }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: attempt === 0 ? 8192 : 4096,
+        responseMimeType: "application/json",
+        responseSchema: gradingSchema,
+      },
+    });
+
+    try {
+      parsed = parseGeminiJson(payload);
+      break;
+    } catch (error) {
+      if (
+        attempt === 0 &&
+        error instanceof Error &&
+        ["EMPTY_GRADING_RESPONSE", "INVALID_GRADING_RESPONSE"].includes(
+          error.message,
+        )
+      ) {
+        continue;
+      }
+      throw new Error(
+        "Gemini returned incomplete grading data. Please try again.",
+      );
+    }
+  }
+
+  if (!parsed) {
+    throw new Error("Gemini returned incomplete grading data. Please try again.");
+  }
+
+  const suggestedScore = cleanNumber(parsed?.suggestedScore, 0, maxScore);
+  const criteria = Array.isArray(parsed?.criteria)
+    ? parsed.criteria.slice(0, 6).map((criterion: any) => {
+        const criterionMax = cleanNumber(criterion?.maxScore, 0, maxScore);
+        return {
+          name: cleanText(criterion?.name, "Criterion", 160),
+          score: cleanNumber(criterion?.score, 0, criterionMax),
+          maxScore: criterionMax,
+          reason: cleanText(criterion?.reason, "", 360),
+        };
+      })
+    : [];
+
+  return {
+    suggestedScore,
+    maxScore,
+    feedback: cleanText(parsed?.feedback, "No feedback was generated.", 1800),
+    confidence: Math.round(cleanNumber(parsed?.confidence, 0, 100)),
+    criteria,
+    warnings: Array.isArray(parsed?.warnings)
+      ? parsed.warnings
+          .slice(0, 4)
+          .map((warning: unknown) => cleanText(warning, "", 240))
+          .filter(Boolean)
+      : [],
+    model,
+  };
 };
 
 Deno.serve(async (req) => {
@@ -557,240 +783,175 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
+  const model = Deno.env.get("AI_GRADING_MODEL") || "gemini-2.5-flash";
+
+  if (!supabaseUrl || !serviceRoleKey || !geminiApiKey) {
+    return jsonResponse({ error: "AI grading worker is not configured." }, 500);
+  }
+
+  if (req.headers.get("Authorization") !== `Bearer ${serviceRoleKey}`) {
+    return jsonResponse({ error: "Unauthorized" }, 401);
+  }
+
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
-    const model = Deno.env.get("AI_GRADING_MODEL") || "gemini-2.5-flash";
-
-    if (!supabaseUrl || !anonKey || !serviceRoleKey) {
-      throw new Error("Supabase environment is not configured.");
-    }
-    if (!geminiApiKey) {
-      throw new Error("GEMINI_API_KEY is not configured.");
-    }
-
-    const authHeader = req.headers.get("Authorization") || "";
-    const authClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: userData, error: userError } = await authClient.auth.getUser();
-
-    if (userError || !userData.user) {
-      return jsonResponse({ error: "Unauthorized" }, 401);
-    }
-
-    const body = await req.json();
-    const assignmentId = cleanText(body?.assignmentId, "", 80);
-    const studentId = cleanText(body?.studentId, "", 80);
-
-    if (!assignmentId || !studentId) {
-      return jsonResponse(
-        { error: "Assignment and student identifiers are required." },
-        400,
-      );
-    }
-
+    const body = await req.json().catch(() => ({}));
+    const batchSize = Math.min(5, Math.max(1, Number(body?.batchSize) || 1));
     const serviceClient = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const { data: profile, error: profileError } = await serviceClient
-      .from("user_profiles")
-      .select("role, is_active")
-      .eq("id", userData.user.id)
-      .single();
+    const { data: messages, error: dequeueError } = await serviceClient.rpc(
+      "dequeue_ai_grading_jobs",
+      { p_batch_size: batchSize },
+    );
 
-    if (
-      profileError ||
-      !["lecturer", "admin"].includes(profile?.role) ||
-      profile?.is_active === false
-    ) {
-      return jsonResponse({ error: "Lecturer access is required." }, 403);
-    }
+    if (dequeueError) throw dequeueError;
 
-    const { data: assignment, error: assignmentError } = await serviceClient
-      .from("assignments")
-      .select("id, course_id, title, description, max_score, rubric")
-      .eq("id", assignmentId)
-      .single();
+    let completed = 0;
+    let failed = 0;
+    let deferred = 0;
 
-    if (assignmentError || !assignment) {
-      return jsonResponse({ error: "Assignment not found." }, 404);
-    }
+    for (const rawMessage of messages || []) {
+      const message = rawMessage as QueueMessage;
+      const jobId = cleanText(message.message?.jobId, "", 80);
+      if (!jobId) {
+        await serviceClient.rpc("archive_ai_grading_message", {
+          p_msg_id: message.msg_id,
+        });
+        failed += 1;
+        continue;
+      }
 
-    if (profile.role !== "admin") {
-      const { data: instructor } = await serviceClient
-        .from("course_instructors")
-        .select("user_id")
-        .eq("course_id", assignment.course_id)
-        .eq("user_id", userData.user.id)
+      const { data: jobData, error: jobError } = await serviceClient
+        .from("ai_grading_jobs")
+        .select(
+          "id, assignment_id, student_id, requested_by, status, attempts, max_attempts, started_at",
+        )
+        .eq("id", jobId)
         .maybeSingle();
 
-      if (!instructor) {
-        return jsonResponse(
-          { error: "You are not an instructor for this course." },
-          403,
-        );
+      if (jobError || !jobData) {
+        await serviceClient.rpc("archive_ai_grading_message", {
+          p_msg_id: message.msg_id,
+        });
+        failed += 1;
+        continue;
       }
-    }
 
-    const { data: submission, error: submissionError } = await serviceClient
-      .from("assignment_submissions")
-      .select("id, student_id, submission_text, files, submitted_at")
-      .eq("assignment_id", assignmentId)
-      .eq("student_id", studentId)
-      .maybeSingle();
+      const job = jobData as AiGradingJob;
+      if (["completed", "failed"].includes(job.status)) {
+        await serviceClient.rpc("delete_ai_grading_message", {
+          p_msg_id: message.msg_id,
+        });
+        continue;
+      }
 
-    if (submissionError || !submission) {
-      return jsonResponse({ error: "The student has not submitted this assignment." }, 404);
-    }
+      if (
+        job.status === "processing" &&
+        job.started_at &&
+        Date.now() - new Date(job.started_at).getTime() < 10 * 60 * 1000
+      ) {
+        deferred += 1;
+        continue;
+      }
 
-    const rubric = parseRubric(assignment.rubric);
-    if (!rubric.text && rubric.files.length === 0) {
-      return jsonResponse(
-        { error: "Add a grading rubric before using AI grading." },
-        400,
-      );
-    }
+      const nextAttempt = job.attempts + 1;
+      const { error: claimError } = await serviceClient
+        .from("ai_grading_jobs")
+        .update({
+          status: "processing",
+          attempts: nextAttempt,
+          started_at: new Date().toISOString(),
+          error_message: null,
+        })
+        .eq("id", job.id)
+        .in("status", ["queued", "processing"]);
 
-    const submissionFiles = normalizeFiles(submission.files);
-    const submissionText = cleanText(submission.submission_text, "", 40000);
-    if (!submissionText && submissionFiles.length === 0) {
-      return jsonResponse(
-        { error: "This submission has no readable text or attached files." },
-        400,
-      );
-    }
-
-    const maxScore = cleanNumber(assignment.max_score ?? 100, 1, 100000);
-    const promptParts: Array<Record<string, unknown>> = [
-      {
-        text: [
-          "You are an assessment assistant for a college lecturer.",
-          "Evaluate the student's submitted work strictly against the lecturer-provided rubric and assignment instructions.",
-          "Return a suggested grade only. The lecturer will review and decide the final grade.",
-          "Do not reward content that is not present in the submission.",
-          "If a file is unreadable, incomplete, suspicious, or the rubric is ambiguous, explain that in warnings and lower confidence.",
-          "The suggestedScore and all criterion scores must be within their stated maximum values.",
-          "Write constructive, specific feedback that cites strengths and improvements visible in the work.",
-          "Write the main feedback as one concise paragraph below 120 words.",
-          "Mention only the most important strengths and improvements.",
-          "Keep each rubric criterion reason below 25 words and return no more than 6 criteria.",
-          "Keep every warning below 20 words and return no more than 4 warnings.",
-          "",
-          `Assignment title: ${cleanText(assignment.title, "Assignment", 300)}`,
-          `Assignment instructions: ${cleanText(assignment.description, "No additional instructions.", 12000)}`,
-          `Maximum score: ${maxScore}`,
-          rubric.text ? `Rubric text: ${rubric.text}` : "Rubric is supplied as attached file(s).",
-          submissionText ? `Student submission text: ${submissionText}` : "Student work is supplied as attached file(s).",
-        ].join("\n"),
-      },
-    ];
-
-    promptParts.push(
-      ...(await loadFileParts(
-        rubric.files,
-        "Lecturer rubric file",
-        supabaseUrl,
-        serviceClient,
-      )),
-    );
-    promptParts.push(
-      ...(await loadFileParts(
-        submissionFiles,
-        "Student submission file",
-        supabaseUrl,
-        serviceClient,
-      )),
-    );
-
-    let parsed: any = null;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const attemptParts =
-        attempt === 0
-          ? promptParts
-          : [
-              ...promptParts,
-              {
-                text: [
-                  "Return a shorter grading response.",
-                  "Use at most 100 words for feedback, at most 5 rubric criteria, and one short sentence per reason.",
-                  "Return complete valid JSON only.",
-                ].join("\n"),
-              },
-            ];
-      const payload = await callGemini(geminiApiKey, model, {
-        contents: [{ role: "user", parts: attemptParts }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: attempt === 0 ? 8192 : 4096,
-          responseMimeType: "application/json",
-          responseSchema: gradingSchema,
-        },
-      });
+      if (claimError) {
+        deferred += 1;
+        continue;
+      }
 
       try {
-        parsed = parseGeminiJson(payload);
-        break;
+        const result = await gradeJob({
+          job: { ...job, status: "processing", attempts: nextAttempt },
+          supabaseUrl,
+          serviceClient,
+          geminiApiKey,
+          model,
+        });
+
+        const { error: completeError } = await serviceClient
+          .from("ai_grading_jobs")
+          .update({
+            status: "completed",
+            result,
+            model,
+            error_message: null,
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", job.id);
+
+        if (completeError) throw completeError;
+
+        await serviceClient.rpc("delete_ai_grading_message", {
+          p_msg_id: message.msg_id,
+        });
+        completed += 1;
       } catch (error) {
-        if (
-          attempt === 0 &&
-          error instanceof Error &&
-          ["EMPTY_GRADING_RESPONSE", "INVALID_GRADING_RESPONSE"].includes(
-            error.message,
-          )
-        ) {
-          continue;
-        }
-        throw new Error(
-          "Gemini returned incomplete grading data. Please click Try Again.",
+        const errorMessage = cleanText(
+          error instanceof Error
+            ? error.message
+            : "The assignment could not be graded.",
+          "The assignment could not be graded.",
+          1000,
         );
+        const permanentlyFailed = nextAttempt >= job.max_attempts;
+
+        await serviceClient
+          .from("ai_grading_jobs")
+          .update({
+            status: permanentlyFailed ? "failed" : "queued",
+            error_message: errorMessage,
+            completed_at: permanentlyFailed ? new Date().toISOString() : null,
+          })
+          .eq("id", job.id);
+
+        if (permanentlyFailed) {
+          await serviceClient.rpc("archive_ai_grading_message", {
+            p_msg_id: message.msg_id,
+          });
+          failed += 1;
+        } else {
+          deferred += 1;
+        }
+
+        console.error("AI grading job failed", {
+          jobId: job.id,
+          attempt: nextAttempt,
+          permanentlyFailed,
+          error: errorMessage,
+        });
       }
     }
 
-    if (!parsed) {
-      throw new Error(
-        "Gemini returned incomplete grading data. Please click Try Again.",
-      );
-    }
-
-    const suggestedScore = cleanNumber(parsed?.suggestedScore, 0, maxScore);
-    const criteria = Array.isArray(parsed?.criteria)
-      ? parsed.criteria.slice(0, 6).map((criterion: any) => {
-          const criterionMax = cleanNumber(criterion?.maxScore, 0, maxScore);
-          return {
-            name: cleanText(criterion?.name, "Criterion", 160),
-            score: cleanNumber(criterion?.score, 0, criterionMax),
-            maxScore: criterionMax,
-            reason: cleanText(criterion?.reason, "", 360),
-          };
-        })
-      : [];
-
     return jsonResponse({
-      suggestedScore,
-      maxScore,
-      feedback: cleanText(parsed?.feedback, "No feedback was generated.", 1800),
-      confidence: Math.round(cleanNumber(parsed?.confidence, 0, 100)),
-      criteria,
-      warnings: Array.isArray(parsed?.warnings)
-        ? parsed.warnings
-            .slice(0, 4)
-            .map((warning: unknown) => cleanText(warning, "", 240))
-            .filter(Boolean)
-        : [],
-      model,
+      dequeued: messages?.length || 0,
+      completed,
+      failed,
+      deferred,
     });
   } catch (error) {
-    console.error("AI grading error:", error);
+    console.error("AI grading worker error:", error);
     return jsonResponse(
       {
         error:
           error instanceof Error
             ? error.message
-            : "The assignment could not be graded.",
+            : "The AI grading worker failed.",
       },
       500,
     );

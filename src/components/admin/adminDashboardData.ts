@@ -1,5 +1,6 @@
 import type { Json } from "@/lib/database.types";
 import { supabase } from "@/lib/supabase";
+import { withSignedStorageUrls } from "@/lib/storageUrls";
 import type {
   AdminAnnouncement,
   AdminStats,
@@ -178,12 +179,29 @@ export const loadAdminDashboardData = async (): Promise<{
   ].find(Boolean);
   if (firstError) throw firstError;
 
-  const announcements: AdminAnnouncement[] = (
+  const unsignedAnnouncements: AdminAnnouncement[] = (
     announcementsResult.data || []
   ).map((announcement) => ({
     ...announcement,
     priority: announcement.priority as AdminAnnouncement["priority"],
     attachments: getAnnouncementAttachments(announcement.attachments),
+  }));
+  const signedAnnouncementAttachments = await withSignedStorageUrls(
+    "announcement-attachments",
+    unsignedAnnouncements.flatMap(announcement => announcement.attachments),
+  );
+  const attachmentUrlByPath = new Map(
+    signedAnnouncementAttachments.map(attachment => [
+      attachment.path,
+      attachment.url,
+    ]),
+  );
+  const announcements = unsignedAnnouncements.map(announcement => ({
+    ...announcement,
+    attachments: announcement.attachments.map(attachment => ({
+      ...attachment,
+      url: attachmentUrlByPath.get(attachment.path) || attachment.url,
+    })),
   }));
 
   const reportRows = (reportsResult.data || []) as unknown as AdminReportRow[];

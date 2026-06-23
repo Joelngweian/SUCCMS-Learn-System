@@ -11,6 +11,7 @@ import {
   normalizeCourseOffering,
 } from "@/lib/courseOfferings";
 import type { Database } from "@/lib/database.types";
+import { withSignedStorageUrls } from "@/lib/storageUrls";
 import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { OnlineActivity, SocialActivityFeed } from "./SocialWidgets";
@@ -259,6 +260,19 @@ const asStringList = (value: unknown) =>
     ? value.filter((item): item is string => typeof item === "string")
     : [];
 
+const asString = (value: unknown, fallback = "") =>
+  typeof value === "string" ? value : fallback;
+
+const asNumber = (value: unknown, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const asBoolean = (value: unknown) => value === true;
+
+const asArray = (value: unknown): unknown[] =>
+  Array.isArray(value) ? value : [];
+
 const isRecommendation = (value: unknown): value is Recommendation => {
   const item = asRecord(value);
   return (
@@ -291,6 +305,127 @@ const normalizeAnnouncementAttachments = (
         }];
       })
     : [];
+
+const normalizeDashboardCourse = (value: unknown): StudentCourse | null => {
+  const course = asRecord(value);
+  const id = asString(course.id);
+  if (!id) return null;
+
+  const next = asRecord(course.nextAssignment);
+  const nextAssignment = asString(next.id)
+    ? {
+        dueDate: asString(next.dueDate),
+        id: asString(next.id),
+        title: asString(next.title),
+      }
+    : undefined;
+
+  return {
+    assignments: asNumber(course.assignments),
+    code: asString(course.code, "N/A"),
+    completedAssignments: asNumber(course.completedAssignments),
+    credits: asNumber(course.credits),
+    grade: typeof course.grade === "string" ? course.grade : null,
+    id,
+    lastActivity: new Date(asString(course.lastActivity)),
+    lecturer: asString(course.lecturer, "No lecturer assigned"),
+    name: asString(course.name, "Course"),
+    nextAssignment,
+    pendingAssignments: asNumber(course.pendingAssignments),
+    progress: asNumber(course.progress),
+    status: asString(course.status, "active"),
+  };
+};
+
+const normalizeUpcomingAssignment = (
+  value: unknown,
+): DashboardAssignment | null => {
+  const assignment = asRecord(value);
+  const id = asString(assignment.id);
+  const courseId = asString(assignment.courseId);
+  if (!id || !courseId) return null;
+
+  return {
+    courseCode: asString(assignment.courseCode, "N/A"),
+    courseId,
+    courseName: asString(assignment.courseName, "Course"),
+    dueDate: asString(assignment.dueDate),
+    id,
+    title: asString(assignment.title),
+  };
+};
+
+const normalizeDashboardAnnouncement = (
+  value: unknown,
+): DashboardAnnouncement | null => {
+  const announcement = asRecord(value);
+  const id = asString(announcement.id);
+  if (!id) return null;
+  const priority = announcement.priority === "high" || announcement.priority === "low"
+    ? announcement.priority
+    : "medium";
+
+  return {
+    attachments: normalizeAnnouncementAttachments(announcement.attachments),
+    content: asString(announcement.content),
+    createdAt: asString(announcement.createdAt),
+    id,
+    isRead: asBoolean(announcement.isRead),
+    priority,
+    title: asString(announcement.title),
+  };
+};
+
+const signDashboardAnnouncementAttachments = async (
+  announcements: DashboardAnnouncement[],
+) => {
+  const signedAttachments = await withSignedStorageUrls(
+    "announcement-attachments",
+    announcements.flatMap(announcement => announcement.attachments),
+  );
+  const attachmentUrlByPath = new Map(
+    signedAttachments.map(attachment => [attachment.path, attachment.url]),
+  );
+
+  return announcements.map(announcement => ({
+    ...announcement,
+    attachments: announcement.attachments.map(attachment => ({
+      ...attachment,
+      url: attachmentUrlByPath.get(attachment.path) || attachment.url,
+    })),
+  }));
+};
+
+const normalizeInsightCourse = (
+  value: unknown,
+): StudyInsightCourseContext | null => {
+  const course = asRecord(value);
+  const id = asString(course.id);
+  if (!id) return null;
+
+  return {
+    assignments: asArray(course.assignments).map(asRecord).map(assignment => ({
+      dueDate: asString(assignment.dueDate),
+      isLate: asBoolean(assignment.isLate),
+      submitted: asBoolean(assignment.submitted),
+      title: asString(assignment.title),
+    })),
+    attendance: asArray(course.attendance).map(asRecord).map(record => ({
+      classDate: asString(record.classDate),
+      status: asString(record.status),
+    })),
+    code: asString(course.code, "N/A"),
+    grades: asArray(course.grades).map(asRecord).map(grade => ({
+      assignmentTitle: asString(grade.assignmentTitle, "Course assessment"),
+      feedback: asString(grade.feedback),
+      gradedAt: asString(grade.gradedAt),
+      percentage: asNumber(grade.percentage),
+      rubric: asString(grade.rubric),
+    })),
+    id,
+    name: asString(course.name, "Course"),
+  };
+};
 
 const getCourseCode = (course: {
   course_code?: string | null;
@@ -770,6 +905,49 @@ export function StudentDashboard() {
     setLoadError("");
 
     try {
+      const dashboardResult = await supabase.rpc("get_student_dashboard_data");
+      if (!dashboardResult.error) {
+        const payload = asRecord(dashboardResult.data);
+        const courseList = asArray(payload.courses)
+          .map(normalizeDashboardCourse)
+          .filter((course): course is StudentCourse => course !== null);
+        const futureAssignments = asArray(payload.upcomingAssignments)
+          .map(normalizeUpcomingAssignment)
+          .filter((assignment): assignment is DashboardAssignment => assignment !== null);
+        const announcementList = asArray(payload.announcements)
+          .map(normalizeDashboardAnnouncement)
+          .filter((announcement): announcement is DashboardAnnouncement => announcement !== null);
+        const insightContext = asArray(payload.insightContext)
+          .map(normalizeInsightCourse)
+          .filter((course): course is StudyInsightCourseContext => course !== null);
+        const summary = asRecord(payload.stats);
+
+        setEnrolledCourses(courseList);
+        setUpcomingAssignments(futureAssignments);
+        setAnnouncements(
+          await signDashboardAnnouncementAttachments(announcementList),
+        );
+        setStats({
+          credits: asNumber(summary.credits),
+          gpa: summary.gpa == null ? null : asNumber(summary.gpa),
+          pendingAssignments: asNumber(summary.pendingAssignments),
+          unreadAlerts: asNumber(summary.unreadAlerts),
+        });
+        void generateSmartRecommendations(courseList);
+        void generateStudyInsights(insightContext);
+        return;
+      }
+
+      // Keep existing deployments usable until the accompanying SQL migration
+      // is applied. Other RPC failures should remain visible instead of silently
+      // falling back to the heavier browser fan-out.
+      if (dashboardResult.error.code !== "PGRST202") {
+        throw dashboardResult.error;
+      }
+      console.warn(
+        "Student dashboard summary RPC is not installed yet; using compatibility queries.",
+      );
+
       const [
         enrollmentResult,
         announcementResult,
@@ -1078,7 +1256,9 @@ export function StudentDashboard() {
 
       setEnrolledCourses(courseList);
       setUpcomingAssignments(futureAssignments);
-      setAnnouncements(announcementList);
+      setAnnouncements(
+        await signDashboardAnnouncementAttachments(announcementList),
+      );
       setStats({
         pendingAssignments: assignmentRows.filter(
           (assignment) => !submissionsByAssignment.has(assignment.id)

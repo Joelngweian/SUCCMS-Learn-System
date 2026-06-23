@@ -26,10 +26,12 @@ export type CourseProfileDisplay = {
 };
 
 export type CourseResourceFile = {
+  bucket?: string;
   name: string;
   path: string;
   size?: number;
   type?: string;
+  url?: string;
 };
 
 export type AiGradeDetails = {
@@ -44,8 +46,12 @@ export type AiGradeDetails = {
 };
 
 export type SubmissionFile = {
+  bucket?: string;
   name: string;
   path: string;
+  size?: number;
+  type?: string;
+  url?: string;
 };
 
 export type CoursePostFile = CourseResourceFile & {
@@ -80,7 +86,14 @@ export type MentionPerson = {
 
 const isFileRecord = (
   value: Json,
-): value is { name: string; path: string; url?: string; size?: number; type?: string } => {
+): value is {
+  bucket?: string;
+  name: string;
+  path: string;
+  url?: string;
+  size?: number;
+  type?: string;
+} => {
   if (!value || Array.isArray(value) || typeof value !== "object") return false;
   return typeof value.name === "string" && typeof value.path === "string";
 };
@@ -90,7 +103,14 @@ export const getSubmissionFiles = (value: Json | null): SubmissionFile[] => {
 
   return value
     .filter(isFileRecord)
-    .map(file => ({ name: file.name, path: file.path }));
+    .map(file => ({
+      bucket: typeof file.bucket === "string" ? file.bucket : undefined,
+      name: file.name,
+      path: file.path,
+      size: typeof file.size === "number" ? file.size : undefined,
+      type: typeof file.type === "string" ? file.type : undefined,
+      url: typeof file.url === "string" ? file.url : undefined,
+    }));
 };
 
 export const getCourseResourceFiles = (
@@ -99,10 +119,12 @@ export const getCourseResourceFiles = (
   if (!Array.isArray(value)) return [];
 
   return value.filter(isFileRecord).map(file => ({
+    bucket: typeof file.bucket === "string" ? file.bucket : undefined,
     name: file.name,
     path: file.path,
     size: typeof file.size === "number" ? file.size : undefined,
     type: typeof file.type === "string" ? file.type : undefined,
+    url: typeof file.url === "string" ? file.url : undefined,
   }));
 };
 

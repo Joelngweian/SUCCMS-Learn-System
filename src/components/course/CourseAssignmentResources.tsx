@@ -1,8 +1,11 @@
+import { useEffect, useState } from "react";
 import { Download, FileText, Sparkles } from "lucide-react";
+import { withSignedStorageUrls } from "@/lib/storageUrls";
 import type {
   CourseAssignment,
   CourseResourceFile,
 } from "./coursePageTypes";
+import { getCourseContentStoragePath } from "./courseStorage";
 
 function isCourseResourceFile(value: unknown): value is CourseResourceFile {
   if (!value || Array.isArray(value) || typeof value !== "object") return false;
@@ -10,39 +13,110 @@ function isCourseResourceFile(value: unknown): value is CourseResourceFile {
   return typeof file.name === "string" && typeof file.path === "string";
 }
 
+const parseRubricFiles = (rubric: string | null) => {
+  if (!rubric) return null;
+  try {
+    const parsed: unknown = JSON.parse(rubric);
+    return Array.isArray(parsed)
+      ? parsed.filter(isCourseResourceFile)
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const signCourseResourceFiles = async (files: CourseResourceFile[]) => {
+  const storagePaths = files.map(getCourseContentStoragePath);
+  const signableFiles = files.flatMap((file, index) => {
+    const storagePath = storagePaths[index];
+    return storagePath ? [{ ...file, path: storagePath }] : [];
+  });
+  const signedFiles = await withSignedStorageUrls(
+    "course_content",
+    signableFiles,
+  );
+  const signedUrlByPath = new Map(
+    signedFiles.map(file => [file.path, file.url]),
+  );
+
+  return files.map((file, index) => {
+    const storagePath = storagePaths[index];
+    const legacyUrl = file.path.startsWith("http://")
+      || file.path.startsWith("https://")
+      ? file.path
+      : undefined;
+    return {
+      ...file,
+      url: (storagePath && signedUrlByPath.get(storagePath))
+        || file.url
+        || legacyUrl,
+    };
+  });
+};
+
+const getResourceHref = (file: CourseResourceFile) =>
+  file.url
+  || (file.path.startsWith("http://") || file.path.startsWith("https://")
+    ? file.path
+    : undefined);
+
 export function CourseAssignmentResources({
   assignment,
 }: {
   assignment: CourseAssignment;
 }) {
-  let rubricContent = null;
+  const [rubricFiles, setRubricFiles] = useState<CourseResourceFile[] | null>(
+    () => parseRubricFiles(assignment.rubric),
+  );
+  const [materialFiles, setMaterialFiles] = useState<CourseResourceFile[]>(
+    assignment.attachments,
+  );
 
-  if (assignment.rubric) {
-    try {
-      const parsedRubrics = JSON.parse(assignment.rubric);
-      rubricContent = Array.isArray(parsedRubrics)
-        ? parsedRubrics.filter(isCourseResourceFile).map((file, index) => (
-            <a
-              key={`${file.path}-${index}`}
-              href={file.path}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center p-3 bg-white border rounded-lg hover:border-blue-400 transition-colors shadow-sm"
-            >
-              <div className="bg-blue-100 p-2 rounded mr-3 text-blue-700">
-                <FileText className="h-4 w-4" />
-              </div>
-              <span className="text-sm font-medium truncate flex-1 text-blue-900">
-                {file.name}
-              </span>
-              <Download className="h-4 w-4 text-blue-400" />
-            </a>
-          ))
-        : null;
-    } catch {
-      rubricContent = null;
-    }
-  }
+  useEffect(() => {
+    let active = true;
+    const nextRubricFiles = parseRubricFiles(assignment.rubric);
+    setRubricFiles(nextRubricFiles);
+    setMaterialFiles(assignment.attachments);
+
+    void Promise.all([
+      nextRubricFiles
+        ? signCourseResourceFiles(nextRubricFiles)
+        : Promise.resolve(null),
+      signCourseResourceFiles(assignment.attachments),
+    ]).then(([signedRubrics, signedMaterials]) => {
+      if (!active) return;
+      setRubricFiles(signedRubrics);
+      setMaterialFiles(signedMaterials);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [assignment.attachments, assignment.id, assignment.rubric]);
+
+  const rubricContent = rubricFiles
+    ? rubricFiles.map((file, index) => (
+        <a
+          key={file.path + "-" + index}
+          href={getResourceHref(file)}
+          target="_blank"
+          rel="noreferrer"
+          aria-disabled={!getResourceHref(file)}
+          onClick={event => {
+            if (!getResourceHref(file)) event.preventDefault();
+          }}
+          className="flex items-center p-3 bg-white border rounded-lg hover:border-blue-400 transition-colors shadow-sm"
+        >
+          <div className="bg-blue-100 p-2 rounded mr-3 text-blue-700">
+            <FileText className="h-4 w-4" />
+          </div>
+          <span className="text-sm font-medium truncate flex-1 text-blue-900">
+            {file.name}
+          </span>
+          <Download className="h-4 w-4 text-blue-400" />
+        </a>
+      ))
+    : null;
 
   return (
     <div className="bg-gray-50 p-6 rounded-xl border border-gray-100">
@@ -68,14 +142,18 @@ export function CourseAssignmentResources({
         </div>
       )}
 
-      {assignment.attachments?.length > 0 && (
+      {materialFiles.length > 0 && (
         <div className="mt-6 grid gap-2">
-          {assignment.attachments.map((file, index) => (
+          {materialFiles.map((file, index) => (
             <a
-              key={`${file.path}-${index}`}
-              href={file.path}
+              key={file.path + "-" + index}
+              href={getResourceHref(file)}
               target="_blank"
               rel="noreferrer"
+              aria-disabled={!getResourceHref(file)}
+              onClick={event => {
+                if (!getResourceHref(file)) event.preventDefault();
+              }}
               className="flex items-center p-3 bg-white border rounded-lg hover:border-blue-300 transition-colors group shadow-sm"
             >
               <div className="bg-blue-50 p-2 rounded mr-3 text-blue-600">

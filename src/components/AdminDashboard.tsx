@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { supabase } from "@/lib/supabase";
+import { subscribeToPrivateBroadcast } from "@/lib/realtime";
 import type { Json } from "@/lib/database.types";
 import { useAuth } from "@/contexts/AuthContext";
 import { notify } from "@/lib/notify";
@@ -87,35 +88,19 @@ export function AdminDashboard() {
   useEffect(() => {
     if (!user?.id || profile?.role !== "admin") return;
 
-    const channel = supabase
-      .channel("admin-moderation-reports")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "reports" },
-        () => loadDashboardStats()
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return subscribeToPrivateBroadcast({
+      topic: "admin:moderation",
+      onMessage: () => void loadDashboardStats(),
+    });
   }, [user?.id, profile?.role, loadDashboardStats]);
 
   useEffect(() => {
     if (!user?.id || profile?.role !== "admin") return;
 
-    const channel = supabase
-      .channel("admin-course-creation-requests")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "course_creation_requests" },
-        () => loadDashboardStats()
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return subscribeToPrivateBroadcast({
+      topic: "admin:course-requests",
+      onMessage: () => void loadDashboardStats(),
+    });
   }, [user?.id, profile?.role, loadDashboardStats]);
 
   const resetAnnouncementForm = () => {
@@ -179,14 +164,10 @@ export function AdminDashboard() {
         if (uploadError) throw uploadError;
         uploadedPaths.push(storagePath);
 
-        const { data } = supabase.storage
-          .from("announcement-attachments")
-          .getPublicUrl(storagePath);
-
         attachments.push({
           name: file.name,
           path: storagePath,
-          url: data.publicUrl,
+          url: "",
           type: file.type || "application/octet-stream",
           size: file.size,
         });

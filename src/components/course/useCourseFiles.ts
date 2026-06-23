@@ -248,7 +248,7 @@ export function useCourseFiles({
     }
   };
 
-  const openMaterial = (material: CourseMaterial) => {
+  const openMaterial = async (material: CourseMaterial) => {
     if (material.file_type === "folder") {
       setCurrentFolderId(material.id);
       setFolderPath(current => [
@@ -259,10 +259,16 @@ export function useCourseFiles({
     }
 
     if (material.file_path) {
-      const { data } = supabase.storage
+      const { data, error } = await supabase.storage
         .from("course_content")
-        .getPublicUrl(material.file_path);
-      window.open(data.publicUrl, "_blank");
+        .createSignedUrl(material.file_path, 300);
+      if (!error && data?.signedUrl) {
+        window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+        return;
+      }
+      setFileManagerError(
+        `Failed to open file: ${error?.message || "Unable to create a secure link."}`,
+      );
     }
   };
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { subscribeToPrivateBroadcast } from "@/lib/realtime";
 import { Loader2 } from "lucide-react";
 import {
   AttendanceSummaryCards,
@@ -163,25 +164,10 @@ export function CourseAttendance({
   useEffect(() => {
     if (!isLecturer) return;
 
-    const channel = supabase
-      .channel(`course-attendance-${courseId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "attendance",
-          filter: `course_id=eq.${courseId}`,
-        },
-        () => {
-          fetchAttendance(false);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return subscribeToPrivateBroadcast({
+      topic: `course:${courseId}:attendance`,
+      onMessage: () => void fetchAttendance(false),
+    });
   }, [courseId, fetchAttendance, isLecturer]);
 
   useEffect(() => {

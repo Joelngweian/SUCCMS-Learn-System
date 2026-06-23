@@ -49,6 +49,34 @@ const getSafeDriveFileName = (name: string) => {
   return safeName || "document";
 };
 
+const canManageCourse = async (serviceClient: any, userId: string, courseId: string) => {
+  const [profileResult, offeringResult, instructorResult] = await Promise.all([
+    serviceClient
+      .from("user_profiles")
+      .select("role, is_active")
+      .eq("id", userId)
+      .maybeSingle(),
+    serviceClient
+      .from("course_offerings")
+      .select("id")
+      .eq("id", courseId)
+      .eq("owner_id", userId)
+      .maybeSingle(),
+    serviceClient
+      .from("course_instructors")
+      .select("course_id")
+      .eq("course_id", courseId)
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ]);
+
+  const accessError = profileResult.error || offeringResult.error || instructorResult.error;
+  if (accessError) throw accessError;
+
+  const isActiveAdmin = profileResult.data?.role === "admin" && profileResult.data?.is_active !== false;
+  return isActiveAdmin || Boolean(offeringResult.data) || Boolean(instructorResult.data);
+};
+
 const encodeDrivePath = (path: string) => {
   return path
     .split("/")
@@ -541,7 +569,6 @@ Deno.serve(async (req) => {
     }
 
     const serviceClient = createClient(supabaseUrl, serviceRoleKey);
-    const token = await getGraphToken();
 
     if (body.action === "create") {
       const courseId = body.courseId;
@@ -550,6 +577,9 @@ Deno.serve(async (req) => {
       const extension = officeKindExtensions[kind];
       if (!courseId) throw new Error("courseId is required.");
       if (!extension) throw new Error("This Microsoft Office file type is not supported.");
+      if (!await canManageCourse(serviceClient, userData.user.id, courseId)) {
+        return jsonResponse({ error: "You are not allowed to manage files for this course." }, 403);
+      }
 
       if (parentId) {
         const { data: parentFolder, error: parentError } = await serviceClient
@@ -567,6 +597,7 @@ Deno.serve(async (req) => {
       const title = requestedTitle || defaultOfficeTitles[kind];
       const normalizedTitle = title.toLowerCase().endsWith(`.${extension}`) ? title : `${title}.${extension}`;
       const fileBytes = await createBlankOfficeFile(kind, normalizedTitle);
+      const token = await getGraphToken();
       const driveFileName = `${crypto.randomUUID()}-${getSafeDriveFileName(normalizedTitle)}`;
       const drivePath = `${baseFolder}/${courseId}/${driveFileName}`;
       const driveItem = await uploadSmallFile(token, driveId, drivePath, fileBytes, getContentType(extension));
@@ -613,12 +644,16 @@ Deno.serve(async (req) => {
 
     if (materialError || !material) throw new Error("File was not found.");
     if (material.file_type === "folder") throw new Error("Folders cannot be opened in Microsoft Office.");
+    if (!await canManageCourse(serviceClient, userData.user.id, material.course_id)) {
+      return jsonResponse({ error: "You are not allowed to edit files for this course." }, 403);
+    }
 
     const extension = getExtension(material.title || material.file_path || material.file_url || "");
     if (!officeExtensions.has(extension)) {
       throw new Error("Only Word, Excel, and PowerPoint files can be edited with Microsoft Office.");
     }
 
+    const token = await getGraphToken();
     let driveItemDriveId = material.ms_drive_id || driveId;
     let driveItem = material.ms_drive_item_id
       ? await getExistingDriveItem(token, driveItemDriveId, material.ms_drive_item_id)

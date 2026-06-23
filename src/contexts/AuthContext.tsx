@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase.ts';
+import { getBroadcastNewRecord, subscribeToPrivateBroadcast } from '@/lib/realtime';
 
 const AUTH_PROFILE_SELECT =
   'id, full_name, username, role, faculty, programme, avatar_url, cover_url, bio, is_active';
@@ -171,30 +172,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!userId) return;
 
-    const channel = supabase
-      .channel(`account-status:${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'user_profiles',
-          filter: `id=eq.${userId}`,
-        },
-        async (payload) => {
-          if ((payload.new as UserProfile).is_active === false) {
-            setSession(null);
-            setUser(null);
-            setProfile(null);
-            await supabase.auth.signOut();
-          }
+    return subscribeToPrivateBroadcast({
+      topic: `user:${userId}:account`,
+      event: 'UPDATE',
+      onMessage: async (payload) => {
+        if (getBroadcastNewRecord<UserProfile>(payload)?.is_active === false) {
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          await supabase.auth.signOut();
         }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+      },
+    });
   }, [userId]);
 
   // --- Auth Functions ---

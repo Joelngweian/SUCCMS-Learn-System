@@ -31,6 +31,8 @@ import {
   type SubmissionFile,
 } from "./coursePageTypes";
 import { CourseAssignmentResources } from "./CourseAssignmentResources";
+import { resolveSubmissionFileUrl } from "@/lib/submissionStorage";
+import { notify } from "@/lib/notify";
 
 type CourseAssignmentDetailDialogProps = {
   assignment: CourseAssignment | null;
@@ -212,11 +214,21 @@ export function CourseAssignmentDetailDialog({
                     {gradingSubmission?.files?.length > 0 ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {gradingSubmission.files.map((file, index) => (
-                          <a
+                          <button
                             key={`${file.path}-${index}`}
-                            href={file.path}
-                            target="_blank"
-                            rel="noreferrer"
+                            type="button"
+                            onClick={() => {
+                              void resolveSubmissionFileUrl(file)
+                                .then((url) =>
+                                  window.open(url, "_blank", "noopener,noreferrer")
+                                )
+                                .catch((error) =>
+                                  notify.error(
+                                    error,
+                                    "The submission file could not be opened.",
+                                  )
+                                );
+                            }}
                             className="flex items-center p-4 bg-white border-2 border-blue-100 rounded-xl hover:border-blue-500 hover:shadow-md transition-all group"
                           >
                             <div className="bg-blue-100 p-3 rounded-lg mr-3 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
@@ -229,7 +241,7 @@ export function CourseAssignmentDetailDialog({
                               <p className="text-xs text-blue-400">Click to view</p>
                             </div>
                             <Download className="h-5 w-5 text-gray-300 group-hover:text-blue-500" />
-                          </a>
+                          </button>
                         ))}
                       </div>
                     ) : (

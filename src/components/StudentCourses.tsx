@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext.tsx";
-import { supabase } from "@/lib/supabase.ts";
+import { subscribeToPrivateBroadcast } from "@/lib/realtime";
 import { PROGRAMMES } from "@/lib/programmes";
 import {
   type NormalizedCourseOffering,
 } from "@/lib/courseOfferings";
 import {
-  enrollStudentInCourse,
-  getActiveCourseOfferings,
+  enrollStudentInCourseWithKey,
+  getAvailableCourseOfferings,
   getCourseInstructorSummaries,
   getStudentCourseOfferings,
   invalidateCourseCache,
@@ -55,8 +55,14 @@ interface CourseInstructor {
   avatar_url?: string | null;
 }
 
-const getErrorMessage = (error: unknown, fallback: string) =>
-  error instanceof Error ? error.message : fallback;
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
+};
 
 export function StudentCourses() {
   const { profile, updateProfile } = useAuth();
@@ -66,11 +72,13 @@ export function StudentCourses() {
   // Data State
   const [enrolledCourses, setEnrolledCourses] = useState<Course[]>([]);
   const [availableCourses, setAvailableCourses] = useState<Course[]>([]);
+  const [availableCourseCount, setAvailableCourseCount] = useState(0);
   const [programmeOptions, setProgrammeOptions] = useState<{faculty: string, programme: string}[]>([]);
   
   // UI State
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("my-courses");
   
   // Read courseId from URL search params (e.g., /courses?courseId=xxx&assignmentId=yyy)
@@ -110,7 +118,11 @@ export function StudentCourses() {
   }, [searchParams, viewingCourseId]);
 
   useEffect(() => {
-    setCurrentPage(1);
+    const timer = window.setTimeout(() => {
+      setCurrentPage(1);
+      setDebouncedSearchTerm(searchTerm.trim());
+    }, 350);
+    return () => window.clearTimeout(timer);
   }, [searchTerm]);
 
   // --- 2. Data Fetching ---
@@ -127,46 +139,23 @@ export function StudentCourses() {
     if (!profileId) return;
     setIsLoading(true);
     try {
-      const [myCourses, offerings] = await Promise.all([
+      const [myCourses, availablePage] = await Promise.all([
         getStudentCourseOfferings(profileId),
-        getActiveCourseOfferings(),
+        getAvailableCourseOfferings({
+          page: currentPage,
+          pageSize: ITEMS_PER_PAGE,
+          searchTerm: debouncedSearchTerm,
+        }),
       ]);
-      const enrolledIdSet = new Set(myCourses.map(course => course.id));
-      const available = offerings.filter((course) => {
-        if (enrolledIdSet.has(course.id)) return false;
-
-        const isCommonCore =
-          course.course_type === "common_core" &&
-          course.faculty === profileFaculty;
-        const isDisciplineCore =
-          course.course_type === "discipline_core" &&
-          course.programme === profileProgramme;
-        const isElectiveOpen = course.course_type === "elective_open";
-        const isElectiveCore =
-          course.course_type === "elective_core" &&
-          course.faculty === profileFaculty;
-
-        return (
-          isCommonCore ||
-          isDisciplineCore ||
-          isElectiveOpen ||
-          isElectiveCore
-        );
-      });
-      const visibleCourseIds = [
-        ...myCourses.map(course => course.id),
-        ...available.map(course => course.id),
-      ];
-      setEnrolledCourses(myCourses);
-      setAvailableCourses(available);
+      setAvailableCourseCount(availablePage.totalCount);
+      setAvailableCourses(availablePage.courses);
 
       let instructorRows = [];
       try {
         instructorRows =
-          await getCourseInstructorSummaries(visibleCourseIds);
+          await getCourseInstructorSummaries(myCourses.map(course => course.id));
       } catch (instructorError) {
         console.error("Error fetching course instructors", instructorError);
-        return;
       }
       const instructorsByCourse = new Map<string, CourseInstructor[]>();
 
@@ -186,7 +175,6 @@ export function StudentCourses() {
       });
 
       setEnrolledCourses(myCourses.map(attachInstructors));
-      setAvailableCourses(available.map(attachInstructors));
     } catch (error) {
       console.error(
         "Error fetching courses",
@@ -197,7 +185,7 @@ export function StudentCourses() {
     } finally {
       setIsLoading(false);
     }
-  }, [profileFaculty, profileId, profileProgramme]);
+  }, [currentPage, debouncedSearchTerm, profileId]);
 
   // --- 1. Initial Load & Checks ---
   useEffect(() => {
@@ -206,7 +194,6 @@ export function StudentCourses() {
       setShowProfileSetup(true);
       fetchProgrammeOptions();
     } else {
-      invalidateCourseCache({ userId: profileId });
       void fetchData();
     }
   }, [fetchData, profileFaculty, profileId, profileProgramme]);
@@ -221,22 +208,13 @@ export function StudentCourses() {
       }
     };
 
-    const channel = supabase
-      .channel(`student-course-enrollments:${profileId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "course_enrollments",
-          filter: `student_id=eq.${profileId}`,
-        },
-        () => {
-          invalidateCourseCache({ userId: profileId });
-          void fetchData();
-        }
-      )
-      .subscribe();
+    const unsubscribe = subscribeToPrivateBroadcast({
+      topic: `user:${profileId}:enrollments`,
+      onMessage: () => {
+        invalidateCourseCache({ userId: profileId });
+        void fetchData();
+      },
+    });
 
     window.addEventListener("focus", refreshCourses);
     document.addEventListener("visibilitychange", refreshCourses);
@@ -244,7 +222,7 @@ export function StudentCourses() {
     return () => {
       window.removeEventListener("focus", refreshCourses);
       document.removeEventListener("visibilitychange", refreshCourses);
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, [fetchData, profileId, profileRole]);
 
@@ -281,16 +259,10 @@ export function StudentCourses() {
     setEnrollmentError("");
 
     try {
-      const inputKey = enrollmentKeyInput.trim();
-      const actualKey = selectedCourseForEnrollment.enrollment_key?.trim();
-
-      if (!actualKey) throw new Error("System Error: Course has no key set. Contact your lecturer.");
-      if (inputKey !== actualKey) throw new Error("Invalid Enrollment Key.");
-
       try {
-        await enrollStudentInCourse({
+        await enrollStudentInCourseWithKey({
           courseId: selectedCourseForEnrollment.id,
-          studentId: profile.id,
+          enrollmentKey: enrollmentKeyInput.trim(),
         });
       } catch (error) {
         if (
@@ -310,6 +282,7 @@ export function StudentCourses() {
       });
       setSelectedCourseForEnrollment(null);
       setActiveTab("my-courses");
+      setCurrentPage(1);
       void fetchData();
       
     } catch (error: unknown) {
@@ -337,16 +310,8 @@ export function StudentCourses() {
     }} />;
   }
 
-  const displayedAvailable = availableCourses.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    getCourseCode(c).toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const totalPages = Math.ceil(displayedAvailable.length / ITEMS_PER_PAGE);
-  const paginatedCourses = displayedAvailable.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE, 
-    currentPage * ITEMS_PER_PAGE
-  );
+  const totalPages = Math.ceil(availableCourseCount / ITEMS_PER_PAGE);
+  const paginatedCourses = availableCourses;
 
   const filteredProgrammes = programmeOptions.filter(p => 
     p.programme.toLowerCase().includes(programmeSearch.toLowerCase())

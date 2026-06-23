@@ -44,7 +44,6 @@ export function StudyGroupsDashboard() {
     const loadSessions = async () => {
       setIsLoading(true);
       try {
-        await supabase.rpc("dispatch_study_session_reminders");
         const { data, error } = await supabase.rpc(
           "get_my_upcoming_study_sessions",
           { p_limit: 3 }

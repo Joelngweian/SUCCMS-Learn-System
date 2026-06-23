@@ -59,17 +59,15 @@ export function CourseAssignmentsSection({
         onOpenChange={assignments.setShowNewAssignmentDialog}
         onAssignmentChange={assignments.setNewAssign}
         onRubricUpload={(event) =>
-          void assignments.uploadAssignmentFile(
+          void assignments.uploadAssignmentResourceFiles(
             event,
             assignments.setNewRubricFiles,
-            assignments.newRubricFiles,
           )
         }
         onMaterialUpload={(event) =>
-          void assignments.uploadAssignmentFile(
+          void assignments.uploadAssignmentResourceFiles(
             event,
             assignments.setNewAssignFiles,
-            assignments.newAssignFiles,
           )
         }
         onCreate={() => void assignments.createAssignment()}
@@ -93,11 +91,7 @@ export function CourseAssignmentsSection({
         onGradingStudentChange={assignments.setGradingStudentId}
         onSubmissionFilesChange={assignments.setSubmissionFiles}
         onUploadSubmissionFile={(event) =>
-          void assignments.uploadAssignmentFile(
-            event,
-            assignments.setSubmissionFiles,
-            assignments.submissionFiles,
-          )
+          void assignments.uploadSubmissionFiles(event)
         }
         onTurnIn={() => void assignments.turnIn()}
         onUndoTurnIn={() => void assignments.undoTurnIn()}

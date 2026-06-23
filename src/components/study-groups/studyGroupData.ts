@@ -83,11 +83,6 @@ export async function loadStudyGroupPage({
   };
 }
 
-export async function dispatchStudySessionReminders() {
-  const { error } = await supabase.rpc("dispatch_study_session_reminders");
-  if (error) throw error;
-}
-
 export async function createStudyGroup({
   courseId,
   description,

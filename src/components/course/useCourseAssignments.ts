@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ChangeEvent,
   type Dispatch,
@@ -9,6 +10,10 @@ import {
 import { supabase } from "@/lib/supabase";
 import { confirmAction } from "@/lib/confirm";
 import { notify } from "@/lib/notify";
+import {
+  ASSIGNMENT_SUBMISSIONS_BUCKET,
+  removeSubmissionFiles,
+} from "@/lib/submissionStorage";
 import {
   getAssignmentMaxScore,
   normalizeCourseAssignment,
@@ -19,7 +24,15 @@ import {
   type CourseSubmission,
   type SubmissionFile,
 } from "./coursePageTypes";
-import { getErrorMessage } from "./courseStorage";
+import {
+  getCourseContentStoragePath,
+  getErrorMessage,
+  removeCourseContentPaths,
+} from "./courseStorage";
+import {
+  getBroadcastNewRecord,
+  subscribeToPrivateBroadcast,
+} from "@/lib/realtime";
 
 type AiGradeResponse = {
   error?: string;
@@ -33,6 +46,23 @@ type AiGradeResponse = {
     reason?: string;
   }>;
   warnings?: unknown[];
+};
+
+type AiGradeRequestResponse = {
+  error?: string;
+  jobId?: string;
+  status?: "queued" | "processing" | "completed" | "failed";
+};
+
+const AI_GRADING_POLL_TIMEOUT_MS = 10 * 60 * 1000;
+const AI_GRADING_WORKER_RETRY_MS = 60 * 1000;
+const AI_GRADING_FALLBACK_POLL_MS = 20 * 1000;
+const COURSE_CONTENT_BUCKET = "course_content";
+const MAX_ASSIGNMENT_FILE_SIZE = 8 * 1024 * 1024;
+
+type AiGradingJobBroadcastRow = {
+  id: string;
+  status?: AiGradeRequestResponse["status"];
 };
 
 const getFunctionErrorMessage = async (
@@ -104,6 +134,7 @@ export function useCourseAssignments({
   const [newAssign, setNewAssign] = useState(emptyAssignmentDraft);
   const [newAssignFiles, setNewAssignFiles] = useState<CourseResourceFile[]>([]);
   const [newRubricFiles, setNewRubricFiles] = useState<CourseResourceFile[]>([]);
+  const assignmentDraftPathsRef = useRef(new Set<string>());
 
   const fetchAssignments = useCallback(async () => {
     const { data, error } = await supabase
@@ -234,12 +265,45 @@ export function useCourseAssignments({
       return;
     }
 
+    assignmentDraftPathsRef.current.clear();
     setShowNewAssignmentDialog(false);
     setNewAssign(emptyAssignmentDraft);
     setNewAssignFiles([]);
     setNewRubricFiles([]);
     await fetchAssignments();
   };
+
+  const setAssignmentDialogOpen = (open: boolean) => {
+    if (!open && isAssignmentUploading) return;
+
+    setShowNewAssignmentDialog(open);
+    if (open) return;
+
+    const abandonedPaths = [...assignmentDraftPathsRef.current];
+    assignmentDraftPathsRef.current.clear();
+    setNewAssign(emptyAssignmentDraft);
+    setNewAssignFiles([]);
+    setNewRubricFiles([]);
+
+    if (abandonedPaths.length > 0) {
+      void removeCourseContentPaths(abandonedPaths).then(error => {
+        if (!error) return;
+        abandonedPaths.forEach(path => assignmentDraftPathsRef.current.add(path));
+        console.warn("Failed to remove abandoned assignment files:", error);
+      });
+    }
+  };
+
+  useEffect(() => {
+    const draftPaths = assignmentDraftPathsRef.current;
+    return () => {
+      const abandonedPaths = [...draftPaths];
+      draftPaths.clear();
+      if (abandonedPaths.length > 0) {
+        void removeCourseContentPaths(abandonedPaths);
+      }
+    };
+  }, [courseId]);
 
   const deleteAssignment = async (assignmentId: string) => {
     if (
@@ -304,6 +368,11 @@ export function useCourseAssignments({
 
   const undoTurnIn = async () => {
     if (!selectedAssignment || !userId) return;
+    const existingSubmission = mySubmissions.find(
+      item =>
+        item.assignment_id === selectedAssignment.id
+        && item.student_id === userId,
+    );
     const { error } = await supabase
       .from("assignment_submissions")
       .delete()
@@ -313,6 +382,11 @@ export function useCourseAssignments({
     if (error) {
       notify.error(error, "Failed to undo submission.");
       return;
+    }
+    try {
+      await removeSubmissionFiles(existingSubmission?.files);
+    } catch (cleanupError) {
+      console.warn("Submission deleted but file cleanup failed:", cleanupError);
     }
     setMySubmissions(current =>
       current.filter(
@@ -365,7 +439,7 @@ export function useCourseAssignments({
   };
 
   const aiAutoGrade = async () => {
-    if (!selectedAssignment || !gradingStudentId) return;
+    if (!selectedAssignment || !gradingStudentId || !userId) return;
     const submission = allSubmissions.find(
       item => item.student_id === gradingStudentId,
     );
@@ -382,9 +456,9 @@ export function useCourseAssignments({
     setAiGradeDetails(null);
     setIsAiGrading(true);
     try {
-      const { data, error } =
-        await supabase.functions.invoke<AiGradeResponse>(
-          "ai-grade-assignment",
+      const { data: requestData, error: requestError } =
+        await supabase.functions.invoke<AiGradeRequestResponse>(
+          "ai-grading-request",
           {
             body: {
               assignmentId: selectedAssignment.id,
@@ -393,15 +467,119 @@ export function useCourseAssignments({
           },
         );
 
-      if (error) {
+      if (requestError) {
         throw new Error(
           await getFunctionErrorMessage(
-            error,
+            requestError,
             "The AI grading service could not be reached.",
           ),
         );
       }
-      if (data?.error) throw new Error(data.error);
+      if (requestData?.error) throw new Error(requestData.error);
+      if (!requestData?.jobId) {
+        throw new Error("The AI grading service did not return a job ID.");
+      }
+
+      notify.info("AI grading started. You can continue using the course page.");
+
+      let data: AiGradeResponse | null = null;
+      const pollingStartedAt = Date.now();
+      let nextWorkerRetryAt = pollingStartedAt + AI_GRADING_WORKER_RETRY_MS;
+      let signalPending = false;
+      let signalResolver: (() => void) | null = null;
+      let signalTimer: number | null = null;
+      const signalJobCheck = () => {
+        if (signalResolver) {
+          signalResolver();
+          return;
+        }
+        signalPending = true;
+      };
+      const waitForRealtimeOrFallback = (milliseconds: number) => {
+        if (signalPending) {
+          signalPending = false;
+          return Promise.resolve();
+        }
+
+        return new Promise<void>(resolve => {
+          const finish = () => {
+            if (signalTimer !== null) window.clearTimeout(signalTimer);
+            signalTimer = null;
+            signalResolver = null;
+            signalPending = false;
+            resolve();
+          };
+          signalResolver = finish;
+          signalTimer = window.setTimeout(finish, milliseconds);
+        });
+      };
+      const stopAiGradingBroadcast = subscribeToPrivateBroadcast({
+        topic: `user:${userId}:ai-grading`,
+        onMessage: message => {
+          const row = getBroadcastNewRecord<AiGradingJobBroadcastRow>(message);
+          if (row?.id === requestData.jobId) signalJobCheck();
+        },
+      });
+
+      try {
+        while (Date.now() - pollingStartedAt < AI_GRADING_POLL_TIMEOUT_MS) {
+          const { data: job, error: jobError } = await supabase
+            .from("ai_grading_jobs")
+            .select("status, result, error_message")
+            .eq("id", requestData.jobId)
+            .maybeSingle();
+
+          if (jobError) throw jobError;
+
+          if (job?.status === "completed") {
+            data = job.result as unknown as AiGradeResponse;
+            break;
+          }
+
+          if (job?.status === "failed") {
+            throw new Error(
+              job.error_message || "AI grading failed. Please try again.",
+            );
+          }
+
+          // Re-kick the pull-based worker at most once per minute. The queue's
+          // visibility timeout prevents another worker from grading the same
+          // message while an active worker still owns it.
+          const now = Date.now();
+          if (now >= nextWorkerRetryAt) {
+            void supabase.functions.invoke<AiGradeRequestResponse>(
+              "ai-grading-request",
+              {
+                body: {
+                  assignmentId: selectedAssignment.id,
+                  studentId: gradingStudentId,
+                },
+              },
+            );
+            nextWorkerRetryAt = now + AI_GRADING_WORKER_RETRY_MS;
+          }
+
+          const elapsedMs = Date.now() - pollingStartedAt;
+          const remainingMs = AI_GRADING_POLL_TIMEOUT_MS - elapsedMs;
+          if (remainingMs <= 0) break;
+          const fallbackDelay = document.visibilityState === "hidden"
+            ? 30000
+            : AI_GRADING_FALLBACK_POLL_MS;
+          await waitForRealtimeOrFallback(
+            Math.min(fallbackDelay, remainingMs),
+          );
+        }
+      } finally {
+        stopAiGradingBroadcast();
+        if (signalTimer !== null) window.clearTimeout(signalTimer);
+        signalResolver = null;
+      }
+
+      if (!data) {
+        throw new Error(
+          "AI grading is still queued after 10 minutes. Please try again later.",
+        );
+      }
 
       const maxScore = getAssignmentMaxScore(selectedAssignment);
       const suggestedScore = Number(data?.suggestedScore);
@@ -458,35 +636,100 @@ export function useCourseAssignments({
     }
   };
 
-  const uploadAssignmentFile = async <
-    T extends { name: string; path: string },
-  >(
+  const uploadFiles = async (
     event: ChangeEvent<HTMLInputElement>,
-    setList: Dispatch<SetStateAction<T[]>>,
-    currentList: T[],
-  ) => {
-    if (!event.target.files?.length) return;
-    const file = event.target.files[0];
-    const filePath = `${courseId}/assignments/${crypto.randomUUID()}_${file.name}`;
-    setIsAssignmentUploading(true);
-    const { error } = await supabase.storage
-      .from("course_content")
-      .upload(filePath, file);
-    setIsAssignmentUploading(false);
+    bucket: string,
+    getFilePath: (file: File) => string,
+  ): Promise<CourseResourceFile[]> => {
+    const files = Array.from(event.target.files || []);
     event.target.value = "";
+    if (files.length === 0) return [];
+    if (files.some(file => file.size > MAX_ASSIGNMENT_FILE_SIZE)) {
+      notify.error("Each assignment file must be 8 MB or smaller.");
+      return [];
+    }
 
-    if (error) {
+    setIsAssignmentUploading(true);
+    const uploadedFiles: CourseResourceFile[] = [];
+    const uploadedPaths: string[] = [];
+
+    try {
+      for (const file of files) {
+        const filePath = getFilePath(file);
+        const { error } = await supabase.storage
+          .from(bucket)
+          .upload(filePath, file);
+        if (error) throw error;
+
+        uploadedPaths.push(filePath);
+        uploadedFiles.push({
+          bucket,
+          name: file.name,
+          path: filePath,
+          size: file.size,
+          type: file.type,
+        });
+      }
+      return uploadedFiles;
+    } catch (error) {
+      if (uploadedPaths.length > 0) {
+        await supabase.storage.from(bucket).remove(uploadedPaths);
+      }
       notify.error(error, "Failed to upload file.");
+      return [];
+    } finally {
+      setIsAssignmentUploading(false);
+    }
+  };
+
+  const uploadAssignmentResourceFiles = async (
+    event: ChangeEvent<HTMLInputElement>,
+    setList: Dispatch<SetStateAction<CourseResourceFile[]>>,
+  ) => {
+    if (!userId) {
+      event.target.value = "";
+      notify.error("Please sign in before uploading assignment files.");
       return;
     }
 
-    const { data } = supabase.storage
-      .from("course_content")
-      .getPublicUrl(filePath);
-    setList([
-      ...currentList,
-      { name: file.name, path: data.publicUrl } as T,
-    ]);
+    const uploadedFiles = await uploadFiles(
+      event,
+      COURSE_CONTENT_BUCKET,
+      file => {
+        const safeName = file.name.replace(/[^\w.-]+/g, "_");
+        return courseId + "/assignments/drafts/" + userId + "/"
+          + crypto.randomUUID() + "_" + safeName;
+      },
+    );
+    uploadedFiles.forEach(file => assignmentDraftPathsRef.current.add(
+      getCourseContentStoragePath(file) || file.path,
+    ));
+    if (uploadedFiles.length > 0) {
+      setList(current => [...current, ...uploadedFiles]);
+    }
+  };
+
+  const uploadSubmissionFiles = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
+    if (!selectedAssignment || !userId) {
+      event.target.value = "";
+      notify.error("Select an assignment before uploading a submission.");
+      return;
+    }
+
+    const uploadedFiles = await uploadFiles(
+      event,
+      ASSIGNMENT_SUBMISSIONS_BUCKET,
+      file => {
+        const safeName = file.name.replace(/[^\w.-]+/g, "_");
+        return userId + "/" + selectedAssignment.id + "/"
+          + crypto.randomUUID() + "_" + safeName;
+      },
+    );
+    if (uploadedFiles.length > 0) {
+      setSubmissionFiles(current => [...current, ...uploadedFiles]);
+    }
   };
 
   return {
@@ -516,12 +759,13 @@ export function useCourseAssignments({
     setNewAssignFiles,
     setNewRubricFiles,
     setSelectedAssignment,
-    setShowNewAssignmentDialog,
+    setShowNewAssignmentDialog: setAssignmentDialogOpen,
     setSubmissionFiles,
     showNewAssignmentDialog,
     submissionFiles,
     turnIn,
     undoTurnIn,
-    uploadAssignmentFile,
+    uploadAssignmentResourceFiles,
+    uploadSubmissionFiles,
   };
 }

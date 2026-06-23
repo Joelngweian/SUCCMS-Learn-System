@@ -7,7 +7,15 @@ import {
   type ChangeEvent,
 } from "react";
 import { supabase } from "@/lib/supabase";
+import {
+  getBroadcastChangeType,
+  getBroadcastNewRecord,
+  getBroadcastOldRecord,
+  subscribeToPrivateBroadcast,
+} from "@/lib/realtime";
 import { confirmAction } from "@/lib/confirm";
+import type { Database } from "@/lib/database.types";
+import { withSignedStorageUrls } from "@/lib/storageUrls";
 import {
   normalizeCoursePost,
   type CoursePerson,
@@ -23,6 +31,29 @@ import {
 
 const COURSE_POST_SELECT =
   "id, course_id, author_id, author_name, content, attachments, created_at, updated_at";
+const COURSE_POST_PAGE_SIZE = 20;
+
+type CoursePostRow = Database["public"]["Tables"]["course_posts"]["Row"];
+type CoursePostCursor = Pick<CoursePostRow, "created_at" | "id">;
+
+const signCoursePostAttachments = async (posts: CoursePost[]) => {
+  const attachments = posts.flatMap(post => post.attachments || []);
+  const signedAttachments = await withSignedStorageUrls(
+    "course_content",
+    attachments,
+  );
+  const signedUrlByPath = new Map(
+    signedAttachments.map(file => [file.path, file.url]),
+  );
+
+  return posts.map(post => ({
+    ...post,
+    attachments: post.attachments.map(file => ({
+      ...file,
+      url: signedUrlByPath.get(file.path) || file.url,
+    })),
+  }));
+};
 
 export function useCoursePosts({
   authorName,
@@ -40,6 +71,8 @@ export function useCoursePosts({
   const [postFiles, setPostFiles] = useState<CoursePostFile[]>([]);
   const [postError, setPostError] = useState("");
   const [isPostUploading, setIsPostUploading] = useState(false);
+  const [hasMorePosts, setHasMorePosts] = useState(false);
+  const [isLoadingMorePosts, setIsLoadingMorePosts] = useState(false);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [editPostContent, setEditPostContent] = useState("");
   const [editPostFiles, setEditPostFiles] = useState<CoursePostFile[]>([]);
@@ -49,20 +82,58 @@ export function useCoursePosts({
   const draftPostPathsRef = useRef(new Set<string>());
   const editPostNewPathsRef = useRef(new Set<string>());
   const editPostOriginalFilesRef = useRef<CoursePostFile[]>([]);
+  const nextPostsCursorRef = useRef<CoursePostCursor | null>(null);
 
-  const fetchPosts = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("course_posts")
-      .select(COURSE_POST_SELECT)
-      .eq("course_id", courseId)
-      .order("created_at", { ascending: false });
+  const fetchPosts = useCallback(async (
+    cursor: CoursePostCursor | null = null,
+    append = false,
+  ) => {
+    if (append) setIsLoadingMorePosts(true);
+
+    const { data, error } = await supabase.rpc("get_course_posts_page", {
+      p_course_id: courseId,
+      p_before_created_at: cursor?.created_at ?? null,
+      p_before_id: cursor?.id ?? null,
+      p_limit: COURSE_POST_PAGE_SIZE + 1,
+    });
 
     if (error) {
       setPostError(`Failed to load posts: ${error.message}`);
+      if (append) setIsLoadingMorePosts(false);
       return;
     }
-    setPosts((data || []).map(normalizeCoursePost));
+
+    const rows = (data || []) as CoursePostRow[];
+    const pageRows = rows.slice(0, COURSE_POST_PAGE_SIZE);
+    const page = await signCoursePostAttachments(
+      pageRows.map(normalizeCoursePost),
+    );
+    const lastRow = pageRows.at(-1);
+    nextPostsCursorRef.current = lastRow
+      ? { created_at: lastRow.created_at, id: lastRow.id }
+      : null;
+
+    setPosts(current => {
+      if (!append) return page;
+      const existingIds = new Set(current.map(post => post.id));
+      return [
+        ...current,
+        ...page.filter(post => !existingIds.has(post.id)),
+      ];
+    });
+    setHasMorePosts(rows.length > COURSE_POST_PAGE_SIZE);
+    if (append) setIsLoadingMorePosts(false);
   }, [courseId]);
+
+  const loadMorePosts = useCallback(async () => {
+    if (
+      !hasMorePosts
+      || isLoadingMorePosts
+      || !nextPostsCursorRef.current
+    ) return;
+
+    await fetchPosts(nextPostsCursorRef.current, true);
+  }, [fetchPosts, hasMorePosts, isLoadingMorePosts]);
 
   useEffect(() => {
     setPosts([]);
@@ -72,35 +143,54 @@ export function useCoursePosts({
     setEditingPostId(null);
     setEditPostContent("");
     setEditPostFiles([]);
+    setHasMorePosts(false);
+    setIsLoadingMorePosts(false);
+    nextPostsCursorRef.current = null;
     setShowMentionDropdown(false);
     void fetchPosts();
-    const channel = supabase
-      .channel(`course-posts:${courseId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "course_posts",
-          filter: `course_id=eq.${courseId}`,
-        },
-        payload => {
-          const post = normalizeCoursePost(
-            payload.new as Parameters<typeof normalizeCoursePost>[0],
-          );
-          setPosts(current =>
-            current.some(item => item.id === post.id)
-              ? current
-              : [post, ...current],
-          );
-        },
-      )
-      .subscribe();
+    const unsubscribe = subscribeToPrivateBroadcast({
+      topic: `course:${courseId}:posts`,
+      onMessage: message => {
+        const changeType = getBroadcastChangeType(message);
+        const nextRow = getBroadcastNewRecord<CoursePostRow>(message);
+        const previousRow = getBroadcastOldRecord<CoursePostRow>(message);
+        const changedRow = nextRow || previousRow;
+
+        if (!changeType || !changedRow) {
+          void fetchPosts();
+          return;
+        }
+        if (changedRow.course_id !== courseId) return;
+
+        if (changeType === "DELETE") {
+          setPosts(current => current.filter(post => post.id !== changedRow.id));
+          return;
+        }
+        if (!nextRow) return;
+
+        void signCoursePostAttachments([normalizeCoursePost(nextRow)])
+          .then(([nextPost]) => {
+            setPosts(current => {
+              const existingIndex = current.findIndex(
+                post => post.id === nextPost.id,
+              );
+              if (existingIndex < 0) {
+                return changeType === "INSERT"
+                  ? [nextPost, ...current]
+                  : current;
+              }
+              return current.map(post =>
+                post.id === nextPost.id ? nextPost : post
+              );
+            });
+          });
+      },
+    });
 
     const draftPaths = draftPostPathsRef.current;
     const editPaths = editPostNewPathsRef.current;
     return () => {
-      void supabase.removeChannel(channel);
+      unsubscribe();
       const abandonedPaths = [...draftPaths, ...editPaths];
       if (abandonedPaths.length > 0) {
         void supabase.storage.from("course_content").remove(abandonedPaths);
@@ -132,13 +222,15 @@ export function useCoursePosts({
         if (error) throw error;
 
         uploadedPaths.push(filePath);
-        const { data } = supabase.storage
+        const { data: signedUrlData, error: signedUrlError } =
+          await supabase.storage
           .from("course_content")
-          .getPublicUrl(filePath);
+          .createSignedUrl(filePath, 3600);
+        if (signedUrlError) throw signedUrlError;
         uploadedFiles.push({
           name: file.name,
           path: filePath,
-          url: data.publicUrl,
+          url: signedUrlData.signedUrl,
           size: file.size,
           type: file.type,
         });
@@ -211,13 +303,17 @@ export function useCoursePosts({
     }
     setPostError("");
 
-    const { error } = await supabase.from("course_posts").insert({
-      course_id: courseId,
-      author_id: userId,
-      author_name: authorName,
-      content: newPostContent.trim(),
-      attachments: postFiles,
-    });
+    const { data, error } = await supabase
+      .from("course_posts")
+      .insert({
+        course_id: courseId,
+        author_id: userId,
+        author_name: authorName,
+        content: newPostContent.trim(),
+        attachments: postFiles,
+      })
+      .select(COURSE_POST_SELECT)
+      .single();
 
     if (error) {
       setPostError(`Failed to create post: ${error.message}`);
@@ -227,7 +323,13 @@ export function useCoursePosts({
     setNewPostContent("");
     draftPostPathsRef.current.clear();
     setPostFiles([]);
-    await fetchPosts();
+    const [createdPost] = await signCoursePostAttachments([
+      normalizeCoursePost(data),
+    ]);
+    setPosts(current => [
+      createdPost,
+      ...current.filter(post => post.id !== createdPost.id),
+    ]);
   };
 
   const saveEditedPost = async () => {
@@ -239,14 +341,16 @@ export function useCoursePosts({
     }
     setPostError("");
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("course_posts")
       .update({
         content: editPostContent,
         attachments: editPostFiles,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", editingPostId);
+      .eq("id", editingPostId)
+      .select(COURSE_POST_SELECT)
+      .single();
 
     if (error) {
       setPostError(`Failed to update post: ${error.message}`);
@@ -269,7 +373,12 @@ export function useCoursePosts({
     editPostNewPathsRef.current.clear();
     editPostOriginalFilesRef.current = [];
     setEditingPostId(null);
-    await fetchPosts();
+    const [updatedPost] = await signCoursePostAttachments([
+      normalizeCoursePost(data),
+    ]);
+    setPosts(current => current.map(post =>
+      post.id === updatedPost.id ? updatedPost : post
+    ));
     if (cleanupError) {
       setPostError(
         `Post updated, but an old attachment could not be removed: ${cleanupError.message}`,
@@ -406,6 +515,9 @@ export function useCoursePosts({
     handlePostChange,
     insertMention,
     isPostUploading,
+    hasMorePosts,
+    isLoadingMorePosts,
+    loadMorePosts,
     newPostContent,
     postError,
     postFiles,

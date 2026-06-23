@@ -53,7 +53,6 @@ import {
   deleteStudyGroup,
   deleteStudyGroupPost,
   deleteStudySession,
-  dispatchStudySessionReminders,
   joinStudyGroup,
   leaveStudyGroup,
   loadEnrolledStudyGroupCourses,
@@ -197,7 +196,6 @@ export function StudyGroupsPage() {
     void loadCourses().catch((error) => {
       console.error("Failed to load enrolled courses:", error);
     });
-    void dispatchStudySessionReminders();
   }, [loadCourses, userId]);
 
   useEffect(() => {

@@ -30,6 +30,8 @@ export function CoursePostsSection({
       postFiles={posts.postFiles}
       postError={posts.postError}
       isUploading={posts.isPostUploading}
+      hasMorePosts={posts.hasMorePosts}
+      isLoadingMorePosts={posts.isLoadingMorePosts}
       showMentionDropdown={posts.showMentionDropdown}
       filteredMentions={posts.filteredMentions}
       editingPostId={posts.editingPostId}
@@ -47,6 +49,7 @@ export function CoursePostsSection({
       onSaveEdit={posts.saveEditedPost}
       onStartEdit={posts.startEditingPost}
       onDeletePost={posts.deletePost}
+      onLoadMorePosts={posts.loadMorePosts}
     />
   );
 }

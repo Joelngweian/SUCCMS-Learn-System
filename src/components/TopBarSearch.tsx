@@ -17,6 +17,7 @@ export function TopBarSearch() {
   const [isLoading, setIsLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const latestRequestRef = useRef(0);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -31,10 +32,15 @@ export function TopBarSearch() {
   }, []);
 
   useEffect(() => {
+    const normalizedQuery = query.trim();
+    const requestId = ++latestRequestRef.current;
+    const abortController = new AbortController();
+
     const searchUsers = async () => {
-      if (!query.trim()) {
+      if (normalizedQuery.length < 3) {
         setResults([]);
-        setIsOpen(false);
+        setIsLoading(false);
+        setIsOpen(normalizedQuery.length > 0);
         return;
       }
 
@@ -45,20 +51,32 @@ export function TopBarSearch() {
         const { data, error } = await supabase
           .from("user_profiles")
           .select("id, full_name, avatar_url, role")
-          .ilike("full_name", `%${query}%`)
+          .or("is_active.eq.true,is_active.is.null")
+          .ilike("full_name", `%${normalizedQuery}%`)
+          .order("full_name", { ascending: true })
+          .abortSignal(abortController.signal)
           .limit(5);
 
         if (error) throw error;
-        setResults(data || []);
+        if (requestId === latestRequestRef.current) {
+          setResults(data || []);
+        }
       } catch (err) {
-        console.error("Error searching users:", err);
+        if (!abortController.signal.aborted) {
+          console.error("Error searching users:", err);
+        }
       } finally {
-        setIsLoading(false);
+        if (requestId === latestRequestRef.current) {
+          setIsLoading(false);
+        }
       }
     };
 
-    const debounceTimer = setTimeout(searchUsers, 300);
-    return () => clearTimeout(debounceTimer);
+    const debounceTimer = setTimeout(searchUsers, 350);
+    return () => {
+      clearTimeout(debounceTimer);
+      abortController.abort();
+    };
   }, [query]);
 
   const handleSelectUser = (userId: string) => {
@@ -88,6 +106,10 @@ export function TopBarSearch() {
             <div className="p-4 flex items-center justify-center text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
               <span className="text-sm">Searching...</span>
+            </div>
+          ) : query.trim().length < 3 ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">
+              Type at least 3 characters.
             </div>
           ) : results.length > 0 ? (
             <ul className="max-h-[300px] overflow-auto py-1">

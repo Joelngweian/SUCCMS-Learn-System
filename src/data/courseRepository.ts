@@ -4,7 +4,9 @@ import {
   type NormalizedCourseOffering,
 } from "@/lib/courseOfferings";
 import { supabase } from "@/lib/supabase";
+import type { Database } from "@/lib/database.types";
 import { cachedRequest, invalidateRequestCache } from "./requestCache";
+import { getSharedCachedData } from "./sharedCacheRepository";
 
 const normalizeIds = (ids: string[]) =>
   Array.from(new Set(ids.filter(Boolean))).sort();
@@ -15,6 +17,80 @@ export type CourseInstructorSummary = {
   fullName: string;
   id: string;
 };
+
+export type AvailableCourseOffering = NormalizedCourseOffering & {
+  instructors: Array<{
+    avatar_url: string | null;
+    full_name: string;
+    id: string;
+  }>;
+};
+
+type AvailableCourseRow =
+  Database["public"]["Functions"]["get_available_course_offerings"]["Returns"][number];
+
+const asAvailableCourseOffering = (
+  row: AvailableCourseRow,
+): AvailableCourseOffering => ({
+  id: row.id,
+  template_id: row.template_id,
+  course_code: row.course_code,
+  code: row.code,
+  name: row.name,
+  chinese_name: row.chinese_name,
+  faculty: row.faculty,
+  programme: row.programme,
+  course_type: row.course_type as NormalizedCourseOffering["course_type"],
+  credits: row.credit_hours,
+  credit_hours: row.credit_hours,
+  max_capacity: row.max_capacity,
+  enrollment_key: null,
+  status: row.status as NormalizedCourseOffering["status"],
+  semester: row.semester,
+  created_at: row.created_at,
+  instructors: Array.isArray(row.instructors)
+    ? row.instructors.flatMap(value => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+        const instructor = value as Record<string, unknown>;
+        if (
+          typeof instructor.id !== "string"
+          || typeof instructor.full_name !== "string"
+        ) return [];
+
+        return [{
+          avatar_url:
+            typeof instructor.avatar_url === "string"
+              ? instructor.avatar_url
+              : null,
+          full_name: instructor.full_name,
+          id: instructor.id,
+        }];
+      })
+    : [],
+});
+
+export async function getAvailableCourseOfferings({
+  page,
+  pageSize,
+  searchTerm,
+}: {
+  page: number;
+  pageSize: number;
+  searchTerm: string;
+}) {
+  const { data, error } = await supabase.rpc("get_available_course_offerings", {
+    p_limit: pageSize,
+    p_offset: Math.max(0, page - 1) * pageSize,
+    p_search: searchTerm.trim() || null,
+  });
+
+  if (error) throw error;
+  const rows = data || [];
+  return {
+    courses: rows.map(asAvailableCourseOffering),
+    totalCount: Number(rows[0]?.total_count || 0),
+  };
+}
 
 export async function getCourseOffering(
   courseId: string,
@@ -52,13 +128,21 @@ export async function getActiveCourseOfferings(): Promise<
   NormalizedCourseOffering[]
 > {
   return cachedRequest("course:offerings:active", async () => {
-    const { data, error } = await supabase
-      .from("course_offerings")
-      .select(COURSE_OFFERING_SELECT)
-      .eq("status", "active");
+    try {
+      const data = await getSharedCachedData<unknown[]>(
+        "active-course-offerings",
+      );
+      return data.map(normalizeCourseOffering);
+    } catch (cacheError) {
+      console.warn("Shared course cache unavailable; using direct query:", cacheError);
+      const { data, error } = await supabase
+        .from("course_offerings")
+        .select(COURSE_OFFERING_SELECT)
+        .eq("status", "active");
 
-    if (error) throw error;
-    return (data || []).map(normalizeCourseOffering);
+      if (error) throw error;
+      return (data || []).map(normalizeCourseOffering);
+    }
   });
 }
 
@@ -148,6 +232,21 @@ export async function enrollStudentInCourse({
   const { error } = await supabase.from("course_enrollments").insert({
     course_id: courseId,
     student_id: studentId,
+  });
+
+  if (error) throw error;
+}
+
+export async function enrollStudentInCourseWithKey({
+  courseId,
+  enrollmentKey,
+}: {
+  courseId: string;
+  enrollmentKey: string;
+}) {
+  const { error } = await supabase.rpc("enroll_student_in_course", {
+    p_course_id: courseId,
+    p_enrollment_key: enrollmentKey,
   });
 
   if (error) throw error;

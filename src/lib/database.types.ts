@@ -66,6 +66,48 @@ export type Database = {
           },
         ]
       >
+      ai_grading_jobs: Table<
+        {
+          id: string
+          assignment_id: string
+          student_id: string
+          requested_by: string
+          status: "queued" | "processing" | "completed" | "failed"
+          attempts: number
+          max_attempts: number
+          result: Json | null
+          error_message: string | null
+          model: string | null
+          created_at: string
+          started_at: string | null
+          completed_at: string | null
+          updated_at: string
+        },
+        "assignment_id" | "student_id" | "requested_by",
+        [
+          {
+            foreignKeyName: "ai_grading_jobs_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_grading_jobs_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_grading_jobs_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
       announcement_reads: Table<
         {
           id: string
@@ -731,6 +773,12 @@ export type Database = {
           },
         ]
       >
+      presence_summary_cache: Table<{
+        singleton: boolean
+        online_count: number
+        sample_users: Json
+        refreshed_at: string
+      }>
       reports: Table<
         {
           id: string
@@ -779,6 +827,17 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      >
+      shared_cache_entries: Table<
+        {
+          cache_key: string
+          value: Json
+          expires_at: string
+          stale_until: string
+          refreshing_until: string | null
+          updated_at: string
+        },
+        "cache_key" | "value" | "expires_at" | "stale_until"
       >
       social_activity_events: Table<
         {
@@ -1115,6 +1174,13 @@ export type Database = {
           },
         ]
       >
+      user_presence: Table<
+        {
+          user_id: string
+          last_seen_at: string
+        },
+        "user_id"
+      >
       user_profiles: Table<
         {
           id: string
@@ -1278,6 +1344,15 @@ export type Database = {
         Args: { p_course_id: string; p_code: string }
         Returns: Json
       }
+      claim_shared_cache_refresh: {
+        Args: { p_cache_key: string; p_lease_seconds?: number }
+        Returns: {
+          cache_value: Json
+          cache_expires_at: string
+          cache_stale_until: string
+          lease_acquired: boolean
+        }[]
+      }
       correct_attendance_session_date: {
         Args: { p_session_id: string; p_new_date: string }
         Returns: Json
@@ -1329,6 +1404,64 @@ export type Database = {
       }
       delete_attendance_class: {
         Args: { p_session_id: string }
+        Returns: Json
+      }
+      enroll_student_in_course: {
+        Args: { p_course_id: string; p_enrollment_key: string }
+        Returns: string
+      }
+      get_available_course_offerings: {
+        Args: {
+          p_search?: string | null
+          p_limit?: number
+          p_offset?: number
+        }
+        Returns: {
+          id: string
+          template_id: string
+          course_code: string
+          code: string
+          name: string
+          chinese_name: string | null
+          faculty: string
+          programme: string
+          course_type: string
+          credit_hours: number
+          max_capacity: number
+          status: string
+          semester: string
+          created_at: string
+          instructors: Json
+          total_count: number
+        }[]
+      }
+      get_course_posts_page: {
+        Args: {
+          p_course_id: string
+          p_before_created_at: string | null
+          p_before_id: string | null
+          p_limit: number
+        }
+        Returns: {
+          id: string
+          course_id: string
+          author_id: string
+          author_name: string
+          content: string
+          attachments: Json
+          created_at: string
+          updated_at: string
+        }[]
+      }
+      get_lecturer_analytics: {
+        Args: {
+          p_period_start: string
+          p_bucket_start: string
+        }
+        Returns: Json
+      }
+      get_student_dashboard_data: {
+        Args: Record<PropertyKey, never>
         Returns: Json
       }
       drop_course_offering: {

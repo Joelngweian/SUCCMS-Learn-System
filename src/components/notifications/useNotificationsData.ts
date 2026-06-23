@@ -9,6 +9,7 @@ import {
 } from "@/data/notificationRepository";
 import { notify } from "@/lib/notify";
 import { supabase } from "@/lib/supabase";
+import { subscribeToPrivateBroadcast } from "@/lib/realtime";
 import type {
   AnnouncementNotification,
   AssignmentNotification,
@@ -171,26 +172,13 @@ export function useNotificationsData({
 
   useEffect(() => {
     if (!userId) return;
-    const channel = supabase
-      .channel(`user-notifications:${userId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "notifications",
-          filter: `recipient_id=eq.${userId}`,
-        },
-        () => {
-          invalidateNotificationCache(userId);
-          void loadNotifications(false);
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
+    return subscribeToPrivateBroadcast({
+      topic: `user:${userId}:notifications`,
+      onMessage: () => {
+        invalidateNotificationCache(userId);
+        void loadNotifications(false);
+      },
+    });
   }, [loadNotifications, userId]);
 
   const unreadCount = useMemo(

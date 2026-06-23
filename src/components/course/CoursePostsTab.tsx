@@ -29,6 +29,8 @@ type CoursePostsTabProps = {
   postFiles: CoursePostFile[];
   postError: string;
   isUploading: boolean;
+  hasMorePosts: boolean;
+  isLoadingMorePosts: boolean;
   showMentionDropdown: boolean;
   filteredMentions: MentionPerson[];
   editingPostId: string | null;
@@ -46,6 +48,7 @@ type CoursePostsTabProps = {
   onSaveEdit: () => void;
   onStartEdit: (post: CoursePost) => void;
   onDeletePost: (postId: string, attachments: CoursePostFile[]) => void;
+  onLoadMorePosts: () => void;
 };
 
 const isImageAttachment = (file: CoursePostFile) =>
@@ -64,6 +67,8 @@ export function CoursePostsTab({
   postFiles,
   postError,
   isUploading,
+  hasMorePosts,
+  isLoadingMorePosts,
   showMentionDropdown,
   filteredMentions,
   editingPostId,
@@ -81,6 +86,7 @@ export function CoursePostsTab({
   onSaveEdit,
   onStartEdit,
   onDeletePost,
+  onLoadMorePosts,
 }: CoursePostsTabProps) {
   return (
     <TabsContent value="posts" className="space-y-4 flex-1">
@@ -367,6 +373,21 @@ export function CoursePostsTab({
             </Card>
           );
         })}
+        {hasMorePosts && (
+          <div className="flex justify-center pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onLoadMorePosts}
+              disabled={isLoadingMorePosts}
+            >
+              {isLoadingMorePosts && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Load more posts
+            </Button>
+          </div>
+        )}
       </div>
     </TabsContent>
   );

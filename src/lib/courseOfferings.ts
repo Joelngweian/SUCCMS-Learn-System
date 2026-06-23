@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import type { Database } from "@/lib/database.types";
 
-export const COURSE_OFFERING_SELECT = "*, courses(*), academic_terms(*)";
+export const COURSE_OFFERING_SELECT = "id, course_id, academic_term_id, owner_id, section_code, enrollment_key, max_capacity, status, created_at, updated_at, courses(id, code, name, description, lecturer_id, credits, max_students, created_at, updated_at, course_code, chinese_name, faculty, programme, course_type, credit_hours, max_capacity, enrollment_key, status), academic_terms(id, code, name, starts_at, ends_at, status, created_at, updated_at)";
 
 type CourseRow = Database["public"]["Tables"]["courses"]["Row"];
 type CourseOfferingRow =
@@ -214,14 +214,34 @@ export async function removeCourseOfferingFiles(offeringId: string) {
   });
 
   const submissionRows = submissionsResult.data || [];
-  const submissionPaths = [
-    ...collectAttachmentPaths(submissionRows, "files", "course_content"),
+  const submissionCoursePaths = [
+    ...submissionRows.flatMap(submission => {
+      const files = Array.isArray(submission.files) ? submission.files : [];
+      return files.flatMap(file => {
+        const record = asRecord(file);
+        if (record.bucket === "assignment-submissions") return [];
+        const path = extractStoragePath(
+          record.path || record.url || file,
+          "course_content",
+        );
+        return path ? [path] : [];
+      });
+    }),
     ...submissionRows
       .map(submission =>
         extractStoragePath(submission.submission_file_url, "course_content")
       )
       .filter(Boolean),
   ] as string[];
+  const privateSubmissionPaths = submissionRows.flatMap(submission => {
+    const files = Array.isArray(submission.files) ? submission.files : [];
+    return files.flatMap(file => {
+      const record = asRecord(file);
+      if (record.bucket !== "assignment-submissions") return [];
+      const path = extractStoragePath(record.path || record.url, "assignment-submissions");
+      return path ? [path] : [];
+    });
+  });
 
   await Promise.all([
     removeStoragePaths("course_content", [
@@ -229,8 +249,9 @@ export async function removeCourseOfferingFiles(offeringId: string) {
       ...collectAttachmentPaths(postsResult.data || [], "attachments", "course_content"),
       ...collectAttachmentPaths(assignments, "attachments", "course_content"),
       ...assignmentRubricPaths,
-      ...submissionPaths,
+      ...submissionCoursePaths,
     ]),
+    removeStoragePaths("assignment-submissions", privateSubmissionPaths),
     removeStoragePaths(
       "forum-images",
       [

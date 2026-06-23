@@ -22,134 +22,134 @@ type OnlinePresenceValue = {
   onlineCount: number;
 };
 
-const OnlinePresenceContext = createContext<OnlinePresenceValue | null>(null);
-
-type PresencePayload = {
-  user_id?: string;
-  full_name?: string;
-  role?: OnlineUser["role"];
-  avatar_url?: string | null;
-  online_at?: string;
+type PresenceSummaryRow = {
+  online_count: number;
+  sample_users: unknown;
 };
 
-const isPresencePayload = (value: unknown): value is PresencePayload =>
-  Boolean(value && typeof value === "object" && !Array.isArray(value));
+const HEARTBEAT_INTERVAL_MS = 60_000;
+const SUMMARY_INTERVAL_MS = 60_000;
+const OnlinePresenceContext = createContext<OnlinePresenceValue | null>(null);
+
+const normalizeSampleUsers = (value: unknown): OnlineUser[] => {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object") return [];
+    const user = candidate as Record<string, unknown>;
+    if (
+      typeof user.id !== "string"
+      || typeof user.name !== "string"
+      || !["student", "lecturer", "admin"].includes(String(user.role))
+    ) return [];
+
+    return [{
+      id: user.id,
+      name: user.name,
+      role: user.role as OnlineUser["role"],
+      avatarUrl: typeof user.avatarUrl === "string" ? user.avatarUrl : undefined,
+      onlineAt:
+        typeof user.onlineAt === "string"
+          ? user.onlineAt
+          : new Date().toISOString(),
+    }];
+  }).slice(0, 4);
+};
 
 export function OnlinePresenceProvider({ children }: { children: ReactNode }) {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const userId = user?.id;
-  const userEmail = user?.email;
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
+  const [onlineCount, setOnlineCount] = useState(0);
 
   useEffect(() => {
     if (!userId) {
       setOnlineUsers([]);
+      setOnlineCount(0);
       return;
     }
 
-    let isActive = true;
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-    let refreshTimer: number | null = null;
+    let active = true;
+    let heartbeatTimer: number | null = null;
+    let summaryTimer: number | null = null;
 
-    const connectPresence = async () => {
+    const loadSummary = async () => {
+      const { data, error } = await supabase
+        .from("presence_summary_cache")
+        .select("online_count, sample_users")
+        .eq("singleton", true)
+        .maybeSingle();
+      if (!active || error || !data) return;
+
+      const summary = data as PresenceSummaryRow;
+      setOnlineCount(Math.max(0, Number(summary.online_count) || 0));
+      setOnlineUsers(normalizeSampleUsers(summary.sample_users));
+    };
+
+    const sendHeartbeat = async () => {
+      if (document.visibilityState !== "visible") return;
+      await supabase.from("user_presence").upsert(
+        { user_id: userId, last_seen_at: new Date().toISOString() },
+        { onConflict: "user_id" },
+      );
+    };
+
+    const initialize = async () => {
       const { data: settings } = await supabase
         .from("user_settings")
         .select("show_online_status")
         .eq("user_id", userId)
         .maybeSingle();
+      if (!active) return;
 
-      if (!isActive) return;
+      if (settings?.show_online_status === false) {
+        await supabase.from("user_presence").delete().eq("user_id", userId);
+      } else {
+        await sendHeartbeat();
+        heartbeatTimer = window.setInterval(
+          () => void sendHeartbeat(),
+          HEARTBEAT_INTERVAL_MS,
+        );
+      }
 
-      const showOnlineStatus = settings?.show_online_status !== false;
-
-      channel = supabase.channel("campus-presence", {
-        config: {
-          presence: {
-            key: userId,
-          },
-        },
-      });
-
-      const syncPresenceState = () => {
-        if (!channel || !isActive) return;
-
-        const presenceState = channel.presenceState();
-        const uniqueUsers = new Map<string, OnlineUser>();
-
-        Object.entries(presenceState).forEach(([presenceKey, presences]) => {
-          presences.forEach((presence) => {
-            if (!isPresencePayload(presence)) return;
-            const userId = presence.user_id || presenceKey;
-            if (!userId || uniqueUsers.has(userId)) return;
-
-            uniqueUsers.set(userId, {
-              id: userId,
-              name: presence.full_name || "SUCCMS User",
-              role: presence.role || "student",
-              avatarUrl: presence.avatar_url || undefined,
-              onlineAt: presence.online_at || new Date().toISOString(),
-            });
-          });
-        });
-
-        setOnlineUsers(Array.from(uniqueUsers.values()));
-      };
-
-      channel
-        .on("presence", { event: "sync" }, () => {
-          syncPresenceState();
-        })
-        .subscribe(async (status) => {
-          if (status !== "SUBSCRIBED" || !showOnlineStatus) return;
-
-          await channel?.track({
-            user_id: userId,
-            full_name: profile?.full_name || userEmail || "SUCCMS User",
-            role: profile?.role || "student",
-            avatar_url: profile?.avatar_url || null,
-            online_at: new Date().toISOString(),
-          });
-
-          if (refreshTimer == null) {
-            refreshTimer = window.setInterval(syncPresenceState, 3000);
-          }
-        });
+      await loadSummary();
+      summaryTimer = window.setInterval(
+        () => void loadSummary(),
+        SUMMARY_INTERVAL_MS,
+      );
     };
 
-    connectPresence();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void sendHeartbeat();
+      void loadSummary();
+    };
+
+    void initialize();
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
 
     return () => {
-      isActive = false;
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
-      if (refreshTimer != null) {
-        window.clearInterval(refreshTimer);
-      }
+      active = false;
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer);
+      if (summaryTimer !== null) window.clearInterval(summaryTimer);
     };
-  }, [
-    userId,
-    userEmail,
-    profile?.full_name,
-    profile?.role,
-    profile?.avatar_url,
-  ]);
+  }, [userId]);
 
   return createElement(
     OnlinePresenceContext.Provider,
-    { value: { onlineUsers, onlineCount: onlineUsers.length } },
-    children
+    { value: { onlineUsers, onlineCount } },
+    children,
   );
 }
 
 export function useOnlinePresence() {
   const context = useContext(OnlinePresenceContext);
-
   if (!context) {
     throw new Error(
-      "useOnlinePresence must be used within an OnlinePresenceProvider"
+      "useOnlinePresence must be used within an OnlinePresenceProvider",
     );
   }
-
   return context;
 }

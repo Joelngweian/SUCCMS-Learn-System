@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { getBroadcastNewRecord, subscribeToPrivateBroadcast } from "@/lib/realtime";
 import { loadGamificationRpcData } from "@/data/gamificationRepository";
 import {
   COURSE_OFFERING_SELECT,
@@ -158,35 +159,23 @@ export function Gamification() {
   useEffect(() => {
     if (!userId) return;
 
-    const channel = supabase
-      .channel(`user-achievements:${userId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "user_achievements",
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          const achievement = payload.new as {
+    return subscribeToPrivateBroadcast({
+      topic: `user:${userId}:achievements`,
+      event: "INSERT",
+      onMessage: (payload) => {
+          const achievement = getBroadcastNewRecord<{
             achievement_code?: string;
             earned_at?: string;
-          };
+          }>(payload);
 
-          if (achievement.achievement_code && achievement.earned_at) {
+          if (achievement?.achievement_code && achievement.earned_at) {
             setAchievementDates((current) => ({
               ...current,
               [achievement.achievement_code as string]: achievement.earned_at as string,
             }));
           }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+      },
+    });
   }, [userId]);
 
   const loadProgressData = useCallback(async () => {
