@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Button } from "../ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar"
 import { Pencil, Camera, Trash2 } from "lucide-react"
+import { StoryAvatarRing } from "../stories/StoryAvatarRing"
 
 interface ProfileHeaderProps {
   name: string
@@ -21,9 +22,11 @@ interface ProfileHeaderProps {
   onCoverChange?: (file: File) => void
   onAvatarRemove?: () => void
   onCoverRemove?: () => void
+  hasActiveStory?: boolean
+  onStoryClick?: () => void
 }
 
-export function ProfileHeader({ name, role, profileImage, backgroundImage, bio, stats, isEditing = false, onAvatarChange, onCoverChange, onAvatarRemove, onCoverRemove }: ProfileHeaderProps) {
+export function ProfileHeader({ name, role, profileImage, backgroundImage, bio, stats, isEditing = false, onAvatarChange, onCoverChange, onAvatarRemove, onCoverRemove, hasActiveStory = false, onStoryClick }: ProfileHeaderProps) {
   const [isHoveringBg, setIsHoveringBg] = useState(false)
   const [isHoveringProfile, setIsHoveringProfile] = useState(false)
 
@@ -92,18 +95,35 @@ export function ProfileHeader({ name, role, profileImage, backgroundImage, bio, 
         {/* Profile Picture - positioned with enough top padding */}
         <div className="flex items-end justify-between" style={{ marginTop: '-48px' }}>
           <div
-            className="relative"
+            className={`relative ${hasActiveStory && !isEditing ? "cursor-pointer" : ""}`}
             onMouseEnter={() => setIsHoveringProfile(true)}
             onMouseLeave={() => setIsHoveringProfile(false)}
+            onClick={() => {
+              if (!isEditing && hasActiveStory) onStoryClick?.()
+            }}
+            role={hasActiveStory && !isEditing ? "button" : undefined}
+            tabIndex={hasActiveStory && !isEditing ? 0 : undefined}
+            onKeyDown={event => {
+              if (
+                !isEditing &&
+                hasActiveStory &&
+                (event.key === "Enter" || event.key === " ")
+              ) {
+                event.preventDefault()
+                onStoryClick?.()
+              }
+            }}
           >
-            <Avatar className="h-32 w-32 border-4 border-card shadow-xl">
-              {profileImage && (
-                <AvatarImage src={profileImage} className="object-cover" />
-              )}
-              <AvatarFallback className="text-4xl font-bold">
-                {name?.charAt(0)?.toUpperCase() || 'U'}
-              </AvatarFallback>
-            </Avatar>
+            <StoryAvatarRing active={hasActiveStory && !isEditing}>
+              <Avatar className="h-32 w-32 border-4 border-card shadow-xl">
+                {profileImage && (
+                  <AvatarImage src={profileImage} className="object-cover" />
+                )}
+                <AvatarFallback className="text-4xl font-bold">
+                  {name?.charAt(0)?.toUpperCase() || 'U'}
+                </AvatarFallback>
+              </Avatar>
+            </StoryAvatarRing>
             
             {isEditing && isHoveringProfile && (
               <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/60">

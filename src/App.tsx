@@ -157,6 +157,9 @@ export default function App() {
 
   // Derived State
   const userRole = (profile?.role as UserRole) || 'student';
+  const isWideDashboard =
+    (userRole === 'student' || userRole === 'lecturer') &&
+    location.pathname === '/';
   
   const userData = profile ? {
     id: profile.id,
@@ -234,9 +237,9 @@ export default function App() {
     { id: 'courses', label: 'My Courses', icon: BookOpen, description: 'Enrolled courses & materials' },
     { 
         id: 'assignments', 
-        label: 'Assignments', 
-        icon: FileText, 
-        description: 'Submit & track assignments', 
+        label: 'Assessments',
+        icon: FileText,
+        description: 'Submit & track assessments',
         badge: crucialCount > 0 ? crucialCount.toString() : undefined // Dynamic Badge
     },
     { id: 'forum', label: 'Discussions', icon: MessageSquare, description: 'Course discussions & Q&A' },
@@ -247,7 +250,7 @@ export default function App() {
   const lecturerNavigationItems: NavigationItem[] = [
     { id: '', label: 'Dashboard', icon: LayoutDashboard, description: 'Overview & AI insights' },
     { id: 'courses', label: 'Courses', icon: BookOpen, description: 'Manage course content' },
-    { id: 'assignments', label: 'Assignments', icon: ClipboardList, description: 'Create & grade assignments' },
+    { id: 'assignments', label: 'Assessments', icon: ClipboardList, description: 'Create & grade assessments' },
     { id: 'forum', label: 'Forums', icon: MessageSquare, description: 'Moderate discussions' },
     { id: 'analytics', label: 'Analytics', icon: BarChart3, description: 'Student progress reports' }
   ];
@@ -409,7 +412,11 @@ export default function App() {
             </div>
           </header>
 
-          <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+          <main
+            className={`mx-auto w-full p-4 sm:p-6 lg:p-8 ${
+          isWideDashboard ? 'max-w-[1600px]' : 'max-w-7xl'
+            }`}
+          >
             <Suspense fallback={<PageLoadingFallback />}>
               <Routes>
                 {/* Common Routes */}

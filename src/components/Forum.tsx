@@ -19,16 +19,14 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import {
   Search, Plus, MessageCircle,
-  Loader2, Coffee, Layers, Smile, ArrowLeft,
+  Loader2, Coffee, Layers, ArrowLeft,
   X, AtSign
 } from "lucide-react";
-import {
-  Popover, PopoverContent, PopoverTrigger,
-} from "./ui/popover";
 import {
   CreateDiscussionDialog,
   EditDiscussionDialog,
 } from "./forum/ForumThreadDialogs";
+import { ForumEmojiPicker } from "./forum/ForumEmojiPicker";
 import { ForumReactionBar } from "./forum/ForumReactionBar";
 import { ForumThreadCard } from "./forum/ForumThreadCard";
 import { ForumCommentNode } from "./forum/ForumCommentNode";
@@ -51,7 +49,6 @@ import {
   normalizeForumReply,
 } from "./forum/forumTypes";
 import {
-  COMMENT_EMOJIS,
   formatForumDate,
   getActiveMentionQuery,
   getErrorMessage,
@@ -668,33 +665,7 @@ export function Forum() {
   };
 
   const renderEmojiPicker = (onSelect: (emoji: string) => void) => (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="rounded-full p-1.5 text-gray-400 transition-colors hover:bg-yellow-50 hover:text-yellow-600 dark:hover:bg-yellow-900/20 dark:hover:text-yellow-400"
-          title="Add emoji"
-        >
-          <Smile className="h-4 w-4" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        side="top"
-        align="end"
-        className="grid w-52 grid-cols-6 gap-1 rounded-lg border border-gray-200 bg-white p-2 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
-      >
-        {COMMENT_EMOJIS.map(emoji => (
-          <button
-            key={emoji}
-            type="button"
-            className="flex h-8 w-8 items-center justify-center rounded text-lg hover:bg-gray-100 dark:hover:bg-zinc-800"
-            onClick={() => onSelect(emoji)}
-          >
-            {emoji}
-          </button>
-        ))}
-      </PopoverContent>
-    </Popover>
+    <ForumEmojiPicker onSelect={onSelect} />
   );
 
   const updateLocalReaction = (targetId: string, previousType: string | undefined, nextType: string | undefined, isThread: boolean) => {

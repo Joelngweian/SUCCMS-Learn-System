@@ -10,8 +10,10 @@ import { StudentAttendanceView } from "./attendance/StudentAttendanceView";
 import { TeacherAttendanceControls } from "./attendance/TeacherAttendanceControls";
 import { TeacherAttendanceRoster } from "./attendance/TeacherAttendanceRoster";
 import { TeacherAttendanceDialogs } from "./attendance/TeacherAttendanceDialogs";
+import { exportAttendanceWorkbook } from "./attendance/exportAttendanceWorkbook";
 import {
   formatClassDate,
+  formatSessionSlotLabel,
   getRecordStatus,
   receivesAttendanceCredit,
   type AttendanceFilter,
@@ -23,6 +25,8 @@ import {
 
 type CourseAttendanceProps = {
   courseId: string;
+  courseCode?: string;
+  courseName?: string;
   userId: string | null;
   isLecturer: boolean;
   students: CourseStudent[];
@@ -31,15 +35,24 @@ type CourseAttendanceProps = {
 const PAGE_SIZE = 25;
 
 const ATTENDANCE_SELECT =
-  "id, course_id, student_id, class_date, marked_present, marked_at, marked_by, session_id, status, check_in_at, check_in_method";
+  "id, course_id, student_id, class_date, marked_present, marked_at, marked_by, class_meeting_id, session_id, status, check_in_at, check_in_method";
 
 const ATTENDANCE_SESSION_SELECT =
-  "id, course_id, class_date, check_in_code, status, starts_at, ends_at, closed_at, created_by, created_at, updated_at";
+  "id, course_id, class_meeting_id, class_date, slot_no, slot_label, check_in_code, status, starts_at, ends_at, check_in_window_minutes, closed_at, created_by, created_at, updated_at";
+
+const EXPORT_PAGE_SIZE = 1000;
 
 const getLocalDateValue = () => {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60_000;
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+};
+
+const getLocalTimeValue = () => {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, "0")}:${String(
+    now.getMinutes(),
+  ).padStart(2, "0")}`;
 };
 
 const generateCheckInCode = () => {
@@ -53,12 +66,17 @@ const generateCheckInCode = () => {
 
 export function CourseAttendance({
   courseId,
+  courseCode,
+  courseName,
   userId,
   isLecturer,
   students,
 }: CourseAttendanceProps) {
   const today = getLocalDateValue();
   const [selectedDate, setSelectedDate] = useState(today);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
+    null
+  );
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [draft, setDraft] = useState<
@@ -71,19 +89,22 @@ export function CourseAttendance({
   const [statusFilter, setStatusFilter] =
     useState<AttendanceFilter>("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [classHours, setClassHours] = useState("3");
+  const [classStartTime, setClassStartTime] = useState(getLocalTimeValue);
   const [sessionDuration, setSessionDuration] = useState("15");
   const [checkInCode, setCheckInCode] = useState("");
   const [clock, setClock] = useState(Date.now());
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExportingAttendance, setIsExportingAttendance] = useState(false);
+  const [isExportingAttendanceSummary, setIsExportingAttendanceSummary] =
+    useState(false);
   const [isManagingSession, setIsManagingSession] = useState(false);
   const [isCheckingIn, setIsCheckingIn] = useState(false);
   const [startConfirmationOpen, setStartConfirmationOpen] = useState(false);
   const [correctionDialogOpen, setCorrectionDialogOpen] = useState(false);
-  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [correctedDate, setCorrectedDate] = useState(today);
   const [isCorrectingDate, setIsCorrectingDate] = useState(false);
-  const [isDeletingClass, setIsDeletingClass] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
@@ -97,14 +118,48 @@ export function CourseAttendance({
     [students]
   );
 
-  const selectedSession = useMemo(
-    () => sessions.find((session) => session.class_date === selectedDate) || null,
-    [selectedDate, sessions]
+  const sessionsForSelectedDate = useMemo(
+    () =>
+      sessions
+        .filter((session) => session.class_date === selectedDate)
+        .sort((a, b) => {
+          const slotSort = (a.slot_no || 1) - (b.slot_no || 1);
+          if (slotSort !== 0) return slotSort;
+          return a.starts_at.localeCompare(b.starts_at);
+        }),
+    [selectedDate, sessions],
   );
+
+  const selectedSession = useMemo(() => {
+    if (sessionsForSelectedDate.length === 0) return null;
+    return (
+      sessionsForSelectedDate.find(
+        (session) => session.id === selectedSessionId,
+      ) || sessionsForSelectedDate[0]
+    );
+  }, [selectedSessionId, sessionsForSelectedDate]);
+
+  const missingSlotNumbers = useMemo(() => {
+    const targetSlots = Number(classHours);
+    if (!Number.isFinite(targetSlots) || targetSlots <= 0) return [];
+
+    const existingSlotNumbers = new Set(
+      sessionsForSelectedDate.map((session) => session.slot_no || 1),
+    );
+
+    return Array.from({ length: targetSlots }, (_, index) => index + 1).filter(
+      (slotNo) => !existingSlotNumbers.has(slotNo),
+    );
+  }, [classHours, sessionsForSelectedDate]);
 
   const sessionIsOpen =
     selectedSession?.status === "open" &&
+    new Date(selectedSession.starts_at).getTime() <= clock &&
     new Date(selectedSession.ends_at).getTime() > clock;
+
+  const sessionIsUpcoming =
+    selectedSession?.status === "open" &&
+    new Date(selectedSession.starts_at).getTime() > clock;
 
   const sessionHasExpired =
     selectedSession?.status === "open" &&
@@ -134,6 +189,7 @@ export function CourseAttendance({
           .select(ATTENDANCE_SESSION_SELECT)
           .eq("course_id", courseId)
           .order("class_date", { ascending: false })
+          .order("slot_no", { ascending: true })
       : { data: [] as AttendanceSession[], error: null };
 
     if (attendanceResult.error) {
@@ -178,9 +234,46 @@ export function CourseAttendance({
   useEffect(() => {
     if (!isLecturer) return;
 
+    if (sessionsForSelectedDate.length === 0) {
+      setSelectedSessionId(null);
+      return;
+    }
+
+    if (
+      selectedSessionId &&
+      sessionsForSelectedDate.some((session) => session.id === selectedSessionId)
+    ) {
+      return;
+    }
+
+    const now = Date.now();
+    const activeSession = sessionsForSelectedDate.find(
+      (session) =>
+        session.status === "open" &&
+        new Date(session.starts_at).getTime() <= now &&
+        new Date(session.ends_at).getTime() > now,
+    );
+    const upcomingSession = sessionsForSelectedDate.find(
+      (session) =>
+        session.status === "open" &&
+        new Date(session.starts_at).getTime() > now,
+    );
+
+    setSelectedSessionId(
+      (activeSession || upcomingSession || sessionsForSelectedDate[0]).id,
+    );
+  }, [isLecturer, selectedSessionId, sessionsForSelectedDate]);
+
+  useEffect(() => {
+    if (!isLecturer) return;
+
     const recordsForDate = new Map(
       records
-        .filter((record) => record.class_date === selectedDate)
+        .filter((record) =>
+          selectedSession
+            ? record.session_id === selectedSession.id
+            : record.class_date === selectedDate && record.session_id == null,
+        )
         .map((record) => [record.student_id, getRecordStatus(record)])
     );
 
@@ -194,7 +287,7 @@ export function CourseAttendance({
     );
     setDirtyStudentIds(new Set());
     setErrorMessage("");
-  }, [isLecturer, records, selectedDate, sortedStudents]);
+  }, [isLecturer, records, selectedDate, selectedSession, sortedStudents]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -216,21 +309,45 @@ export function CourseAttendance({
     () =>
       new Map(
         records
-          .filter((record) => record.class_date === selectedDate)
+          .filter((record) =>
+            selectedSession
+              ? record.session_id === selectedSession.id
+              : record.class_date === selectedDate && record.session_id == null,
+          )
           .map((record) => [record.student_id, record])
       ),
-    [records, selectedDate]
+    [records, selectedDate, selectedSession]
   );
 
   const sessionSummaries = useMemo(() => {
     const grouped = new Map<
       string,
-      { date: string; present: number; absent: number; total: number }
+      {
+        date: string;
+        slots: number;
+        present: number;
+        absent: number;
+        total: number;
+      }
     >();
+
+    sessions.forEach((session) => {
+      const summary = grouped.get(session.class_date) || {
+        date: session.class_date,
+        slots: 0,
+        present: 0,
+        absent: 0,
+        total: 0,
+      };
+
+      summary.slots += 1;
+      grouped.set(session.class_date, summary);
+    });
 
     records.forEach((record) => {
       const summary = grouped.get(record.class_date) || {
         date: record.class_date,
+        slots: 0,
         present: 0,
         absent: 0,
         total: 0,
@@ -246,7 +363,7 @@ export function CourseAttendance({
     return Array.from(grouped.values()).sort((a, b) =>
       b.date.localeCompare(a.date)
     );
-  }, [records]);
+  }, [records, sessions]);
 
   const studentSummary = useMemo(() => {
     const statuses = records.map(getRecordStatus);
@@ -333,43 +450,266 @@ export function CourseAttendance({
     setErrorMessage("");
     setSuccessMessage("");
 
-    const startsAt = new Date();
-    const endsAt = new Date(
-      startsAt.getTime() + Number(sessionDuration) * 60_000
-    );
-    const sessionData = {
-      check_in_code: generateCheckInCode(),
-      status: "open",
-      starts_at: startsAt.toISOString(),
-      ends_at: endsAt.toISOString(),
-      closed_at: null,
-      created_by: userId,
-      updated_at: startsAt.toISOString(),
-    };
+    const now = new Date();
+    const checkInWindowMinutes = Number(sessionDuration);
 
-    const result = selectedSession
-      ? await supabase
-          .from("attendance_sessions")
-          .update(sessionData)
-          .eq("id", selectedSession.id)
-      : await supabase.from("attendance_sessions").insert({
-          ...sessionData,
-          course_id: courseId,
-          class_date: selectedDate,
-        });
-
-    if (result.error) {
-      setErrorMessage(`Failed to start check-in: ${result.error.message}`);
-    } else {
-      setSuccessMessage(
-        `Student check-in is open for ${sessionDuration} minutes.`
+    if (selectedSession) {
+      const startsAt = now;
+      const endsAt = new Date(
+        startsAt.getTime() + checkInWindowMinutes * 60_000
       );
+      const { error } = await supabase
+        .from("attendance_sessions")
+        .update({
+          check_in_code: generateCheckInCode(),
+          status: "open",
+          starts_at: startsAt.toISOString(),
+          ends_at: endsAt.toISOString(),
+          check_in_window_minutes: checkInWindowMinutes,
+          closed_at: null,
+          updated_at: startsAt.toISOString(),
+        })
+        .eq("id", selectedSession.id);
+
+      if (error) {
+        setErrorMessage(`Failed to start check-in: ${error.message}`);
+      } else {
+        setSuccessMessage(
+          `${formatSessionSlotLabel(selectedSession)} check-in is open for ${sessionDuration} minutes.`
+        );
+        setStatusFilter("unmarked");
+        setClock(Date.now());
+        await fetchAttendance(false);
+      }
+
+      setIsManagingSession(false);
+      return;
+    }
+
+    const classDurationHours = Number(classHours);
+    const classStartsAt = new Date(`${selectedDate}T${classStartTime}:00`);
+    const classEndsAt = new Date(
+      classStartsAt.getTime() + classDurationHours * 60 * 60_000
+    );
+
+    const { data: meeting, error: meetingError } = await supabase
+      .from("attendance_class_meetings")
+      .insert({
+        course_id: courseId,
+        class_date: selectedDate,
+        starts_at: classStartsAt.toISOString(),
+        ends_at: classEndsAt.toISOString(),
+        slot_minutes: 60,
+        total_slots: classDurationHours,
+        created_by: userId,
+      })
+      .select("id")
+      .single();
+
+    if (meetingError || !meeting) {
+      setErrorMessage(
+        `Failed to create class meeting: ${
+          meetingError?.message || "No meeting was returned."
+        }`
+      );
+      setIsManagingSession(false);
+      return;
+    }
+
+    const hourlySessions = Array.from(
+      { length: classDurationHours },
+      (_, index) => {
+        const slotStart = new Date(
+          classStartsAt.getTime() + index * 60 * 60_000
+        );
+        const slotEnd = new Date(
+          slotStart.getTime() + checkInWindowMinutes * 60_000
+        );
+
+        return {
+          course_id: courseId,
+          class_meeting_id: meeting.id,
+          class_date: selectedDate,
+          slot_no: index + 1,
+          slot_label: `Hour ${index + 1}`,
+          check_in_code: generateCheckInCode(),
+          status: "open",
+          starts_at: slotStart.toISOString(),
+          ends_at: slotEnd.toISOString(),
+          check_in_window_minutes: checkInWindowMinutes,
+          closed_at: null,
+          created_by: userId,
+          updated_at: now.toISOString(),
+        };
+      }
+    );
+
+    const { data, error } = await supabase
+      .from("attendance_sessions")
+      .insert(hourlySessions)
+      .select(ATTENDANCE_SESSION_SELECT);
+
+    if (error) {
+      await supabase
+        .from("attendance_class_meetings")
+        .delete()
+        .eq("id", meeting.id);
+      setErrorMessage(`Failed to start check-in: ${error.message}`);
+    } else {
+      const createdSessions = (data || []) as AttendanceSession[];
+      setSuccessMessage(
+        `Created ${classDurationHours} hourly check-in slot${
+          classDurationHours === 1 ? "" : "s"
+        }. Select each hour to show its code.`
+      );
+      setSelectedSessionId(createdSessions[0]?.id || null);
       setStatusFilter("unmarked");
       setClock(Date.now());
       await fetchAttendance(false);
     }
 
     setIsManagingSession(false);
+  };
+
+  const addMissingHourlySlots = async () => {
+    if (
+      !userId ||
+      !canOpenCheckIn ||
+      sessionsForSelectedDate.length === 0 ||
+      missingSlotNumbers.length === 0
+    ) {
+      return;
+    }
+
+    setIsManagingSession(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const sortedSessions = [...sessionsForSelectedDate].sort((left, right) => {
+      const slotSort = (left.slot_no || 1) - (right.slot_no || 1);
+      if (slotSort !== 0) return slotSort;
+      return left.starts_at.localeCompare(right.starts_at);
+    });
+    const firstSession = sortedSessions[0];
+    const firstSlotNo = firstSession.slot_no || 1;
+    const classStartsAt = new Date(
+      new Date(firstSession.starts_at).getTime() -
+        (firstSlotNo - 1) * 60 * 60_000,
+    );
+    const checkInWindowMinutes =
+      Number(sessionDuration) ||
+      firstSession.check_in_window_minutes ||
+      15;
+    const targetSlots = Number(classHours);
+    const now = new Date();
+
+    const newSessions = missingSlotNumbers.map((slotNo) => {
+      const slotStart = new Date(
+        classStartsAt.getTime() + (slotNo - 1) * 60 * 60_000,
+      );
+      const slotEnd = new Date(
+        slotStart.getTime() + checkInWindowMinutes * 60_000,
+      );
+
+      return {
+        course_id: courseId,
+        class_meeting_id: firstSession.class_meeting_id,
+        class_date: selectedDate,
+        slot_no: slotNo,
+        slot_label: `Hour ${slotNo}`,
+        check_in_code: generateCheckInCode(),
+        status: "open",
+        starts_at: slotStart.toISOString(),
+        ends_at: slotEnd.toISOString(),
+        check_in_window_minutes: checkInWindowMinutes,
+        closed_at: null,
+        created_by: userId,
+        updated_at: now.toISOString(),
+      };
+    });
+
+    const { data, error } = await supabase
+      .from("attendance_sessions")
+      .insert(newSessions)
+      .select(ATTENDANCE_SESSION_SELECT);
+
+    if (error) {
+      setErrorMessage(`Failed to add hourly slots: ${error.message}`);
+      setIsManagingSession(false);
+      return;
+    }
+
+    if (firstSession.class_meeting_id) {
+      const classEndsAt = new Date(
+        classStartsAt.getTime() + targetSlots * 60 * 60_000,
+      );
+      const { error: meetingError } = await supabase
+        .from("attendance_class_meetings")
+        .update({
+          starts_at: classStartsAt.toISOString(),
+          ends_at: classEndsAt.toISOString(),
+          total_slots: targetSlots,
+          updated_at: now.toISOString(),
+        })
+        .eq("id", firstSession.class_meeting_id);
+
+      if (meetingError) {
+        setErrorMessage(
+          `Hourly slots were added, but the class summary could not be updated: ${meetingError.message}`,
+        );
+      }
+    }
+
+    const createdSessions = (data || []) as AttendanceSession[];
+    setSelectedSessionId(createdSessions[0]?.id || selectedSession?.id || null);
+    setSuccessMessage(
+      `Added ${createdSessions.length} missing hourly slot${
+        createdSessions.length === 1 ? "" : "s"
+      }.`,
+    );
+    await fetchAttendance(false);
+    setIsManagingSession(false);
+  };
+
+  const markMissingStudentsAbsentForSession = async (
+    session: AttendanceSession,
+    markedAt: string
+  ) => {
+    if (!userId) return { count: 0, error: null as Error | null };
+
+    const existingStudentIds = new Set(
+      records
+        .filter((record) => record.session_id === session.id)
+        .map((record) => record.student_id)
+    );
+    const absentRows = sortedStudents
+      .filter((student) => !existingStudentIds.has(student.id))
+      .map((student) => ({
+        course_id: courseId,
+        student_id: student.id,
+        class_date: session.class_date,
+        marked_present: false,
+        marked_at: markedAt,
+        marked_by: userId,
+        class_meeting_id: session.class_meeting_id,
+        session_id: session.id,
+        status: "absent",
+        check_in_at: null,
+        check_in_method: "manual",
+      }));
+
+    if (absentRows.length === 0) {
+      return { count: 0, error: null };
+    }
+
+    const { error } = await supabase.from("attendance").upsert(absentRows, {
+      onConflict: "session_id,student_id",
+    });
+
+    return {
+      count: absentRows.length,
+      error: error ? new Error(error.message) : null,
+    };
   };
 
   const closeCheckInSession = async () => {
@@ -391,9 +731,26 @@ export function CourseAttendance({
 
     if (error) {
       setErrorMessage(`Failed to close check-in: ${error.message}`);
+      setIsManagingSession(false);
+      return;
+    }
+
+    const absentResult = await markMissingStudentsAbsentForSession(
+      selectedSession,
+      now
+    );
+
+    if (absentResult.error) {
+      setErrorMessage(
+        `Check-in closed, but failed to mark absentees: ${absentResult.error.message}`
+      );
     } else {
       setSuccessMessage(
-        "Student check-in closed. Review the remaining students below."
+        `${formatSessionSlotLabel(
+          selectedSession
+        )} closed. ${absentResult.count} missing student${
+          absentResult.count === 1 ? "" : "s"
+        } marked absent for this hour.`
       );
       setStatusFilter("unmarked");
       await fetchAttendance(false);
@@ -442,34 +799,6 @@ export function CourseAttendance({
     setIsCorrectingDate(false);
   };
 
-  const deleteClassRecord = async () => {
-    if (!selectedSession || sessionIsOpen) return;
-
-    setIsDeletingClass(true);
-    setErrorMessage("");
-    setSuccessMessage("");
-
-    const { data, error } = await supabase.rpc("delete_attendance_class", {
-      p_session_id: selectedSession.id,
-    });
-    const result = data as
-      | { success?: boolean; message?: string }
-      | null;
-
-    if (error) {
-      setErrorMessage(`Failed to delete class record: ${error.message}`);
-    } else if (!result?.success) {
-      setErrorMessage(result?.message || "Failed to delete class record.");
-    } else {
-      setDeleteConfirmationOpen(false);
-      setSelectedDate(today);
-      setSuccessMessage(result.message || "Class attendance record deleted.");
-      await fetchAttendance(false);
-    }
-
-    setIsDeletingClass(false);
-  };
-
   const copyCheckInCode = async () => {
     if (!selectedSession) return;
 
@@ -483,6 +812,10 @@ export function CourseAttendance({
 
   const handleSaveAttendance = async () => {
     if (!userId || dirtyStudentIds.size === 0) return;
+    if (!selectedSession) {
+      setErrorMessage("Create or select an hourly check-in slot before saving attendance.");
+      return;
+    }
 
     setIsSaving(true);
     setErrorMessage("");
@@ -490,7 +823,7 @@ export function CourseAttendance({
 
     const existingRecords = new Map(
       records
-        .filter((record) => record.class_date === selectedDate)
+        .filter((record) => record.session_id === selectedSession.id)
         .map((record) => [record.student_id, record])
     );
 
@@ -503,11 +836,12 @@ export function CourseAttendance({
         return {
           course_id: courseId,
           student_id: studentId,
-          class_date: selectedDate,
+          class_date: selectedSession.class_date,
           marked_present: receivesAttendanceCredit(status),
           marked_by: userId,
           marked_at: new Date().toISOString(),
-          session_id: selectedSession?.id || existingRecord?.session_id || null,
+          class_meeting_id: selectedSession.class_meeting_id,
+          session_id: selectedSession.id,
           status,
           check_in_at: existingRecord?.check_in_at || null,
           check_in_method: existingRecord?.check_in_method || "manual",
@@ -518,14 +852,16 @@ export function CourseAttendance({
     const { error } = await supabase
       .from("attendance")
       .upsert(attendanceRows, {
-        onConflict: "course_id,student_id,class_date",
+        onConflict: "session_id,student_id",
       });
 
     if (error) {
       setErrorMessage(`Failed to save attendance: ${error.message}`);
     } else {
       setSuccessMessage(
-        `Attendance saved for ${formatClassDate(selectedDate)}.`
+        `Attendance saved for ${formatClassDate(
+          selectedSession.class_date
+        )} ${formatSessionSlotLabel(selectedSession)}.`
       );
       await fetchAttendance(false);
     }
@@ -560,6 +896,140 @@ export function CourseAttendance({
     }
 
     setIsCheckingIn(false);
+  };
+
+  const fetchAttendanceRecordsForExport = async () => {
+    const allRecords: AttendanceRecord[] = [];
+
+    for (let from = 0; ; from += EXPORT_PAGE_SIZE) {
+      const { data, error } = await supabase
+        .from("attendance")
+        .select(ATTENDANCE_SELECT)
+        .eq("course_id", courseId)
+        .order("class_date", { ascending: true })
+        .range(from, from + EXPORT_PAGE_SIZE - 1);
+
+      if (error) throw new Error(error.message);
+
+      const page = (data || []) as AttendanceRecord[];
+      allRecords.push(...page);
+
+      if (page.length < EXPORT_PAGE_SIZE) break;
+    }
+
+    return allRecords;
+  };
+
+  const fetchAttendanceSessionsForExport = async () => {
+    const allSessions: AttendanceSession[] = [];
+
+    for (let from = 0; ; from += EXPORT_PAGE_SIZE) {
+      const { data, error } = await supabase
+        .from("attendance_sessions")
+        .select(ATTENDANCE_SESSION_SELECT)
+        .eq("course_id", courseId)
+        .order("class_date", { ascending: true })
+        .order("slot_no", { ascending: true })
+        .range(from, from + EXPORT_PAGE_SIZE - 1);
+
+      if (error) throw new Error(error.message);
+
+      const page = (data || []) as AttendanceSession[];
+      allSessions.push(...page);
+
+      if (page.length < EXPORT_PAGE_SIZE) break;
+    }
+
+    return allSessions;
+  };
+
+  const handleExportAttendance = async () => {
+    if (!isLecturer || sortedStudents.length === 0) return;
+
+    setIsExportingAttendance(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const currentSessionIds = new Set(
+        (selectedSession ? [selectedSession] : sessionsForSelectedDate).map(
+          (session) => session.id,
+        ),
+      );
+      const currentRecords = records.filter((record) =>
+        selectedSession
+          ? record.session_id === selectedSession.id
+          : currentSessionIds.size > 0
+            ? record.session_id != null && currentSessionIds.has(record.session_id)
+            : record.class_date === selectedDate && record.session_id == null,
+      );
+      const currentSessions = selectedSession
+        ? [selectedSession]
+        : sessionsForSelectedDate;
+
+      await exportAttendanceWorkbook({
+        courseCode,
+        courseName,
+        courseId,
+        reportType: selectedSession
+          ? `Current Class - ${formatClassDate(
+              selectedSession.class_date,
+            )} ${formatSessionSlotLabel(selectedSession)}`
+          : `Current Class - ${formatClassDate(selectedDate)}`,
+        fileSuffix: selectedSession
+          ? `attendance-${selectedSession.class_date}-${formatSessionSlotLabel(
+              selectedSession,
+            )}`
+          : `attendance-${selectedDate}`,
+        students: sortedStudents,
+        records: currentRecords,
+        sessions: currentSessions,
+      });
+      setSuccessMessage("Attendance Excel file exported.");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? `Failed to export attendance: ${error.message}`
+          : "Failed to export attendance.",
+      );
+    } finally {
+      setIsExportingAttendance(false);
+    }
+  };
+
+  const handleExportAttendanceSummary = async () => {
+    if (!isLecturer || sortedStudents.length === 0) return;
+
+    setIsExportingAttendanceSummary(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const [allRecords, allSessions] = await Promise.all([
+        fetchAttendanceRecordsForExport(),
+        fetchAttendanceSessionsForExport(),
+      ]);
+
+      await exportAttendanceWorkbook({
+        courseCode,
+        courseName,
+        courseId,
+        reportType: "Full Course Attendance Summary",
+        fileSuffix: "attendance-summary",
+        students: sortedStudents,
+        records: allRecords,
+        sessions: allSessions,
+      });
+      setSuccessMessage("Attendance summary Excel file exported.");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? `Failed to export attendance summary: ${error.message}`
+          : "Failed to export attendance summary.",
+      );
+    } finally {
+      setIsExportingAttendanceSummary(false);
+    }
   };
 
   if (isLoading) {
@@ -598,21 +1068,43 @@ export function CourseAttendance({
         <TeacherAttendanceControls
           selectedDate={selectedDate}
           today={today}
+          classHours={classHours}
+          classStartTime={classStartTime}
           sessionDuration={sessionDuration}
+          sessionsForDate={sessionsForSelectedDate}
+          selectedSessionId={selectedSession?.id || null}
           selectedSession={selectedSession}
           sessionIsOpen={sessionIsOpen}
+          sessionIsUpcoming={sessionIsUpcoming}
           sessionHasExpired={sessionHasExpired}
           canOpenCheckIn={canOpenCheckIn}
           isManagingSession={isManagingSession}
+          isExportingAttendance={isExportingAttendance}
+          isExportingAttendanceSummary={isExportingAttendanceSummary}
+          canExportAttendance={sortedStudents.length > 0}
+          canExportAttendanceSummary={sortedStudents.length > 0}
+          missingSlotCount={missingSlotNumbers.length}
+          canAddMissingSlots={canOpenCheckIn && missingSlotNumbers.length > 0}
           onSelectedDateChange={(value) => {
             setSelectedDate(value);
+            setSelectedSessionId(null);
             setSuccessMessage("");
           }}
+          onClassHoursChange={setClassHours}
+          onClassStartTimeChange={setClassStartTime}
           onSessionDurationChange={setSessionDuration}
+          onSelectedSessionChange={(value) => {
+            setSelectedSessionId(value);
+            setSuccessMessage("");
+          }}
+          onExportAttendance={() => void handleExportAttendance()}
+          onExportAttendanceSummary={() =>
+            void handleExportAttendanceSummary()
+          }
+          onAddMissingSlots={() => void addMissingHourlySlots()}
           onCopyCode={copyCheckInCode}
           onCloseSession={() => void closeCheckInSession()}
           onCorrectDate={openDateCorrection}
-          onDeleteClass={() => setDeleteConfirmationOpen(true)}
           onStartSession={() => setStartConfirmationOpen(true)}
         />
 
@@ -669,18 +1161,16 @@ export function CourseAttendance({
       <TeacherAttendanceDialogs
         selectedDate={selectedDate}
         today={today}
+        classHours={classHours}
         sessionDuration={sessionDuration}
         selectedSession={selectedSession}
         startOpen={startConfirmationOpen}
         correctionOpen={correctionDialogOpen}
-        deleteOpen={deleteConfirmationOpen}
         correctedDate={correctedDate}
         errorMessage={errorMessage}
         isCorrectingDate={isCorrectingDate}
-        isDeletingClass={isDeletingClass}
         onStartOpenChange={setStartConfirmationOpen}
         onCorrectionOpenChange={setCorrectionDialogOpen}
-        onDeleteOpenChange={setDeleteConfirmationOpen}
         onCorrectedDateChange={(value) => {
           setCorrectedDate(value);
           setErrorMessage("");
@@ -690,7 +1180,6 @@ export function CourseAttendance({
           void startCheckInSession();
         }}
         onCorrectDate={() => void correctClassDate()}
-        onDeleteClass={() => void deleteClassRecord()}
       />
     </>
   );

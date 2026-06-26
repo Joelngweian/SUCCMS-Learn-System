@@ -9,6 +9,8 @@ import { ProfileReportDialog } from "./profile/ProfileReportDialog";
 import { useUserProfileData } from "./profile/useUserProfileData";
 import { Button } from "./ui/button";
 import { Flag, Loader2, Pencil, Save } from "lucide-react";
+import { Stories } from "./Stories";
+import { useActiveStoryStatus } from "./stories/useActiveStoryStatus";
 
 const getErrorCode = (error: unknown) => {
   if (!error || typeof error !== "object" || !("code" in error)) return null;
@@ -23,7 +25,7 @@ const revokeBlobUrl = (value: string | null) => {
 export const UserProfile = () => {
   const { userId: routeUserId } = useParams();
   const navigate = useNavigate();
-  const { user: me, refreshProfile } = useAuth();
+  const { user: me, profile: currentUserProfile, refreshProfile } = useAuth();
   const viewId = routeUserId || me?.id || null;
   const isOwnProfile = me?.id === viewId;
   const {
@@ -60,6 +62,8 @@ export const UserProfile = () => {
   const [deleteAvatar, setDeleteAvatar] = useState(false);
   const [deleteCover, setDeleteCover] = useState(false);
   const [imageHash, setImageHash] = useState(Date.now());
+  const [storyViewerOpen, setStoryViewerOpen] = useState(false);
+  const activeStoryUserIds = useActiveStoryStatus([viewId]);
 
   useEffect(() => {
     if (!profileData || isEditing) return;
@@ -364,6 +368,8 @@ export const UserProfile = () => {
           onCoverChange={handleCoverSelect}
           onAvatarRemove={handleRemoveAvatar}
           onCoverRemove={handleRemoveCover}
+          hasActiveStory={Boolean(viewId && activeStoryUserIds.has(viewId))}
+          onStoryClick={() => setStoryViewerOpen(true)}
         />
 
         <div className="flex items-center justify-between gap-2 py-4">
@@ -452,6 +458,35 @@ export const UserProfile = () => {
           onReasonChange={setReportReason}
           onDetailsChange={setReportDetails}
           onSubmit={handleReport}
+        />
+
+        <Stories
+          currentUserName={currentUserProfile?.full_name || "Your Story"}
+          currentUserInitials={(
+            currentUserProfile?.full_name ||
+            me?.email ||
+            "YS"
+          )
+            .split(" ")
+            .map(part => part[0])
+            .join("")
+            .slice(0, 2)
+            .toUpperCase()}
+          currentUserAvatar={currentUserProfile?.avatar_url}
+          currentUserRole={currentUserProfile?.role}
+          mode="viewer"
+          targetUser={{
+            id: profileData.id,
+            name: profileData.full_name || profileData.email || "User",
+            avatarUrl: profileData.avatar_url,
+            initials:
+              (profileData.full_name || profileData.email || "U")
+                .charAt(0)
+                .toUpperCase(),
+            role: profileData.role,
+          }}
+          open={storyViewerOpen}
+          onOpenChange={setStoryViewerOpen}
         />
       </div>
     </div>

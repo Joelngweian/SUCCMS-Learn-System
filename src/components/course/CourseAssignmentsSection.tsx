@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { CourseAssignmentDetailDialog } from "./CourseAssignmentDetailDialog";
 import { CourseAssignmentsTab } from "./CourseAssignmentsTab";
-import { CreateAssignmentDialog } from "./CourseDialogs";
+import { CreateAssessmentDialog } from "./CourseDialogs";
 import { useCourseAssignments } from "./useCourseAssignments";
 import { useCoursePeople } from "./useCoursePeople";
 
@@ -45,12 +45,12 @@ export function CourseAssignmentsSection({
         isLecturer={isLecturer}
         assignments={assignmentItems}
         mySubmissions={assignments.mySubmissions}
-        onCreateAssignment={() => assignments.setShowNewAssignmentDialog(true)}
+        onCreateAssessment={() => assignments.setShowNewAssignmentDialog(true)}
         onDeleteAssignment={assignments.deleteAssignment}
         onSelectAssignment={selectAssignment}
       />
 
-      <CreateAssignmentDialog
+      <CreateAssessmentDialog
         open={assignments.showNewAssignmentDialog}
         assignment={assignments.newAssign}
         rubricFiles={assignments.newRubricFiles}
@@ -85,6 +85,7 @@ export function CourseAssignmentsSection({
         isAiGrading={assignments.isAiGrading}
         aiGradingError={assignments.aiGradingError}
         aiGradeDetails={assignments.aiGradeDetails}
+        rubricGrades={assignments.rubricGrades}
         currentGrade={assignments.currentGrade}
         currentFeedback={assignments.currentFeedback}
         onClose={() => assignments.setSelectedAssignment(null)}
@@ -96,6 +97,8 @@ export function CourseAssignmentsSection({
         onTurnIn={() => void assignments.turnIn()}
         onUndoTurnIn={() => void assignments.undoTurnIn()}
         onAiGrade={() => void assignments.aiAutoGrade()}
+        onRubricAdjustmentChange={assignments.setRubricGradeAdjustment}
+        onResetRubricAdjustments={assignments.resetRubricGradeAdjustments}
         onGradeChange={assignments.setCurrentGrade}
         onFeedbackChange={assignments.setCurrentFeedback}
         onSaveGrade={() => void assignments.saveGrade()}

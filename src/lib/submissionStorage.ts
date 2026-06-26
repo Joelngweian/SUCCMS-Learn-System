@@ -11,6 +11,13 @@ export type SubmissionFileReference = {
   url?: string;
 };
 
+const WORD_DOCUMENT_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+export const isWordSubmissionFile = (file: SubmissionFileReference) =>
+  file.type === WORD_DOCUMENT_MIME ||
+  file.name.trim().toLocaleLowerCase().endsWith(".docx");
+
 export async function resolveSubmissionFileUrl(
   file: SubmissionFileReference,
 ) {

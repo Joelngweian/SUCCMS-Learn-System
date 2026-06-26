@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "./ui/badge";
@@ -11,17 +12,66 @@ import {
 } from "lucide-react";
 import { AssignmentCard } from "./assignments/AssignmentCard";
 import { AssignmentEmptyState } from "./assignments/AssignmentEmptyState";
+import {
+  AssessmentFilters,
+  type AssessmentTypeFilter,
+} from "./assignments/AssessmentFilters";
 import { useAssignmentsData } from "./assignments/useAssignmentsData";
+import { matchesAssessmentFilters } from "@/lib/assessmentTypes";
 
 export function Assignments() {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
   const isLecturer = profile?.role === "lecturer";
+  const [typeFilter, setTypeFilter] =
+    useState<AssessmentTypeFilter>("all");
   const { loading, studentBuckets, lecturerBuckets } = useAssignmentsData({
     isLecturer,
     profileId: profile?.id,
     userId: user?.id,
   });
+
+  const filterItems = <T extends typeof lecturerBuckets.all>(
+    items: T,
+  ) =>
+    items.filter(item =>
+      matchesAssessmentFilters({
+        assessmentType: item.assessment_type,
+        typeFilter,
+      }),
+    );
+
+  const filteredLecturerBuckets = useMemo(
+    () => ({
+      all: filterItems(lecturerBuckets.all),
+      needsGrading: filterItems(lecturerBuckets.needsGrading),
+      graded: filterItems(lecturerBuckets.graded),
+    }),
+    // filterItems is derived entirely from these values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lecturerBuckets, typeFilter],
+  );
+  const filteredStudentBuckets = useMemo(
+    () => ({
+      upcoming: filterItems(studentBuckets.upcoming),
+      pastDue: filterItems(studentBuckets.pastDue),
+      completed: filterItems(studentBuckets.completed),
+    }),
+    // filterItems is derived entirely from these values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [studentBuckets, typeFilter],
+  );
+  const totalAssessmentCount = isLecturer
+    ? lecturerBuckets.all.length
+    : studentBuckets.upcoming.length
+      + studentBuckets.pastDue.length
+      + studentBuckets.completed.length;
+  const filteredAssessmentCount = isLecturer
+    ? filteredLecturerBuckets.all.length
+    : filteredStudentBuckets.upcoming.length
+      + filteredStudentBuckets.pastDue.length
+      + filteredStudentBuckets.completed.length;
+  const filterActive = typeFilter !== "all";
 
   const openAssignment = (courseId: string, assignmentId: string) => {
     navigate(`/courses?courseId=${courseId}&assignmentId=${assignmentId}`);
@@ -41,18 +91,18 @@ export function Assignments() {
         <div className="flex items-end justify-between">
           <div>
             <h1 className="text-3xl font-extrabold tracking-tight text-foreground">
-              Assignments
+              Assessments
             </h1>
             <p className="mt-2 text-lg text-muted-foreground">
               {isLecturer
-                ? "Manage all course assignments."
-                : "Track your upcoming tasks."}
+                ? "Manage tutorials, assignments and projects across your courses."
+                : "Track your upcoming assessments."}
             </p>
           </div>
           {!isLecturer && studentBuckets.crucialCount > 0 && (
             <div className="hidden animate-pulse items-center gap-2 rounded-full bg-orange-100 px-4 py-2 text-sm font-bold text-orange-800 dark:bg-orange-900/50 dark:text-orange-200 sm:flex">
               <AlertCircle className="h-4 w-4" />
-              {studentBuckets.crucialCount} assignments due soon!
+              {studentBuckets.crucialCount} assessments due soon!
             </div>
           )}
         </div>
@@ -62,7 +112,7 @@ export function Assignments() {
           className="w-full"
         >
           <TabsList
-            className="mb-8 grid h-14 w-full grid-cols-3 rounded-xl border border-border bg-card p-1 shadow-sm"
+            className="mb-4 grid h-14 w-full grid-cols-3 rounded-xl border border-border bg-card p-1 shadow-sm"
           >
             {isLecturer ? (
               <>
@@ -71,9 +121,9 @@ export function Assignments() {
                   className="rounded-lg text-base font-semibold text-muted-foreground transition-all hover:text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
                 >
                   Needs Grading
-                  {lecturerBuckets.needsGrading.length > 0 && (
+                  {filteredLecturerBuckets.needsGrading.length > 0 && (
                     <Badge className="ml-2 border-0 bg-yellow-100 text-yellow-800 hover:bg-yellow-200">
-                      {lecturerBuckets.needsGrading.length}
+                      {filteredLecturerBuckets.needsGrading.length}
                     </Badge>
                   )}
                 </TabsTrigger>
@@ -82,9 +132,9 @@ export function Assignments() {
                   className="rounded-lg text-base font-semibold text-muted-foreground transition-all hover:text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
                 >
                   Graded
-                  {lecturerBuckets.graded.length > 0 && (
+                  {filteredLecturerBuckets.graded.length > 0 && (
                     <Badge className="ml-2 border-0 bg-green-100 text-green-700 hover:bg-green-200">
-                      {lecturerBuckets.graded.length}
+                      {filteredLecturerBuckets.graded.length}
                     </Badge>
                   )}
                 </TabsTrigger>
@@ -93,9 +143,9 @@ export function Assignments() {
                   className="rounded-lg text-base font-semibold text-muted-foreground transition-all hover:text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
                 >
                   All
-                  {lecturerBuckets.all.length > 0 && (
+                  {filteredLecturerBuckets.all.length > 0 && (
                     <Badge className="ml-2 border-0 bg-muted text-foreground">
-                      {lecturerBuckets.all.length}
+                      {filteredLecturerBuckets.all.length}
                     </Badge>
                   )}
                 </TabsTrigger>
@@ -107,9 +157,9 @@ export function Assignments() {
                   className="rounded-lg text-base font-semibold text-muted-foreground transition-all hover:text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
                 >
                   Upcoming
-                  {studentBuckets.upcoming.length > 0 && (
+                  {filteredStudentBuckets.upcoming.length > 0 && (
                     <Badge className="ml-2 border-0 bg-muted text-foreground">
-                      {studentBuckets.upcoming.length}
+                      {filteredStudentBuckets.upcoming.length}
                     </Badge>
                   )}
                 </TabsTrigger>
@@ -118,9 +168,9 @@ export function Assignments() {
                   className="rounded-lg text-base font-semibold text-muted-foreground transition-all hover:text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
                 >
                   Past Due
-                  {studentBuckets.pastDue.length > 0 && (
+                  {filteredStudentBuckets.pastDue.length > 0 && (
                     <Badge className="ml-2 border-0 bg-red-100 text-red-700 hover:bg-red-200">
-                      {studentBuckets.pastDue.length}
+                      {filteredStudentBuckets.pastDue.length}
                     </Badge>
                   )}
                 </TabsTrigger>
@@ -129,9 +179,9 @@ export function Assignments() {
                   className="rounded-lg text-base font-semibold text-muted-foreground transition-all hover:text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
                 >
                   Completed
-                  {studentBuckets.completed.length > 0 && (
+                  {filteredStudentBuckets.completed.length > 0 && (
                     <Badge className="ml-2 border-0 bg-green-100 text-green-700 hover:bg-green-200">
-                      {studentBuckets.completed.length}
+                      {filteredStudentBuckets.completed.length}
                     </Badge>
                   )}
                 </TabsTrigger>
@@ -139,17 +189,34 @@ export function Assignments() {
             )}
           </TabsList>
 
+          <div className="mb-8">
+            <AssessmentFilters
+              typeFilter={typeFilter}
+              resultCount={filteredAssessmentCount}
+              totalCount={totalAssessmentCount}
+              onTypeChange={setTypeFilter}
+            />
+          </div>
+
           {isLecturer ? (
             <>
               <TabsContent value="needs-grading" className="space-y-4">
-                {lecturerBuckets.needsGrading.length === 0 ? (
+                {filteredLecturerBuckets.needsGrading.length === 0 ? (
                   <AssignmentEmptyState
                     icon={<AlertCircle className="h-10 w-10 text-yellow-500" />}
-                    title="No ungraded submissions"
-                    description="You're all caught up."
+                    title={
+                      filterActive
+                        ? "No matching assessments"
+                        : "No ungraded submissions"
+                    }
+                    description={
+                      filterActive
+                        ? "Try another assessment type."
+                        : "You're all caught up."
+                    }
                   />
                 ) : (
-                  lecturerBuckets.needsGrading.map(item => (
+                  filteredLecturerBuckets.needsGrading.map(item => (
                     <AssignmentCard
                       key={item.id}
                       item={item}
@@ -160,14 +227,22 @@ export function Assignments() {
                 )}
               </TabsContent>
               <TabsContent value="graded" className="space-y-4">
-                {lecturerBuckets.graded.length === 0 ? (
+                {filteredLecturerBuckets.graded.length === 0 ? (
                   <AssignmentEmptyState
                     icon={<CheckCircle className="h-10 w-10 text-green-500" />}
-                    title="No graded assignments yet"
-                    description="Once graded, they'll appear here."
+                    title={
+                      filterActive
+                        ? "No matching assessments"
+                        : "No graded assessments yet"
+                    }
+                    description={
+                      filterActive
+                        ? "Try another assessment type."
+                        : "Once graded, they'll appear here."
+                    }
                   />
                 ) : (
-                  lecturerBuckets.graded.map(item => (
+                  filteredLecturerBuckets.graded.map(item => (
                     <AssignmentCard
                       key={item.id}
                       item={item}
@@ -178,14 +253,22 @@ export function Assignments() {
                 )}
               </TabsContent>
               <TabsContent value="all" className="space-y-4">
-                {lecturerBuckets.all.length === 0 ? (
+                {filteredLecturerBuckets.all.length === 0 ? (
                   <AssignmentEmptyState
                     icon={<FileText className="h-10 w-10 text-muted-foreground" />}
-                    title="No assignments created"
-                    description="Create assignments in your course page."
+                    title={
+                      filterActive
+                        ? "No matching assessments"
+                        : "No assessments created"
+                    }
+                    description={
+                      filterActive
+                        ? "Try another assessment type."
+                        : "Create an assessment from the course page."
+                    }
                   />
                 ) : (
-                  lecturerBuckets.all.map(item => (
+                  filteredLecturerBuckets.all.map(item => (
                     <AssignmentCard
                       key={item.id}
                       item={item}
@@ -199,14 +282,22 @@ export function Assignments() {
           ) : (
             <>
               <TabsContent value="upcoming" className="space-y-4">
-                {studentBuckets.upcoming.length === 0 ? (
+                {filteredStudentBuckets.upcoming.length === 0 ? (
                   <AssignmentEmptyState
                     icon={<CheckCircle className="h-10 w-10 text-blue-500" />}
-                    title="All caught up!"
-                    description="No upcoming assignments."
+                    title={
+                      filterActive
+                        ? "No matching assessments"
+                        : "All caught up!"
+                    }
+                    description={
+                      filterActive
+                        ? "Try another assessment type."
+                        : "No upcoming assessments."
+                    }
                   />
                 ) : (
-                  studentBuckets.upcoming.map(item => (
+                  filteredStudentBuckets.upcoming.map(item => (
                     <AssignmentCard
                       key={item.id}
                       item={item}
@@ -217,14 +308,22 @@ export function Assignments() {
                 )}
               </TabsContent>
               <TabsContent value="past-due" className="space-y-4">
-                {studentBuckets.pastDue.length === 0 ? (
+                {filteredStudentBuckets.pastDue.length === 0 ? (
                   <AssignmentEmptyState
                     icon={<Clock className="h-10 w-10 text-green-500" />}
-                    title="No overdue work"
-                    description="You're doing great!"
+                    title={
+                      filterActive
+                        ? "No matching assessments"
+                        : "No overdue work"
+                    }
+                    description={
+                      filterActive
+                        ? "Try another assessment type."
+                        : "You're doing great!"
+                    }
                   />
                 ) : (
-                  studentBuckets.pastDue.map(item => (
+                  filteredStudentBuckets.pastDue.map(item => (
                     <AssignmentCard
                       key={item.id}
                       item={item}
@@ -235,14 +334,22 @@ export function Assignments() {
                 )}
               </TabsContent>
               <TabsContent value="completed" className="space-y-4">
-                {studentBuckets.completed.length === 0 ? (
+                {filteredStudentBuckets.completed.length === 0 ? (
                   <AssignmentEmptyState
                     icon={<FileText className="h-10 w-10 text-muted-foreground" />}
-                    title="No completed work"
-                    description="Submitted assignments appear here."
+                    title={
+                      filterActive
+                        ? "No matching assessments"
+                        : "No completed work"
+                    }
+                    description={
+                      filterActive
+                        ? "Try another assessment type."
+                        : "Submitted assessments appear here."
+                    }
                   />
                 ) : (
-                  studentBuckets.completed.map(item => (
+                  filteredStudentBuckets.completed.map(item => (
                     <AssignmentCard
                       key={item.id}
                       item={item}

@@ -21,16 +21,30 @@ import {
 } from "./ui/dialog";
 import type { StoryUser } from "./stories/storyTypes";
 import { useStoriesData } from "./stories/useStoriesData";
+import { StoryAvatarRing } from "./stories/StoryAvatarRing";
+import type { StoryTargetUser } from "./stories/storyRepository";
 
-export function Stories({ 
-  currentUserAvatar, 
-  currentUserName, 
-  currentUserInitials 
-}: { 
-  currentUserAvatar?: string, 
-  currentUserName: string, 
-  currentUserInitials: string 
-}) {
+interface StoriesProps {
+  currentUserAvatar?: string;
+  currentUserName: string;
+  currentUserInitials: string;
+  currentUserRole?: string;
+  mode?: "carousel" | "viewer";
+  targetUser?: StoryTargetUser | null;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function Stories({
+  currentUserAvatar,
+  currentUserName,
+  currentUserInitials,
+  currentUserRole = "student",
+  mode = "carousel",
+  targetUser = null,
+  open = false,
+  onOpenChange,
+}: StoriesProps) {
   const { user } = useAuth();
   const [selectedUser, setSelectedUser] = useState<StoryUser | null>(null);
   const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
@@ -50,6 +64,7 @@ export function Stories({
   const {
     deleteStory,
     isDeleting,
+    isLoading,
     isUploading,
     markAsViewed,
     storyUsers,
@@ -59,6 +74,9 @@ export function Stories({
     currentUserAvatar,
     currentUserInitials,
     currentUserId: user?.id,
+    currentUserRole,
+    scope: mode === "viewer" ? "user" : "network",
+    targetUser,
   });
 
   const handleStoryClick = (storyUser: StoryUser) => {
@@ -88,7 +106,80 @@ export function Stories({
       clearInterval(progressIntervalRef.current);
       progressIntervalRef.current = null;
     }
-  }, []);
+    onOpenChange?.(false);
+  }, [onOpenChange]);
+
+  const selectedUserId = selectedUser?.id;
+
+  useEffect(() => {
+    if (mode !== "viewer") return;
+    if (!open) {
+      setSelectedUser(null);
+      return;
+    }
+    if (selectedUserId && selectedUserId !== targetUser?.id) {
+      setSelectedUser(null);
+      return;
+    }
+    if (selectedUserId === targetUser?.id) return;
+
+    const targetStoryUser = storyUsers.find(
+      storyUser =>
+        storyUser.id === targetUser?.id &&
+        storyUser.hasActiveStories &&
+        storyUser.stories.length > 0,
+    );
+    if (!targetStoryUser) return;
+
+    setSelectedUser(current =>
+      current?.id === targetStoryUser.id ? current : targetStoryUser,
+    );
+    const firstUnviewedIndex = targetStoryUser.stories.findIndex(
+      story => !viewedStoryIds.has(story.id),
+    );
+    const storyIndex = firstUnviewedIndex >= 0 ? firstUnviewedIndex : 0;
+    setCurrentStoryIndex(storyIndex);
+    setProgress(0);
+    setImageLoading(true);
+    setIsPaused(false);
+    markAsViewed(targetStoryUser.stories[storyIndex].id);
+  }, [
+    markAsViewed,
+    mode,
+    open,
+    selectedUserId,
+    storyUsers,
+    targetUser?.id,
+    viewedStoryIds,
+  ]);
+
+  useEffect(() => {
+    if (
+      mode !== "viewer" ||
+      !open ||
+      isLoading ||
+      selectedUser ||
+      !targetUser
+    ) {
+      return;
+    }
+
+    const hasTargetStory = storyUsers.some(
+      storyUser =>
+        storyUser.id === targetUser.id &&
+        storyUser.hasActiveStories &&
+        storyUser.stories.length > 0,
+    );
+    if (!hasTargetStory) onOpenChange?.(false);
+  }, [
+    isLoading,
+    mode,
+    onOpenChange,
+    open,
+    selectedUser,
+    storyUsers,
+    targetUser,
+  ]);
 
   const nextStory = useCallback(() => {
     if (!selectedUser) return;
@@ -279,15 +370,11 @@ export function Stories({
   return (
     <div className="w-full">
       {/* Stories Carousel */}
+      {mode === "carousel" && (
       <div className="relative">
         <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide px-1">
           {storyUsers.map((user, index) => {
             const isMe = index === 0;
-            const ringColor = (isMe && !user.hasActiveStories) 
-                ? "bg-gray-200 dark:bg-zinc-800" 
-                : user.viewed 
-                    ? "bg-gray-300 dark:bg-zinc-700" 
-                    : "bg-gradient-to-tr from-blue-500 via-purple-500 to-orange-500";
 
             return (
               <div
@@ -296,16 +383,17 @@ export function Stories({
                 className="flex-shrink-0 flex flex-col items-center gap-2 group cursor-pointer"
               >
                 <div className="relative">
-                  <div className={`p-[3px] rounded-full transition-all ${ringColor}`}>
-                    <div className="bg-white dark:bg-black p-[2px] rounded-full">
-                      <Avatar className="h-16 w-16 border-2 border-white dark:border-black">
-                        <AvatarImage src={user.avatar_url} className="object-cover" />
-                        <AvatarFallback className="bg-blue-100 text-blue-700 font-bold">
-                          {user.initials}
-                        </AvatarFallback>
-                      </Avatar>
-                    </div>
-                  </div>
+                  <StoryAvatarRing
+                    active={user.hasActiveStories}
+                    viewed={user.viewed}
+                  >
+                    <Avatar className="h-16 w-16 border-2 border-background">
+                      <AvatarImage src={user.avatar_url} className="object-cover" />
+                      <AvatarFallback className="bg-blue-100 text-blue-700 font-bold">
+                        {user.initials}
+                      </AvatarFallback>
+                    </Avatar>
+                  </StoryAvatarRing>
 
                   {isMe && (
                     <div 
@@ -326,6 +414,7 @@ export function Stories({
           <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={uploadStory} />
         </div>
       </div>
+      )}
 
       {/* Story Viewer Modal - Using portal-like fixed positioning */}
       {selectedUser && currentStory && (
@@ -549,6 +638,12 @@ export function Stories({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {mode === "viewer" && open && !isLoading && !selectedUser && (
+        <div className="sr-only" role="status">
+          This story is no longer available.
         </div>
       )}
 

@@ -12,9 +12,13 @@ const CourseAttendance = lazy(() =>
 
 export function CourseAttendanceSection({
   courseId,
+  courseCode,
+  courseName,
   isLecturer,
 }: {
   courseId: string;
+  courseCode?: string;
+  courseName?: string;
   isLecturer: boolean;
 }) {
   const { user } = useAuth();
@@ -25,6 +29,8 @@ export function CourseAttendanceSection({
       <Suspense fallback={<CourseTabLoading />}>
         <CourseAttendance
           courseId={courseId}
+          courseCode={courseCode}
+          courseName={courseName}
           userId={user?.id || null}
           isLecturer={isLecturer}
           students={people}

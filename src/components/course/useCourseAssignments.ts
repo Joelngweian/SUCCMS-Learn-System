@@ -16,12 +16,15 @@ import {
 } from "@/lib/submissionStorage";
 import {
   getAssignmentMaxScore,
+  getRubricGradeItems,
   normalizeCourseAssignment,
   normalizeCourseSubmission,
   type AiGradeDetails,
+  type AiGradingAnnotation,
   type CourseAssignment,
   type CourseResourceFile,
   type CourseSubmission,
+  type RubricGradeItem,
   type SubmissionFile,
 } from "./coursePageTypes";
 import {
@@ -33,6 +36,8 @@ import {
   getBroadcastNewRecord,
   subscribeToPrivateBroadcast,
 } from "@/lib/realtime";
+import type { AssessmentDraft } from "@/lib/assessmentTypes";
+import type { Json } from "@/lib/database.types";
 
 type AiGradeResponse = {
   error?: string;
@@ -46,6 +51,13 @@ type AiGradeResponse = {
     reason?: string;
   }>;
   warnings?: unknown[];
+  annotations?: Array<{
+    fileName?: string;
+    page?: number | null;
+    status?: string;
+    excerpt?: string;
+    comment?: string;
+  }>;
 };
 
 type AiGradeRequestResponse = {
@@ -59,6 +71,56 @@ const AI_GRADING_WORKER_RETRY_MS = 60 * 1000;
 const AI_GRADING_FALLBACK_POLL_MS = 20 * 1000;
 const COURSE_CONTENT_BUCKET = "course_content";
 const MAX_ASSIGNMENT_FILE_SIZE = 8 * 1024 * 1024;
+
+const normalizeAiGradeDetails = (
+  data: AiGradeResponse | null | undefined,
+): AiGradeDetails | null => {
+  if (!data) return null;
+
+  const criteria = Array.isArray(data.criteria)
+    ? data.criteria
+        .filter(criterion => criterion?.name)
+        .map(criterion => {
+          const score = Number(criterion.score);
+          const criterionMax = Number(criterion.maxScore);
+          return {
+            name: String(criterion.name),
+            score: Number.isFinite(score) ? score : 0,
+            maxScore: Number.isFinite(criterionMax) ? criterionMax : 0,
+            reason: criterion.reason ? String(criterion.reason) : "",
+          };
+        })
+    : [];
+  const annotations: AiGradingAnnotation[] = Array.isArray(data.annotations)
+    ? data.annotations
+        .map(annotation => {
+          const status = ["correct", "incorrect", "uncertain"].includes(
+              annotation?.status || "",
+            )
+            ? annotation.status as AiGradingAnnotation["status"]
+            : "uncertain";
+          const page = Number(annotation?.page);
+          return {
+            fileName: String(annotation?.fileName || "Submission text"),
+            page: Number.isInteger(page) && page > 0 ? page : null,
+            status,
+            excerpt: String(annotation?.excerpt || "").trim(),
+            comment: String(annotation?.comment || "").trim(),
+          };
+        })
+        .filter(annotation => annotation.excerpt)
+    : [];
+  const confidence = Number(data.confidence);
+
+  return {
+    confidence: Number.isFinite(confidence) ? Math.round(confidence) : null,
+    criteria,
+    warnings: Array.isArray(data.warnings)
+      ? data.warnings.filter(Boolean).map(String)
+      : [],
+    annotations,
+  };
+};
 
 type AiGradingJobBroadcastRow = {
   id: string;
@@ -93,7 +155,8 @@ const getFunctionErrorMessage = async (
   return getErrorMessage(error, fallback);
 };
 
-const emptyAssignmentDraft = {
+const emptyAssignmentDraft: AssessmentDraft = {
+  assessment_type: "",
   title: "",
   description: "",
   rubric: "",
@@ -102,10 +165,57 @@ const emptyAssignmentDraft = {
 };
 
 const ASSIGNMENT_SELECT =
-  "id, course_id, title, description, created_by, due_date, max_score, created_at, updated_at, attachments, rubric";
+  "id, course_id, assessment_type, title, description, created_by, due_date, max_score, created_at, updated_at, attachments, rubric";
 
 const SUBMISSION_SELECT =
-  "id, assignment_id, student_id, submission_file_url, submission_text, submitted_at, is_late, grade, feedback, files";
+  "id, assignment_id, student_id, submission_file_url, submission_text, submitted_at, is_late, grade, feedback, files, rubric_grades";
+
+const clampWholeScore = (value: number, minimum: number, maximum: number) =>
+  Math.min(maximum, Math.max(minimum, Math.round(value)));
+
+const createRubricGrades = (
+  details: AiGradeDetails | null,
+  assignmentMaxScore: number,
+): RubricGradeItem[] => {
+  if (!details?.criteria.length) return [];
+
+  const rawTotal = details.criteria.reduce(
+    (total, criterion) => total + Math.max(0, Number(criterion.maxScore) || 0),
+    0,
+  );
+  let allocatedMax = 0;
+
+  return details.criteria.map((criterion, index) => {
+    const rawMax = Math.max(0, Number(criterion.maxScore) || 0);
+    const isLast = index === details.criteria.length - 1;
+    const maxScore = rawTotal > 0
+      ? isLast
+        ? Math.max(0, assignmentMaxScore - allocatedMax)
+        : clampWholeScore(
+            rawMax / rawTotal * assignmentMaxScore,
+            0,
+            assignmentMaxScore - allocatedMax,
+          )
+      : 0;
+    allocatedMax += maxScore;
+    const rawScore = Math.max(0, Number(criterion.score) || 0);
+    const aiScore = rawMax > 0
+      ? clampWholeScore(rawScore / rawMax * maxScore, 0, maxScore)
+      : 0;
+
+    return {
+      name: criterion.name,
+      aiScore,
+      adjustment: 0,
+      finalScore: aiScore,
+      maxScore,
+      reason: criterion.reason,
+    };
+  });
+};
+
+const getRubricGradeTotal = (items: RubricGradeItem[]) =>
+  items.reduce((total, item) => total + item.finalScore, 0);
 
 export function useCourseAssignments({
   courseId,
@@ -130,6 +240,7 @@ export function useCourseAssignments({
   const [aiGradingError, setAiGradingError] = useState("");
   const [aiGradeDetails, setAiGradeDetails] =
     useState<AiGradeDetails | null>(null);
+  const [rubricGrades, setRubricGrades] = useState<RubricGradeItem[]>([]);
   const [showNewAssignmentDialog, setShowNewAssignmentDialog] = useState(false);
   const [newAssign, setNewAssign] = useState(emptyAssignmentDraft);
   const [newAssignFiles, setNewAssignFiles] = useState<CourseResourceFile[]>([]);
@@ -231,7 +342,66 @@ export function useCourseAssignments({
     setCurrentFeedback(submission?.feedback || "");
     setAiGradingError("");
     setAiGradeDetails(null);
-  }, [allSubmissions, gradingStudentId]);
+    const savedRubricGrades = getRubricGradeItems(
+      submission?.rubric_grades,
+    );
+    setRubricGrades(savedRubricGrades);
+    if (submission?.grade == null && savedRubricGrades.length > 0) {
+      setCurrentGrade(String(getRubricGradeTotal(savedRubricGrades)));
+    }
+
+    if (!selectedAssignment) return;
+    let active = true;
+    void supabase
+      .from("ai_grading_jobs")
+      .select("result")
+      .eq("assignment_id", selectedAssignment.id)
+      .eq("student_id", gradingStudentId)
+      .eq("status", "completed")
+      .order("completed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!active || error || !data?.result) return;
+        const result = data.result as unknown as AiGradeResponse;
+        const normalizedDetails = normalizeAiGradeDetails(result);
+        setAiGradeDetails(normalizedDetails);
+
+        if (submission?.grade == null) {
+          const maxScore = getAssignmentMaxScore(selectedAssignment);
+          const generatedRubricGrades = createRubricGrades(
+            normalizedDetails,
+            maxScore,
+          );
+          if (savedRubricGrades.length === 0) {
+            setRubricGrades(generatedRubricGrades);
+          }
+          const suggestedScore = generatedRubricGrades.length > 0
+            ? getRubricGradeTotal(generatedRubricGrades)
+            : Number(result.suggestedScore);
+          if (Number.isFinite(suggestedScore)) {
+            setCurrentGrade(
+              Math.min(
+                maxScore,
+                Math.max(0, Math.round(suggestedScore)),
+              ).toString(),
+            );
+          }
+          setCurrentFeedback(
+            result.feedback || "No written feedback was generated.",
+          );
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [allSubmissions, gradingStudentId, selectedAssignment]);
+
+  useEffect(() => {
+    if (rubricGrades.length === 0) return;
+    setCurrentGrade(String(getRubricGradeTotal(rubricGrades)));
+  }, [rubricGrades]);
 
   const selectAssignment = useCallback(
     (
@@ -245,11 +415,17 @@ export function useCourseAssignments({
   );
 
   const createAssignment = async () => {
-    if (!newAssign.title || !newAssign.due_date || !userId) return;
+    if (
+      !newAssign.assessment_type
+      || !newAssign.title.trim()
+      || !newAssign.due_date
+      || !userId
+    ) return;
 
     const { error } = await supabase.from("assignments").insert({
       course_id: courseId,
-      title: newAssign.title,
+      assessment_type: newAssign.assessment_type,
+      title: newAssign.title.trim(),
       description: newAssign.description,
       rubric:
         newRubricFiles.length > 0 ? JSON.stringify(newRubricFiles) : null,
@@ -261,7 +437,7 @@ export function useCourseAssignments({
 
     if (error) {
       console.error("Error creating assignment:", error);
-      notify.error(error, "Failed to create assignment.");
+      notify.error(error, "Failed to create assessment.");
       return;
     }
 
@@ -308,9 +484,9 @@ export function useCourseAssignments({
   const deleteAssignment = async (assignmentId: string) => {
     if (
       !(await confirmAction({
-        title: "Delete assignment?",
+        title: "Delete assessment?",
         description:
-          "This assignment and its student submissions will be permanently deleted.",
+          "This assessment and its student submissions will be permanently deleted.",
         confirmLabel: "Delete",
         destructive: true,
       }))
@@ -320,7 +496,7 @@ export function useCourseAssignments({
       .delete()
       .eq("id", assignmentId);
     if (error) {
-      notify.error(error, "Failed to delete assignment.");
+      notify.error(error, "Failed to delete assessment.");
       return;
     }
     await fetchAssignments();
@@ -362,6 +538,7 @@ export function useCourseAssignments({
         is_late: null,
         grade: null,
         feedback: null,
+        rubric_grades: [],
       },
     ]);
   };
@@ -416,6 +593,7 @@ export function useCourseAssignments({
     const gradeData = {
       grade: Math.round(numericGrade),
       feedback: currentFeedback,
+      rubric_grades: rubricGrades as unknown as Json,
     };
     const result = existingSubmission
       ? await supabase
@@ -542,10 +720,6 @@ export function useCourseAssignments({
             );
           }
 
-          if (job?.error_message) {
-            throw new Error(job.error_message);
-          }
-
           // Re-kick the pull-based worker at most once per minute. The queue's
           // visibility timeout prevents another worker from grading the same
           // message while an active worker still owns it.
@@ -586,27 +760,19 @@ export function useCourseAssignments({
       }
 
       const maxScore = getAssignmentMaxScore(selectedAssignment);
-      const suggestedScore = Number(data?.suggestedScore);
+      const normalizedDetails = normalizeAiGradeDetails(data);
+      const generatedRubricGrades = createRubricGrades(
+        normalizedDetails,
+        maxScore,
+      );
+      const suggestedScore = generatedRubricGrades.length > 0
+        ? getRubricGradeTotal(generatedRubricGrades)
+        : Number(data?.suggestedScore);
       if (!Number.isFinite(suggestedScore)) {
         throw new Error("The AI grading service returned an invalid score.");
       }
 
-      const criteria = Array.isArray(data?.criteria)
-        ? data.criteria
-            .filter(criterion => criterion?.name)
-            .map(criterion => {
-              const score = Number(criterion.score);
-              const criterionMax = Number(criterion.maxScore);
-              return {
-                name: String(criterion.name),
-                score: Number.isFinite(score) ? score : 0,
-                maxScore: Number.isFinite(criterionMax) ? criterionMax : 0,
-                reason: criterion.reason ? String(criterion.reason) : "",
-              };
-            })
-        : [];
-      const confidence = Number(data?.confidence);
-
+      setRubricGrades(generatedRubricGrades);
       setCurrentGrade(
         Math.min(
           maxScore,
@@ -616,15 +782,7 @@ export function useCourseAssignments({
       setCurrentFeedback(
         data?.feedback || "No written feedback was generated.",
       );
-      setAiGradeDetails({
-        confidence: Number.isFinite(confidence)
-          ? Math.round(confidence)
-          : null,
-        criteria,
-        warnings: Array.isArray(data?.warnings)
-          ? data.warnings.filter(Boolean).map(String)
-          : [],
-      });
+      setAiGradeDetails(normalizedDetails);
     } catch (error) {
       const message = getErrorMessage(
         error,
@@ -736,6 +894,37 @@ export function useCourseAssignments({
     }
   };
 
+  const setRubricGradeAdjustment = (
+    index: number,
+    nextAdjustment: number,
+  ) => {
+    setRubricGrades(current => {
+      return current.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+        const adjustment = clampWholeScore(
+          nextAdjustment,
+          -item.aiScore,
+          item.maxScore - item.aiScore,
+        );
+        return {
+          ...item,
+          adjustment,
+          finalScore: item.aiScore + adjustment,
+        };
+      });
+    });
+  };
+
+  const resetRubricGradeAdjustments = () => {
+    setRubricGrades(current =>
+      current.map(item => ({
+        ...item,
+        adjustment: 0,
+        finalScore: item.aiScore,
+      })),
+    );
+  };
+
   return {
     aiAutoGrade,
     aiGradeDetails,
@@ -753,6 +942,8 @@ export function useCourseAssignments({
     newAssign,
     newAssignFiles,
     newRubricFiles,
+    resetRubricGradeAdjustments,
+    rubricGrades,
     saveGrade,
     selectAssignment,
     selectedAssignment,
@@ -762,6 +953,7 @@ export function useCourseAssignments({
     setNewAssign,
     setNewAssignFiles,
     setNewRubricFiles,
+    setRubricGradeAdjustment,
     setSelectedAssignment,
     setShowNewAssignmentDialog: setAssignmentDialogOpen,
     setSubmissionFiles,

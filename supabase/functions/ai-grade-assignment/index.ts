@@ -21,7 +21,7 @@ const gradingSchema = {
     confidence: { type: "integer", minimum: 0, maximum: 100 },
     criteria: {
       type: "array",
-      maxItems: 6,
+      maxItems: 20,
       items: {
         type: "object",
         properties: {
@@ -38,8 +38,33 @@ const gradingSchema = {
       maxItems: 4,
       items: { type: "string" },
     },
+    annotations: {
+      type: "array",
+      maxItems: 24,
+      items: {
+        type: "object",
+        properties: {
+          fileName: { type: "string" },
+          page: { type: "integer", minimum: 1 },
+          status: {
+            type: "string",
+            enum: ["correct", "incorrect", "uncertain"],
+          },
+          excerpt: { type: "string" },
+          comment: { type: "string" },
+        },
+        required: ["fileName", "status", "excerpt", "comment"],
+      },
+    },
   },
-  required: ["suggestedScore", "feedback", "confidence", "criteria", "warnings"],
+  required: [
+    "suggestedScore",
+    "feedback",
+    "confidence",
+    "criteria",
+    "warnings",
+    "annotations",
+  ],
 };
 
 type StoredFile = {
@@ -548,8 +573,23 @@ const callGemini = async (
 
     const retryable = response.status === 429 || response.status >= 500;
     if (retryable && attempt < 2) {
+      const retryAfterHeader = Number(response.headers.get("retry-after"));
+      const retryAfterMessage = Number(
+        String(payload?.error?.message || "").match(
+          /retry in\s+([\d.]+)s/i,
+        )?.[1],
+      );
+      const retryAfterSeconds = Number.isFinite(retryAfterHeader)
+        ? retryAfterHeader
+        : Number.isFinite(retryAfterMessage)
+          ? retryAfterMessage
+          : 0;
+      const retryDelay = Math.min(
+        30000,
+        Math.max(750 * 2 ** attempt, retryAfterSeconds * 1000 + 500),
+      );
       await new Promise(resolve =>
-        setTimeout(resolve, 750 * 2 ** attempt),
+        setTimeout(resolve, retryDelay),
       );
       continue;
     }
@@ -608,7 +648,9 @@ const gradeJob = async ({
 
   const { data: assignment, error: assignmentError } = await serviceClient
     .from("assignments")
-    .select("id, course_id, title, description, max_score, rubric")
+    .select(
+      "id, course_id, assessment_type, title, description, max_score, rubric",
+    )
     .eq("id", job.assignment_id)
     .single();
 
@@ -656,19 +698,31 @@ const gradeJob = async ({
     {
       text: [
         "You are an assessment assistant for a college lecturer.",
-        "Evaluate the student's submitted work strictly against the lecturer-provided rubric and assignment instructions.",
+        "Evaluate the student's submitted work strictly against the lecturer-provided rubric and assessment instructions.",
         "Return a suggested grade only. The lecturer will review and decide the final grade.",
         "Do not reward content that is not present in the submission.",
         "If a file is unreadable, incomplete, suspicious, or the rubric is ambiguous, explain that in warnings and lower confidence.",
         "The suggestedScore and all criterion scores must be within their stated maximum values.",
+        "Return one criteria entry for every distinct rubric section, preserving the rubric's names, order, and mark allocation.",
+        "Do not merge rubric sections. The criterion maxScore values must add up to the assessment maximum score.",
+        "The suggestedScore must exactly equal the sum of all criterion scores.",
         "Write constructive, specific feedback that cites strengths and improvements visible in the work.",
         "Write the main feedback as one concise paragraph below 120 words.",
         "Mention only the most important strengths and improvements.",
-        "Keep each rubric criterion reason below 25 words and return no more than 6 criteria.",
+        "Keep each rubric criterion reason below 25 words.",
         "Keep every warning below 20 words and return no more than 4 warnings.",
+        "Also create direct in-document review highlights using the annotations array.",
+        "Each annotation excerpt must be copied verbatim from one short, contiguous span of the student's work, not paraphrased and not taken from the rubric or instructions.",
+        "Use status correct for work you reviewed and found supported by the rubric, incorrect for a definite error, and uncertain when lecturer judgement or clearer evidence is required.",
+        "Use the exact student submission filename shown in the input. Use 'Submission text' when annotating typed submission text.",
+        "Include a page number only when it is visible or can be identified confidently; otherwise omit page.",
+        "Do not invent quotations, page numbers, calculations, or student claims.",
+        "Return 6 to 18 representative annotations when the submission contains enough readable content.",
+        "Keep every excerpt below 45 words and every annotation comment below 25 words.",
         "",
-        `Assignment title: ${cleanText(assignment.title, "Assignment", 300)}`,
-        `Assignment instructions: ${cleanText(assignment.description, "No additional instructions.", 12000)}`,
+        `Assessment type: ${cleanText(assignment.assessment_type, "individual_assignment", 100)}`,
+        `Assessment title: ${cleanText(assignment.title, "Assessment", 300)}`,
+        `Assessment instructions: ${cleanText(assignment.description, "No additional instructions.", 12000)}`,
         `Maximum score: ${maxScore}`,
         rubric.text
           ? `Rubric text: ${rubric.text}`
@@ -707,7 +761,9 @@ const gradeJob = async ({
             {
               text: [
                 "Return a shorter grading response.",
-                "Use at most 100 words for feedback, at most 5 rubric criteria, and one short sentence per reason.",
+                "Use at most 100 words for feedback and one short sentence per rubric criterion reason.",
+                "Keep one criteria entry for every rubric section even in this shorter response.",
+                "Return at most 10 annotations, with excerpts below 30 words and comments below 18 words.",
                 "Return complete valid JSON only.",
               ].join("\n"),
             },
@@ -745,9 +801,8 @@ const gradeJob = async ({
     throw new Error("Gemini returned incomplete grading data. Please try again.");
   }
 
-  const suggestedScore = cleanNumber(parsed?.suggestedScore, 0, maxScore);
   const criteria = Array.isArray(parsed?.criteria)
-    ? parsed.criteria.slice(0, 6).map((criterion: any) => {
+    ? parsed.criteria.slice(0, 20).map((criterion: any) => {
         const criterionMax = cleanNumber(criterion?.maxScore, 0, maxScore);
         return {
           name: cleanText(criterion?.name, "Criterion", 160),
@@ -756,6 +811,38 @@ const gradeJob = async ({
           reason: cleanText(criterion?.reason, "", 360),
         };
       })
+      : [];
+  const criteriaScoreTotal = criteria.reduce(
+    (total: number, criterion: { score: number }) => total + criterion.score,
+    0,
+  );
+  const criteriaMaxTotal = criteria.reduce(
+    (total: number, criterion: { maxScore: number }) =>
+      total + criterion.maxScore,
+    0,
+  );
+  const suggestedScore = criteria.length > 0
+    ? cleanNumber(criteriaScoreTotal, 0, maxScore)
+    : cleanNumber(parsed?.suggestedScore, 0, maxScore);
+  const annotations = Array.isArray(parsed?.annotations)
+    ? parsed.annotations
+        .slice(0, 24)
+        .map((annotation: any) => {
+          const status = ["correct", "incorrect", "uncertain"].includes(
+              annotation?.status,
+            )
+            ? annotation.status
+            : "uncertain";
+          const page = Number(annotation?.page);
+          return {
+            fileName: cleanText(annotation?.fileName, "Submission text", 260),
+            page: Number.isInteger(page) && page > 0 ? page : null,
+            status,
+            excerpt: cleanText(annotation?.excerpt, "", 900),
+            comment: cleanText(annotation?.comment, "", 500),
+          };
+        })
+        .filter((annotation: any) => annotation.excerpt)
     : [];
 
   return {
@@ -764,12 +851,20 @@ const gradeJob = async ({
     feedback: cleanText(parsed?.feedback, "No feedback was generated.", 1800),
     confidence: Math.round(cleanNumber(parsed?.confidence, 0, 100)),
     criteria,
-    warnings: Array.isArray(parsed?.warnings)
-      ? parsed.warnings
+    warnings: [
+      ...(Array.isArray(parsed?.warnings)
+        ? parsed.warnings
           .slice(0, 4)
           .map((warning: unknown) => cleanText(warning, "", 240))
           .filter(Boolean)
-      : [],
+        : []),
+      ...(criteria.length > 0 && Math.abs(criteriaMaxTotal - maxScore) > 0.01
+        ? [
+            `Rubric sections total ${criteriaMaxTotal} marks, but the assessment maximum is ${maxScore}. Lecturer review is required.`,
+          ]
+        : []),
+    ].slice(0, 5),
+    annotations,
     model,
   };
 };
@@ -786,7 +881,8 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
-  const model = Deno.env.get("AI_GRADING_MODEL") || "gemini-2.5-flash";
+  const model =
+    Deno.env.get("AI_GRADING_MODEL") || "gemini-3.1-flash-lite";
 
   if (!supabaseUrl || !serviceRoleKey || !geminiApiKey) {
     return jsonResponse({ error: "AI grading worker is not configured." }, 500);

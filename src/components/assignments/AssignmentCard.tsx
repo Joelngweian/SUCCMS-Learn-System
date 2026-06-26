@@ -11,6 +11,7 @@ import type {
   AssignmentCardType,
   AssignmentListItem,
 } from "./assignmentTypes";
+import { getAssessmentTypeLabel } from "@/lib/assessmentTypes";
 
 interface AssignmentCardProps {
   item: AssignmentListItem;
@@ -67,6 +68,12 @@ export function AssignmentCard({
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-start justify-between">
             <div>
+              <Badge
+                variant="secondary"
+                className="mb-1.5 text-[10px] font-medium"
+              >
+                {getAssessmentTypeLabel(item.assessment_type)}
+              </Badge>
               <h4 className="truncate text-lg font-bold text-foreground transition-colors group-hover:text-primary">
                 {item.title}
               </h4>

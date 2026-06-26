@@ -43,6 +43,24 @@ export type AiGradeDetails = {
     reason: string;
   }>;
   warnings: string[];
+  annotations: AiGradingAnnotation[];
+};
+
+export type RubricGradeItem = {
+  name: string;
+  aiScore: number;
+  adjustment: number;
+  finalScore: number;
+  maxScore: number;
+  reason: string;
+};
+
+export type AiGradingAnnotation = {
+  fileName: string;
+  page: number | null;
+  status: "correct" | "incorrect" | "uncertain";
+  excerpt: string;
+  comment: string;
 };
 
 export type SubmissionFile = {
@@ -111,6 +129,33 @@ export const getSubmissionFiles = (value: Json | null): SubmissionFile[] => {
       type: typeof file.type === "string" ? file.type : undefined,
       url: typeof file.url === "string" ? file.url : undefined,
     }));
+};
+
+export const getRubricGradeItems = (
+  value: Json | null | undefined,
+): RubricGradeItem[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter(
+      (item): item is Exclude<Json, null | string | number | boolean | Json[]> =>
+        Boolean(item) && !Array.isArray(item) && typeof item === "object",
+    )
+    .map(item => {
+      const maxScore = Number(item.maxScore);
+      const aiScore = Number(item.aiScore);
+      const adjustment = Number(item.adjustment);
+      const finalScore = Number(item.finalScore);
+      return {
+        name: typeof item.name === "string" ? item.name : "Rubric criterion",
+        aiScore: Number.isFinite(aiScore) ? aiScore : 0,
+        adjustment: Number.isFinite(adjustment) ? adjustment : 0,
+        finalScore: Number.isFinite(finalScore) ? finalScore : 0,
+        maxScore: Number.isFinite(maxScore) ? maxScore : 0,
+        reason: typeof item.reason === "string" ? item.reason : "",
+      };
+    })
+    .filter(item => item.name && item.maxScore >= 0);
 };
 
 export const getCourseResourceFiles = (

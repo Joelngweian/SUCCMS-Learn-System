@@ -4,6 +4,11 @@ import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "./ui/collapsible";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -30,10 +35,12 @@ import {
   Loader2,
   AlertCircle,
   RefreshCw,
+  ChevronDown,
 } from "lucide-react";
 
 interface AIRecommendationsProps {
   userRole: 'student' | 'lecturer';
+  compact?: boolean;
   currentCourses?: string[];
   performanceData?: {
     courses?: unknown[];
@@ -68,6 +75,7 @@ const emptyPreference: RecommendationPreference = {
 
 export function AIRecommendations({
   userRole,
+  compact = false,
   currentCourses = [],
   performanceData,
 }: AIRecommendationsProps) {
@@ -79,6 +87,7 @@ export function AIRecommendations({
   const [interactionError, setInteractionError] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [recommendationPage, setRecommendationPage] = useState(0);
+  const [compactOpen, setCompactOpen] = useState(false);
 
   const recommendationContext = JSON.stringify({
     courses: performanceData?.courses || [],
@@ -431,6 +440,96 @@ export function AIRecommendations({
       </div>
     );
   };
+
+  if (compact) {
+    return (
+      <Collapsible open={compactOpen} onOpenChange={setCompactOpen}>
+        <Card className="overflow-hidden shadow-sm">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-muted/40"
+            >
+              <div className="rounded-lg bg-purple-100 p-2 text-purple-700">
+                <Brain className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">AI Teaching Recommendations</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  Resources based on overall course performance
+                </p>
+              </div>
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                  compactOpen ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <CardContent className="space-y-3 border-t px-4 pb-4 pt-3">
+              {isLoading ? (
+                <div className="flex min-h-28 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin text-purple-600" />
+                  Finding teaching resources...
+                </div>
+              ) : loadError ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{loadError}</span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-3 w-full"
+                    onClick={() => loadRecommendations(true)}
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Try Again
+                  </Button>
+                </div>
+              ) : recommendations.length > 0 ? (
+                recommendations.slice(0, 3).map(item => (
+                  <div key={item.id} className="rounded-lg border p-3">
+                    <div className="flex items-start gap-2">
+                      <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-purple-600" />
+                      <div className="min-w-0 flex-1">
+                        <p className="line-clamp-2 text-sm font-medium">
+                          {item.title}
+                        </p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          {item.platform} · {item.type}
+                        </p>
+                        <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                          {item.reason}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="mt-2 w-full"
+                      onClick={() => openResource(item.url)}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Open Resource
+                    </Button>
+                  </div>
+                ))
+              ) : (
+                <p className="py-4 text-center text-sm text-muted-foreground">
+                  Add a course to receive teaching resources.
+                </p>
+              )}
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
+    );
+  }
 
   return (
     <Card>

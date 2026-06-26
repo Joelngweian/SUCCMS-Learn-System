@@ -1,10 +1,20 @@
-import { useState, useEffect, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, Loader2 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext.tsx";
 import { supabase } from "@/lib/supabase.ts";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import type { Database } from "@/lib/database.types";
+import { Stories } from "./Stories";
+import { StoryAvatarRing } from "./stories/StoryAvatarRing";
+import { useActiveStoryStatus } from "./stories/useActiveStoryStatus";
+import type { StoryTargetUser } from "./stories/storyRepository";
 
 type SearchUser = Pick<
   Database["public"]["Tables"]["user_profiles"]["Row"],
@@ -16,9 +26,14 @@ export function TopBarSearch() {
   const [results, setResults] = useState<SearchUser[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [storyUser, setStoryUser] = useState<StoryTargetUser | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const latestRequestRef = useRef(0);
   const navigate = useNavigate();
+  const { profile, user: currentUser } = useAuth();
+  const activeStoryUserIds = useActiveStoryStatus(
+    results.map(result => result.id),
+  );
 
   useEffect(() => {
     // Click outside to close dropdown
@@ -85,6 +100,22 @@ export function TopBarSearch() {
     navigate(`/profile/${userId}`);
   };
 
+  const handleStoryClick = (
+    event: ReactMouseEvent,
+    result: SearchUser,
+  ) => {
+    event.stopPropagation();
+    if (!activeStoryUserIds.has(result.id)) return;
+    setIsOpen(false);
+    setStoryUser({
+      id: result.id,
+      name: result.full_name || "User",
+      avatarUrl: result.avatar_url,
+      initials: result.full_name?.charAt(0)?.toUpperCase() || "U",
+      role: result.role,
+    });
+  };
+
   return (
     <div ref={wrapperRef} className="relative hidden sm:block">
       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -119,10 +150,31 @@ export function TopBarSearch() {
                   onClick={() => handleSelectUser(user.id)}
                   className="px-4 py-2 hover:bg-accent cursor-pointer flex items-center gap-3 transition-colors"
                 >
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage src={user.avatar_url || ""} />
-                    <AvatarFallback>{user.full_name?.charAt(0) || "U"}</AvatarFallback>
-                  </Avatar>
+                  <button
+                    type="button"
+                    onClick={event => handleStoryClick(event, user)}
+                    className={
+                      activeStoryUserIds.has(user.id)
+                        ? "rounded-full"
+                        : "cursor-default rounded-full"
+                    }
+                    aria-label={
+                      activeStoryUserIds.has(user.id)
+                        ? `View ${user.full_name}'s story`
+                        : `${user.full_name} has no active story`
+                    }
+                  >
+                    <StoryAvatarRing
+                      active={activeStoryUserIds.has(user.id)}
+                    >
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage src={user.avatar_url || ""} />
+                        <AvatarFallback>
+                          {user.full_name?.charAt(0) || "U"}
+                        </AvatarFallback>
+                      </Avatar>
+                    </StoryAvatarRing>
+                  </button>
                   <div className="flex flex-col overflow-hidden w-full">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium truncate">{user.full_name}</span>
@@ -141,6 +193,24 @@ export function TopBarSearch() {
           )}
         </div>
       )}
+
+      <Stories
+        currentUserName={profile?.full_name || "Your Story"}
+        currentUserInitials={(profile?.full_name || currentUser?.email || "YS")
+          .split(" ")
+          .map(part => part[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase()}
+        currentUserAvatar={profile?.avatar_url}
+        currentUserRole={profile?.role}
+        mode="viewer"
+        targetUser={storyUser}
+        open={Boolean(storyUser)}
+        onOpenChange={nextOpen => {
+          if (!nextOpen) setStoryUser(null);
+        }}
+      />
     </div>
   );
 }

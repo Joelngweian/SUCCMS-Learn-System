@@ -12,28 +12,31 @@ import {
 } from "@/lib/courseOfferings";
 import type { Database } from "@/lib/database.types";
 import { withSignedStorageUrls } from "@/lib/storageUrls";
-import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { OnlineActivity, SocialActivityFeed } from "./SocialWidgets";
-import { StudyGroupsDashboard } from "./StudyGroupsDashboard";
+import { Button } from "./ui/button";
+import { CampusFeed } from "@/components/campus-feed";
 import { Stories } from "./Stories";
 import {
-  StudentStudyInsights,
   type StudyInsight,
 } from "./StudentStudyInsights";
 import {
-  AnnouncementsCard,
-  StudentCoursesCard,
-  StudentFocusPanels,
   StudentStatsGrid,
-  UpcomingAssignmentsCard,
 } from "./student-dashboard/StudentDashboardPanels";
+import { StudentDashboardRightRail } from "./student-dashboard/StudentDashboardRightRail";
 import {
   AlertCircle,
   Brain,
   Sparkles,
   Loader2,
 } from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "./ui/sheet";
 
 const KNOWLEDGE_BASE = [
   {
@@ -638,6 +641,7 @@ export function StudentDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingAi, setIsLoadingAi] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [isStudyPanelOpen, setIsStudyPanelOpen] = useState(false);
 
   const getFallbackStudyMaterials = useCallback((courses: StudentCourse[]) => {
     const userInterests = courses.flatMap((course) => [
@@ -1296,35 +1300,97 @@ export function StudentDashboard() {
     );
   }
 
+  const studyPanel = (
+    <StudentDashboardRightRail
+      announcements={announcements}
+      courses={enrolledCourses}
+      formatRelativeDate={formatRelativeDate}
+      isLoadingAi={isLoadingAi}
+      isLoadingInsights={isLoadingInsights}
+      motivation={aiData.motivation}
+      onBrowseCourses={() => {
+        setIsStudyPanelOpen(false);
+        navigate("/courses");
+      }}
+      onOpenAssignment={(courseId, assignmentId) => {
+        setIsStudyPanelOpen(false);
+        navigate(`/courses?courseId=${courseId}&assignmentId=${assignmentId}`);
+      }}
+      onOpenCourse={(courseId) => {
+        setIsStudyPanelOpen(false);
+        navigate(`/courses?courseId=${courseId}`);
+      }}
+      recentCourses={aiData.recentCourses}
+      studyInsights={studyInsights}
+      studyMaterials={aiData.studyMaterials}
+      upcomingAssignments={upcomingAssignments}
+    />
+  );
+
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Welcome back, {profile?.full_name?.split(" ")[0] || "Scholar"}!
-          </h1>
-          <p className="text-muted-foreground flex items-center gap-2 mt-1">
-            <Sparkles className="h-4 w-4 text-purple-500" />
-            {isLoadingAi
-              ? 'AI Assistant: "Finding relevant resources for your current courses..."'
-              : `AI Assistant: "I've found ${aiData.studyMaterials.length} relevant resources based on your enrollment."`}
-          </p>
+    <div className="grid grid-cols-1 gap-8 animate-in fade-in duration-500 2xl:grid-cols-[minmax(0,1fr)_360px] 2xl:items-start">
+      <div className="min-w-0 space-y-8">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">
+              Welcome back, {profile?.full_name?.split(" ")[0] || "Scholar"}!
+            </h1>
+            <p className="mt-1 flex items-center gap-2 text-muted-foreground">
+              <Sparkles className="h-4 w-4 text-purple-500" />
+              {isLoadingAi
+                ? 'AI Assistant: "Finding relevant resources for your current courses..."'
+                : `AI Assistant: "I've found ${aiData.studyMaterials.length} relevant resources based on your enrollment."`}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className="bg-purple-100 px-3 py-1 text-purple-800 transition-colors hover:bg-purple-200">
+              <Brain className="mr-1 h-3 w-3" />
+              {isLoadingAi ? "Preparing Study Plan" : "AI Study Plan Ready"}
+            </Badge>
+            <Sheet
+              open={isStudyPanelOpen}
+              onOpenChange={setIsStudyPanelOpen}
+            >
+              <SheetTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="2xl:hidden"
+                >
+                  <Sparkles className="h-4 w-4 text-purple-500" />
+                  Study Panel
+                </Button>
+              </SheetTrigger>
+              <SheetContent
+                side="right"
+                className="overflow-hidden p-0"
+              >
+                <SheetHeader className="border-b pr-14">
+                  <SheetTitle className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-purple-500" />
+                    Your Study Panel
+                  </SheetTitle>
+                  <SheetDescription>
+                    Quick study actions, AI insights and course shortcuts.
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+                  {studyPanel}
+                </div>
+              </SheetContent>
+            </Sheet>
+          </div>
         </div>
-        <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-200 transition-colors px-3 py-1">
-          <Brain className="h-3 w-3 mr-1" />
-          {isLoadingAi ? "Preparing Study Plan" : "AI Study Plan Ready"}
-        </Badge>
-      </div>
 
-      {loadError && (
-        <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {loadError}
-        </div>
-      )}
+        {loadError && (
+          <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {loadError}
+          </div>
+        )}
 
-      <Card className="overflow-hidden bg-gradient-to-r from-gray-50 to-white dark:from-zinc-900 dark:to-zinc-950 border-dashed">
-        <CardContent className="p-6">
+        <div className="overflow-hidden rounded-2xl border bg-card px-4 pt-4 shadow-sm sm:px-6 sm:pt-5">
           <Stories
             currentUserName={profile?.full_name || "Your Story"}
             currentUserInitials={(profile?.full_name || "YS")
@@ -1332,60 +1398,24 @@ export function StudentDashboard() {
               .map((part) => part[0])
               .join("")}
             currentUserAvatar={profile?.avatar_url}
-          />
-        </CardContent>
-      </Card>
-
-      <StudentFocusPanels
-        recentCourses={aiData.recentCourses}
-        studyMaterials={aiData.studyMaterials}
-        motivation={aiData.motivation}
-        isLoading={isLoadingAi}
-        onOpenCourses={() => navigate("/courses")}
-      />
-
-      <StudentStudyInsights
-        insights={studyInsights}
-        isLoading={isLoadingInsights}
-      />
-
-      <StudentStatsGrid
-        enrolledCount={enrolledCourses.length}
-        pendingAssignments={stats.pendingAssignments}
-        gpa={stats.gpa}
-        credits={stats.credits}
-        unreadAlerts={stats.unreadAlerts}
-      />
-
-      <SocialActivityFeed />
-
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <StudentCoursesCard
-            courses={enrolledCourses}
-            onOpenCourse={(courseId) =>
-              navigate(`/courses?courseId=${courseId}`)
-            }
-            onBrowseCourses={() => navigate("/courses")}
-            formatRelativeDate={formatRelativeDate}
+            currentUserRole={profile?.role}
           />
         </div>
 
-        <div className="space-y-6">
-          <OnlineActivity userRole="student" />
-          <StudyGroupsDashboard />
-          <UpcomingAssignmentsCard
-            assignments={upcomingAssignments}
-            onOpenAssignment={(courseId, assignmentId) =>
-              navigate(
-                `/courses?courseId=${courseId}&assignmentId=${assignmentId}`
-              )
-            }
-            formatRelativeDate={formatRelativeDate}
-          />
-          <AnnouncementsCard announcements={announcements} />
-        </div>
+        <StudentStatsGrid
+          enrolledCount={enrolledCourses.length}
+          pendingAssignments={stats.pendingAssignments}
+          gpa={stats.gpa}
+          credits={stats.credits}
+          unreadAlerts={stats.unreadAlerts}
+        />
+
+        <main className="min-w-0">
+          <CampusFeed />
+        </main>
       </div>
+
+      <div className="hidden 2xl:block">{studyPanel}</div>
     </div>
   );
 }

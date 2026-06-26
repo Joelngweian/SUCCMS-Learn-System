@@ -1,4 +1,4 @@
-import type { ChangeEvent } from "react";
+import { useState, type ChangeEvent } from "react";
 import {
   CheckCircle,
   ChevronLeft,
@@ -8,7 +8,9 @@ import {
   FileText,
   GraduationCap,
   Loader2,
+  Minus,
   Plus,
+  RotateCcw,
   Sparkles,
   User,
   Users,
@@ -28,11 +30,17 @@ import {
   type CourseAssignment,
   type CoursePerson,
   type CourseSubmission,
+  type RubricGradeItem,
   type SubmissionFile,
 } from "./coursePageTypes";
 import { CourseAssignmentResources } from "./CourseAssignmentResources";
-import { resolveSubmissionFileUrl } from "@/lib/submissionStorage";
+import {
+  isWordSubmissionFile,
+  resolveSubmissionFileUrl,
+} from "@/lib/submissionStorage";
 import { notify } from "@/lib/notify";
+import { getAssessmentTypeLabel } from "@/lib/assessmentTypes";
+import { WordSubmissionViewer } from "./WordSubmissionViewer";
 
 type CourseAssignmentDetailDialogProps = {
   assignment: CourseAssignment | null;
@@ -46,6 +54,7 @@ type CourseAssignmentDetailDialogProps = {
   isAiGrading: boolean;
   aiGradingError: string;
   aiGradeDetails: AiGradeDetails | null;
+  rubricGrades: RubricGradeItem[];
   currentGrade: string;
   currentFeedback: string;
   onClose: () => void;
@@ -55,6 +64,8 @@ type CourseAssignmentDetailDialogProps = {
   onTurnIn: () => void;
   onUndoTurnIn: () => void;
   onAiGrade: () => void;
+  onRubricAdjustmentChange: (index: number, adjustment: number) => void;
+  onResetRubricAdjustments: () => void;
   onGradeChange: (value: string) => void;
   onFeedbackChange: (value: string) => void;
   onSaveGrade: () => void;
@@ -72,6 +83,7 @@ export function CourseAssignmentDetailDialog({
   isAiGrading,
   aiGradingError,
   aiGradeDetails,
+  rubricGrades,
   currentGrade,
   currentFeedback,
   onClose,
@@ -81,10 +93,14 @@ export function CourseAssignmentDetailDialog({
   onTurnIn,
   onUndoTurnIn,
   onAiGrade,
+  onRubricAdjustmentChange,
+  onResetRubricAdjustments,
   onGradeChange,
   onFeedbackChange,
   onSaveGrade,
 }: CourseAssignmentDetailDialogProps) {
+  const [wordPreviewFile, setWordPreviewFile] =
+    useState<SubmissionFile | null>(null);
   if (!assignment) return null;
 
   const mySubmission = mySubmissions.find(
@@ -110,6 +126,9 @@ export function CourseAssignmentDetailDialog({
               </Button>
             )}
             <div>
+              <Badge variant="secondary" className="mb-1.5 text-[10px]">
+                {getAssessmentTypeLabel(assignment.assessment_type)}
+              </Badge>
               <h2 className="text-xl font-bold tracking-tight text-gray-900">
                 {assignment.title}
               </h2>
@@ -124,7 +143,7 @@ export function CourseAssignmentDetailDialog({
             variant="ghost"
             size="icon"
             onClick={onClose}
-            aria-label="Close assignment"
+            aria-label="Close assessment"
           >
             <X className="h-5 w-5 text-gray-500" />
           </Button>
@@ -218,6 +237,11 @@ export function CourseAssignmentDetailDialog({
                             key={`${file.path}-${index}`}
                             type="button"
                             onClick={() => {
+                              if (isWordSubmissionFile(file)) {
+                                setWordPreviewFile(file);
+                                return;
+                              }
+
                               void resolveSubmissionFileUrl(file)
                                 .then((url) =>
                                   window.open(url, "_blank", "noopener,noreferrer")
@@ -339,52 +363,109 @@ export function CourseAssignmentDetailDialog({
                             ? "Try Again"
                             : "Start AI Grading"}
                       </Button>
-                      {aiGradeDetails && (
-                        <details className="assignment-ai-details">
-                          <summary>
-                            <span>View grading details</span>
-                            {aiGradeDetails.confidence != null && (
-                              <span className="assignment-ai-confidence">
-                                {aiGradeDetails.confidence}% confidence
-                              </span>
-                            )}
-                          </summary>
-                          <div className="assignment-ai-details-content">
-                            {aiGradeDetails.criteria.length > 0 && (
-                              <div className="assignment-ai-criteria">
-                                {aiGradeDetails.criteria.map((criterion, index) => (
-                                  <div
-                                    className="assignment-ai-criterion"
-                                    key={`${criterion.name}-${index}`}
-                                  >
-                                    <div className="assignment-ai-criterion-heading">
-                                      <span>{criterion.name}</span>
-                                      <strong>
-                                        {criterion.score}/{criterion.maxScore}
-                                      </strong>
-                                    </div>
-                                    {criterion.reason && <p>{criterion.reason}</p>}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            {aiGradeDetails.warnings.length > 0 && (
-                              <div className="assignment-ai-review-notes">
-                                <strong>Review notes</strong>
-                                {aiGradeDetails.warnings.map((warning, index) => (
-                                  <p key={index}>{warning}</p>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </details>
-                      )}
                     </CardContent>
                   </Card>
 
                   <div className="assignment-grading-form">
+                    {rubricGrades.length > 0 && (
+                      <div className="assignment-rubric-review">
+                        <div className="assignment-rubric-review-header">
+                          <div>
+                            <h4>Rubric score review</h4>
+                            <p>Adjust only the section that needs lecturer review.</p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={onResetRubricAdjustments}
+                            className="assignment-rubric-reset"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            Reset
+                          </Button>
+                        </div>
+
+                        <div className="assignment-rubric-items">
+                          {rubricGrades.map((criterion, index) => (
+                            <div
+                              className="assignment-rubric-item"
+                              key={`${criterion.name}-${index}`}
+                            >
+                              <div className="assignment-rubric-item-heading">
+                                <div>
+                                  <strong>{criterion.name}</strong>
+                                  <span>
+                                    AI {criterion.aiScore}/{criterion.maxScore}
+                                  </span>
+                                </div>
+                                <b>
+                                  {criterion.finalScore}/{criterion.maxScore}
+                                </b>
+                              </div>
+                              {criterion.reason && <p>{criterion.reason}</p>}
+                              <div className="assignment-rubric-adjustment">
+                                <span>Lecturer adjustment</span>
+                                <div>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() =>
+                                      onRubricAdjustmentChange(
+                                        index,
+                                        criterion.adjustment - 1,
+                                      )
+                                    }
+                                    disabled={criterion.finalScore <= 0}
+                                    aria-label={`Deduct one mark from ${criterion.name}`}
+                                  >
+                                    <Minus className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Input
+                                    type="number"
+                                    min={-criterion.aiScore}
+                                    max={criterion.maxScore - criterion.aiScore}
+                                    step={1}
+                                    value={criterion.adjustment}
+                                    onChange={event =>
+                                      onRubricAdjustmentChange(
+                                        index,
+                                        Number(event.target.value || 0),
+                                      )
+                                    }
+                                    aria-label={`${criterion.name} lecturer adjustment`}
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() =>
+                                      onRubricAdjustmentChange(
+                                        index,
+                                        criterion.adjustment + 1,
+                                      )
+                                    }
+                                    disabled={
+                                      criterion.finalScore >= criterion.maxScore
+                                    }
+                                    aria-label={`Add one mark to ${criterion.name}`}
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="assignment-grading-field">
-                      <Label className="text-gray-700 font-semibold">Score</Label>
+                      <Label className="text-gray-700 font-semibold">
+                        {rubricGrades.length > 0
+                          ? "Final score from rubric"
+                          : "Score"}
+                      </Label>
                       <div className="assignment-score-row">
                         <Input
                           type="number"
@@ -392,6 +473,7 @@ export function CourseAssignmentDetailDialog({
                           max={getAssignmentMaxScore(assignment)}
                           value={currentGrade}
                           onChange={event => onGradeChange(event.target.value)}
+                          readOnly={rubricGrades.length > 0}
                           className="assignment-score-input text-2xl font-bold text-center bg-white"
                           placeholder="-"
                         />
@@ -399,6 +481,12 @@ export function CourseAssignmentDetailDialog({
                           / {getAssignmentMaxScore(assignment)}
                         </span>
                       </div>
+                      {rubricGrades.length > 0 && (
+                        <p className="assignment-score-helper">
+                          Automatically calculated from the reviewed rubric
+                          sections above.
+                        </p>
+                      )}
                     </div>
                     <div className="assignment-grading-field">
                       <Label className="text-gray-700 font-semibold">
@@ -521,6 +609,14 @@ export function CourseAssignmentDetailDialog({
             )}
           </div>
         </div>
+        <WordSubmissionViewer
+          file={wordPreviewFile}
+          annotations={aiGradeDetails?.annotations || []}
+          open={wordPreviewFile !== null}
+          onOpenChange={open => {
+            if (!open) setWordPreviewFile(null);
+          }}
+        />
       </DialogContent>
     </Dialog>
   );

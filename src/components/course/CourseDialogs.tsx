@@ -1,5 +1,13 @@
 import type { ChangeEvent } from "react";
-import { Paperclip, X } from "lucide-react";
+import {
+  BookOpenCheck,
+  FolderKanban,
+  Paperclip,
+  UserRound,
+  UsersRound,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +21,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  ASSESSMENT_TYPE_OPTIONS,
+  getAssessmentTitlePlaceholder,
+  type AssessmentDraft,
+  type AssessmentType,
+} from "@/lib/assessmentTypes";
 import type {
   CoursePerson,
   CourseResourceFile,
@@ -96,28 +110,27 @@ export function AddStudentDialog({
   );
 }
 
-type AssignmentDraft = {
-  title: string;
-  description: string;
-  rubric: string;
-  points: string;
-  due_date: string;
+const ASSESSMENT_TYPE_ICONS: Record<AssessmentType, LucideIcon> = {
+  tutorial: BookOpenCheck,
+  individual_assignment: UserRound,
+  group_project: UsersRound,
+  mini_project: FolderKanban,
 };
 
-type CreateAssignmentDialogProps = {
+type CreateAssessmentDialogProps = {
   open: boolean;
-  assignment: AssignmentDraft;
+  assignment: AssessmentDraft;
   rubricFiles: CourseResourceFile[];
   materialFiles: CourseResourceFile[];
   isUploading: boolean;
   onOpenChange: (open: boolean) => void;
-  onAssignmentChange: (assignment: AssignmentDraft) => void;
+  onAssignmentChange: (assignment: AssessmentDraft) => void;
   onRubricUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   onMaterialUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   onCreate: () => void;
 };
 
-export function CreateAssignmentDialog({
+export function CreateAssessmentDialog({
   open,
   assignment,
   rubricFiles,
@@ -128,18 +141,73 @@ export function CreateAssignmentDialog({
   onRubricUpload,
   onMaterialUpload,
   onCreate,
-}: CreateAssignmentDialogProps) {
+}: CreateAssessmentDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl" hideCloseButton>
+      <DialogContent
+        className="max-h-[92vh] overflow-y-auto sm:max-w-2xl"
+        hideCloseButton
+      >
         <DialogHeader className="flex flex-row justify-between items-center">
-          <DialogTitle>Create Assignment</DialogTitle>
+          <DialogTitle>Create Assessment</DialogTitle>
           <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
             <X className="h-4 w-4" />
           </Button>
         </DialogHeader>
         <div className="grid gap-4 py-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <div>
+              <Label>Assessment Type</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Select the kind of work students will complete.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {ASSESSMENT_TYPE_OPTIONS.map(option => {
+                const Icon = ASSESSMENT_TYPE_ICONS[option.value];
+                const isSelected =
+                  assignment.assessment_type === option.value;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() =>
+                      onAssignmentChange({
+                        ...assignment,
+                        assessment_type: option.value,
+                      })
+                    }
+                    className={`flex items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+                      isSelected
+                        ? "border-primary bg-primary/5 ring-1 ring-primary"
+                        : "border-border hover:border-primary/50 hover:bg-muted/40"
+                    }`}
+                  >
+                    <span
+                      className={`rounded-md p-2 ${
+                        isSelected
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold">
+                        {option.label}
+                      </span>
+                      <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
+                        {option.description}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>Title</Label>
               <Input
@@ -148,7 +216,9 @@ export function CreateAssignmentDialog({
                   ...assignment,
                   title: event.target.value,
                 })}
-                placeholder="Assignment Title"
+                placeholder={getAssessmentTitlePlaceholder(
+                  assignment.assessment_type,
+                )}
               />
             </div>
             <div className="space-y-2">
@@ -213,7 +283,7 @@ export function CreateAssignmentDialog({
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Points (Optional)</Label>
+            <Label>Total Marks (Optional)</Label>
             <Input
               type="number"
               value={assignment.points}
@@ -268,9 +338,14 @@ export function CreateAssignmentDialog({
         <DialogFooter>
           <Button
             onClick={onCreate}
-            disabled={!assignment.title || !assignment.due_date || isUploading}
+            disabled={
+              !assignment.assessment_type
+              || !assignment.title.trim()
+              || !assignment.due_date
+              || isUploading
+            }
           >
-            Create
+            Create Assessment
           </Button>
         </DialogFooter>
       </DialogContent>

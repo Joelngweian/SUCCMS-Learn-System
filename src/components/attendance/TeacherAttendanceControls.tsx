@@ -1,11 +1,11 @@
 import {
   CalendarCog,
   Copy,
+  Download,
   Loader2,
   Play,
   RotateCcw,
   Square,
-  Trash2,
 } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -17,54 +17,173 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
-import { formatTime, type AttendanceSession } from "./attendanceTypes";
+import {
+  formatSessionSlotLabel,
+  formatSessionWindow,
+  formatTime,
+  type AttendanceSession,
+} from "./attendanceTypes";
 
 interface TeacherAttendanceControlsProps {
   selectedDate: string;
   today: string;
+  classHours: string;
+  classStartTime: string;
   sessionDuration: string;
+  sessionsForDate: AttendanceSession[];
+  selectedSessionId: string | null;
   selectedSession: AttendanceSession | null;
   sessionIsOpen: boolean;
+  sessionIsUpcoming: boolean;
   sessionHasExpired: boolean;
   canOpenCheckIn: boolean;
   isManagingSession: boolean;
+  isExportingAttendance: boolean;
+  isExportingAttendanceSummary: boolean;
+  canExportAttendance: boolean;
+  canExportAttendanceSummary: boolean;
+  missingSlotCount: number;
+  canAddMissingSlots: boolean;
   onSelectedDateChange: (value: string) => void;
+  onClassHoursChange: (value: string) => void;
+  onClassStartTimeChange: (value: string) => void;
   onSessionDurationChange: (value: string) => void;
+  onSelectedSessionChange: (value: string) => void;
+  onExportAttendance: () => void;
+  onExportAttendanceSummary: () => void;
+  onAddMissingSlots: () => void;
   onCopyCode: () => void;
   onCloseSession: () => void;
   onCorrectDate: () => void;
-  onDeleteClass: () => void;
   onStartSession: () => void;
 }
 
 export function TeacherAttendanceControls({
   selectedDate,
   today,
+  classHours,
+  classStartTime,
   sessionDuration,
+  sessionsForDate,
+  selectedSessionId,
   selectedSession,
   sessionIsOpen,
+  sessionIsUpcoming,
   sessionHasExpired,
   canOpenCheckIn,
   isManagingSession,
+  isExportingAttendance,
+  isExportingAttendanceSummary,
+  canExportAttendance,
+  canExportAttendanceSummary,
+  missingSlotCount,
+  canAddMissingSlots,
   onSelectedDateChange,
+  onClassHoursChange,
+  onClassStartTimeChange,
   onSessionDurationChange,
+  onSelectedSessionChange,
+  onExportAttendance,
+  onExportAttendanceSummary,
+  onAddMissingSlots,
   onCopyCode,
   onCloseSession,
   onCorrectDate,
-  onDeleteClass,
   onStartSession,
 }: TeacherAttendanceControlsProps) {
+  const hasSessionsForDate = sessionsForDate.length > 0;
+
   return (
     <div className="rounded-lg border bg-card p-4">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Class Attendance</h2>
-          <p className="text-sm text-muted-foreground">
-            Open student check-in, then review only those who did not respond.
-          </p>
+      <div className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold">Class Attendance</h2>
+            <p className="max-w-2xl text-sm text-muted-foreground">
+              Create one check-in slot per class hour, then review each hour
+              separately.
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2 self-start">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onExportAttendance}
+              disabled={!canExportAttendance || isExportingAttendance}
+            >
+              {isExportingAttendance ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              Export Current Class
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onExportAttendanceSummary}
+              disabled={
+                !canExportAttendanceSummary || isExportingAttendanceSummary
+              }
+            >
+              {isExportingAttendanceSummary ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              Export Summary
+            </Button>
+          </div>
         </div>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <div className="w-full sm:w-48">
+
+        {hasSessionsForDate && (
+          <div className="border-t pt-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex flex-wrap gap-2">
+                {sessionsForDate.map((session) => (
+                  <button
+                    type="button"
+                    key={session.id}
+                    onClick={() => onSelectedSessionChange(session.id)}
+                    className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                      selectedSessionId === session.id
+                        ? "border-primary bg-primary/5 text-primary"
+                        : "bg-muted/20 hover:bg-muted/40"
+                    }`}
+                  >
+                    <span className="block font-medium">
+                      {formatSessionSlotLabel(session)}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatSessionWindow(session)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {missingSlotCount > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={onAddMissingSlots}
+                  disabled={!canAddMissingSlots || isManagingSession}
+                >
+                  {isManagingSession ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="mr-2 h-4 w-4" />
+                  )}
+                  Add {missingSlotCount} Missing Hour Slot
+                  {missingSlotCount === 1 ? "" : "s"}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="w-full">
             <label
               htmlFor="attendance-date"
               className="mb-1 block text-xs font-medium"
@@ -76,20 +195,50 @@ export function TeacherAttendanceControls({
               type="date"
               value={selectedDate}
               max={today}
-              disabled={selectedSession != null}
-              title={
-                selectedSession
-                  ? "Use Correct Date to change a saved class date."
-                  : undefined
-              }
               onChange={(event) =>
                 onSelectedDateChange(event.target.value)
               }
             />
           </div>
-          <div className="w-full sm:w-40">
+          <div className="w-full">
+            <label
+              htmlFor="attendance-start-time"
+              className="mb-1 block text-xs font-medium"
+            >
+              Start Time
+            </label>
+            <Input
+              id="attendance-start-time"
+              type="time"
+              value={classStartTime}
+              disabled={hasSessionsForDate}
+              onChange={(event) =>
+                onClassStartTimeChange(event.target.value)
+              }
+            />
+          </div>
+          <div className="w-full">
             <label className="mb-1 block text-xs font-medium">
-              Check-In Time
+              Class Hours
+            </label>
+            <Select
+              value={classHours}
+              onValueChange={onClassHoursChange}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">1 hour</SelectItem>
+                <SelectItem value="2">2 hours</SelectItem>
+                <SelectItem value="3">3 hours</SelectItem>
+                <SelectItem value="4">4 hours</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-full">
+            <label className="mb-1 block text-xs font-medium">
+              Check-In Window
             </label>
             <Select
               value={sessionDuration}
@@ -110,12 +259,14 @@ export function TeacherAttendanceControls({
       </div>
 
       <div className="mt-4 border-t pt-4">
-        {selectedSession ? (
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        {hasSessionsForDate ? (
+          <div className="space-y-4">
+            {selectedSession && (
+          <div className="flex flex-col gap-4 rounded-lg border bg-muted/10 p-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap items-center gap-3">
               <div>
                 <p className="text-xs text-muted-foreground">
-                  Student Check-In Code
+                  {formatSessionSlotLabel(selectedSession)} Code
                 </p>
                 <p className="font-mono text-2xl font-semibold tracking-[0.2em]">
                   {selectedSession.check_in_code}
@@ -135,11 +286,15 @@ export function TeacherAttendanceControls({
                 className={
                   sessionIsOpen
                     ? "border-green-200 bg-green-50 text-green-700"
+                    : sessionIsUpcoming
+                      ? "border-blue-200 bg-blue-50 text-blue-700"
                     : "border-gray-200 bg-gray-50 text-gray-700"
                 }
               >
                 {sessionIsOpen
                   ? `Open until ${formatTime(selectedSession.ends_at)}`
+                  : sessionIsUpcoming
+                    ? `Opens at ${formatTime(selectedSession.starts_at)}`
                   : sessionHasExpired
                     ? "Expired"
                     : "Closed"}
@@ -157,7 +312,21 @@ export function TeacherAttendanceControls({
                 ) : (
                   <Square className="mr-2 h-4 w-4" />
                 )}
-                Close Check-In
+                Close & Mark Missing Absent
+              </Button>
+            ) : sessionHasExpired ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onCloseSession}
+                disabled={isManagingSession}
+              >
+                {isManagingSession ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Square className="mr-2 h-4 w-4" />
+                )}
+                Finalize Slot
               </Button>
             ) : (
               <div className="flex flex-wrap gap-2">
@@ -169,16 +338,6 @@ export function TeacherAttendanceControls({
                 >
                   <CalendarCog className="mr-2 h-4 w-4" />
                   Correct Date
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-                  onClick={onDeleteClass}
-                  disabled={isManagingSession}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete Class
                 </Button>
                 <Button
                   type="button"
@@ -195,16 +354,20 @@ export function TeacherAttendanceControls({
               </div>
             )}
           </div>
+            )}
+          </div>
         ) : (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-medium">
-                No check-in session for this date
+                No check-in slots for this date
               </p>
               <p className="text-xs text-muted-foreground">
                 {canOpenCheckIn
-                  ? "Starting a session creates a new six-character code."
-                  : "Student check-in can only be opened for today's class."}
+                  ? `Creating this class makes ${classHours} hourly check-in slot${
+                      classHours === "1" ? "" : "s"
+                    }.`
+                  : "Student check-in slots can only be created for today's class."}
               </p>
             </div>
             <Button
@@ -217,7 +380,7 @@ export function TeacherAttendanceControls({
               ) : (
                 <Play className="mr-2 h-4 w-4" />
               )}
-              Start Student Check-In
+              Create Hourly Check-In Slots
             </Button>
           </div>
         )}

@@ -15,32 +15,37 @@ export function AttendanceSummaryCards({
     {
       label: "Present",
       value: summary.present,
-      className: "bg-green-50/60 text-green-700",
-      valueClassName: "text-green-800",
+      className:
+        "border-green-200 bg-green-50/70 text-green-700 dark:border-green-900/60 dark:bg-green-950/35 dark:text-green-300",
+      valueClassName: "text-green-800 dark:text-green-200",
     },
     {
       label: "Late",
       value: summary.late,
-      className: "bg-amber-50/60 text-amber-700",
-      valueClassName: "text-amber-800",
+      className:
+        "border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/35 dark:text-amber-300",
+      valueClassName: "text-amber-800 dark:text-amber-200",
     },
     {
       label: "Absent",
       value: summary.absent,
-      className: "bg-red-50/60 text-red-700",
-      valueClassName: "text-red-800",
+      className:
+        "border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/60 dark:bg-red-950/35 dark:text-red-300",
+      valueClassName: "text-red-800 dark:text-red-200",
     },
     {
       label: "Excused",
       value: summary.excused,
-      className: "bg-blue-50/60 text-blue-700",
-      valueClassName: "text-blue-800",
+      className:
+        "border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/35 dark:text-blue-300",
+      valueClassName: "text-blue-800 dark:text-blue-200",
     },
     {
       label: "Not Checked In",
       value: summary.unmarked,
-      className: "bg-muted/30 text-muted-foreground",
-      valueClassName: "",
+      className:
+        "border-slate-200 bg-muted/30 text-muted-foreground dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300",
+      valueClassName: "dark:text-slate-100",
     },
   ];
 
@@ -102,10 +107,13 @@ export function RecentClasses({
                 {formatClassDate(session.date)}
               </p>
               <div className="mt-2 flex items-center gap-3 text-xs">
-                <span className="text-green-700">
+                <span className="text-muted-foreground">
+                  {session.slots} slot{session.slots === 1 ? "" : "s"}
+                </span>
+                <span className="text-green-700 dark:text-green-300">
                   {session.present} credited
                 </span>
-                <span className="text-red-700">
+                <span className="text-red-700 dark:text-red-300">
                   {session.absent} absent
                 </span>
               </div>

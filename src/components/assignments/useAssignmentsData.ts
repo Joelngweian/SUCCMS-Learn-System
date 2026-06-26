@@ -19,10 +19,10 @@ type AssignmentQueryRow = AssignmentRow & {
 };
 
 const ASSIGNMENT_SELECT =
-  "id, course_id, title, description, created_by, due_date, max_score, created_at, updated_at, attachments, rubric";
+  "id, course_id, assessment_type, title, description, created_by, due_date, max_score, created_at, updated_at, attachments, rubric";
 
 const SUBMISSION_SELECT =
-  "id, assignment_id, student_id, submission_file_url, submission_text, submitted_at, is_late, grade, feedback, files";
+  "id, assignment_id, student_id, submission_file_url, submission_text, submitted_at, is_late, grade, feedback, files, rubric_grades";
 
 const emptyStudentBuckets: StudentAssignmentBuckets = {
   upcoming: [],

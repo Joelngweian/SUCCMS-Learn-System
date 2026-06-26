@@ -169,6 +169,7 @@ export type Database = {
           grade: number | null
           feedback: string | null
           files: Json | null
+          rubric_grades: Json
         },
         "assignment_id" | "student_id",
         [
@@ -192,6 +193,7 @@ export type Database = {
         {
           id: string
           course_id: string
+          assessment_type: string
           title: string
           description: string | null
           created_by: string
@@ -229,6 +231,7 @@ export type Database = {
           marked_present: boolean | null
           marked_at: string
           marked_by: string
+          class_meeting_id: string | null
           session_id: string | null
           status: string
           check_in_at: string | null
@@ -236,6 +239,13 @@ export type Database = {
         },
         "course_id" | "student_id" | "class_date" | "marked_by",
         [
+          {
+            foreignKeyName: "attendance_class_meeting_id_fkey"
+            columns: ["class_meeting_id"]
+            isOneToOne: false
+            referencedRelation: "attendance_class_meetings"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "attendance_course_offering_id_fkey"
             columns: ["course_id"]
@@ -266,15 +276,50 @@ export type Database = {
           },
         ]
       >
-      attendance_sessions: Table<
+      attendance_class_meetings: Table<
         {
           id: string
           course_id: string
           class_date: string
+          starts_at: string
+          ends_at: string
+          slot_minutes: number
+          total_slots: number
+          created_by: string
+          created_at: string
+          updated_at: string
+        },
+        "course_id" | "starts_at" | "ends_at" | "created_by",
+        [
+          {
+            foreignKeyName: "attendance_class_meetings_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_class_meetings_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      attendance_sessions: Table<
+        {
+          id: string
+          course_id: string
+          class_meeting_id: string | null
+          class_date: string
+          slot_no: number
+          slot_label: string | null
           check_in_code: string
           status: string
           starts_at: string
           ends_at: string
+          check_in_window_minutes: number
           closed_at: string | null
           created_by: string
           created_at: string
@@ -282,6 +327,13 @@ export type Database = {
         },
         "course_id" | "class_date" | "check_in_code" | "ends_at" | "created_by",
         [
+          {
+            foreignKeyName: "attendance_sessions_class_meeting_id_fkey"
+            columns: ["class_meeting_id"]
+            isOneToOne: false
+            referencedRelation: "attendance_class_meetings"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "attendance_sessions_course_id_fkey"
             columns: ["course_id"]
@@ -292,6 +344,79 @@ export type Database = {
           {
             foreignKeyName: "attendance_sessions_created_by_fkey"
             columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      campus_post_comments: Table<
+        {
+          id: string
+          post_id: string
+          author_id: string
+          content: string
+          attachments: Json
+          created_at: string
+          updated_at: string
+        },
+        "post_id" | "author_id",
+        [
+          {
+            foreignKeyName: "campus_post_comments_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "campus_posts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campus_post_comments_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      campus_post_reactions: Table<
+        {
+          post_id: string
+          user_id: string
+          reaction: "like" | "love" | "celebrate" | "support"
+          created_at: string
+        },
+        "post_id" | "user_id",
+        [
+          {
+            foreignKeyName: "campus_post_reactions_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "campus_posts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campus_post_reactions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      campus_posts: Table<
+        {
+          id: string
+          author_id: string
+          content: string
+          attachments: Json
+          created_at: string
+          updated_at: string
+        },
+        "author_id",
+        [
+          {
+            foreignKeyName: "campus_posts_author_id_fkey"
+            columns: ["author_id"]
             isOneToOne: false
             referencedRelation: "user_profiles"
             referencedColumns: ["id"]
@@ -317,6 +442,52 @@ export type Database = {
           {
             foreignKeyName: "course_enrollments_student_id_fkey"
             columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      course_assessment_items: Table<
+        {
+          id: string
+          course_id: string
+          item_type: string
+          title: string
+          max_marks: number
+          weight_percentage: number
+          position: number
+          created_by: string
+          updated_by: string
+          created_at: string
+          updated_at: string
+        },
+        | "course_id"
+        | "item_type"
+        | "title"
+        | "max_marks"
+        | "weight_percentage"
+        | "position"
+        | "created_by"
+        | "updated_by",
+        [
+          {
+            foreignKeyName: "course_assessment_items_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "course_offerings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_assessment_items_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_assessment_items_updated_by_fkey"
+            columns: ["updated_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
             referencedColumns: ["id"]
@@ -1381,6 +1552,14 @@ export type Database = {
         Args: { p_course_id: string; p_academic_term_id?: string }
         Returns: string
       }
+      create_course_offering_with_assessment: {
+        Args: {
+          p_course_id: string
+          p_items: Json
+          p_academic_term_id?: string | null
+        }
+        Returns: string
+      }
       create_user_notification: {
         Args: {
           target_user_id: string
@@ -1451,6 +1630,39 @@ export type Database = {
           attachments: Json
           created_at: string
           updated_at: string
+        }[]
+      }
+      get_campus_posts_page: {
+        Args: {
+          p_before_created_at?: string | null
+          p_before_id?: string | null
+          p_limit?: number
+        }
+        Returns: {
+          id: string
+          author_id: string
+          author_name: string
+          author_avatar_url: string | null
+          author_role: string
+          content: string
+          attachments: Json
+          created_at: string
+          updated_at: string
+          reaction_count: number
+          comment_count: number
+          viewer_reaction: string | null
+        }[]
+      }
+      search_campus_mention_courses: {
+        Args: {
+          p_search?: string | null
+          p_limit?: number
+        }
+        Returns: {
+          id: string
+          course_code: string
+          name: string
+          chinese_name: string | null
         }[]
       }
       get_lecturer_analytics: {
@@ -1628,6 +1840,13 @@ export type Database = {
       reject_course_creation_request: {
         Args: { p_request_id: string; p_admin_notes?: string | null }
         Returns: boolean
+      }
+      save_course_assessment_structure: {
+        Args: {
+          p_course_id: string
+          p_items: Json
+        }
+        Returns: Database["public"]["Tables"]["course_assessment_items"]["Row"][]
       }
       handle_new_user: {
         Args: Record<PropertyKey, never>

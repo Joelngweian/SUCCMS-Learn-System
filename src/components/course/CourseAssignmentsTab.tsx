@@ -1,5 +1,9 @@
-import type { MouseEvent } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import {
+  AssessmentFilters,
+  type AssessmentTypeFilter,
+} from "@/components/assignments/AssessmentFilters";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,12 +14,16 @@ import {
   type CourseSubmission,
   type SubmissionFile,
 } from "./coursePageTypes";
+import {
+  getAssessmentTypeLabel,
+  matchesAssessmentFilters,
+} from "@/lib/assessmentTypes";
 
 type CourseAssignmentsTabProps = {
   isLecturer: boolean;
   assignments: CourseAssignment[];
   mySubmissions: CourseSubmission[];
-  onCreateAssignment: () => void;
+  onCreateAssessment: () => void;
   onDeleteAssignment: (assignmentId: string) => void;
   onSelectAssignment: (
     assignment: CourseAssignment,
@@ -27,26 +35,49 @@ export function CourseAssignmentsTab({
   isLecturer,
   assignments,
   mySubmissions,
-  onCreateAssignment,
+  onCreateAssessment,
   onDeleteAssignment,
   onSelectAssignment,
 }: CourseAssignmentsTabProps) {
+  const [typeFilter, setTypeFilter] =
+    useState<AssessmentTypeFilter>("all");
+  const filteredAssignments = useMemo(
+    () =>
+      assignments.filter(assignment =>
+        matchesAssessmentFilters({
+          assessmentType: assignment.assessment_type,
+          typeFilter,
+        }),
+      ),
+    [assignments, typeFilter],
+  );
+  const filterActive = typeFilter !== "all";
+
   return (
     <TabsContent value="assignments" className="space-y-4">
       {isLecturer && (
-        <Button onClick={onCreateAssignment} className="w-full sm:w-auto">
-          <Plus className="h-4 w-4 mr-2" /> Create Assignment
+        <Button onClick={onCreateAssessment} className="w-full sm:w-auto">
+          <Plus className="h-4 w-4 mr-2" /> Create Assessment
         </Button>
       )}
 
+      <AssessmentFilters
+        typeFilter={typeFilter}
+        resultCount={filteredAssignments.length}
+        totalCount={assignments.length}
+        onTypeChange={setTypeFilter}
+      />
+
       <div className="grid gap-4">
-        {assignments.length === 0 && (
+        {filteredAssignments.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
-            No active assignments.
+            {filterActive
+              ? "No assessments match your filters."
+              : "No active assessments."}
           </div>
         )}
 
-        {assignments.map(assignment => {
+        {filteredAssignments.map(assignment => {
           const submission = mySubmissions.find(
             item => item.assignment_id === assignment.id
           );
@@ -65,9 +96,17 @@ export function CourseAssignmentsTab({
               )}
             >
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-base font-semibold">
-                  {assignment.title}
-                </CardTitle>
+                <div className="min-w-0">
+                  <Badge
+                    variant="secondary"
+                    className="mb-2 text-[10px] font-medium"
+                  >
+                    {getAssessmentTypeLabel(assignment.assessment_type)}
+                  </Badge>
+                  <CardTitle className="truncate text-base font-semibold">
+                    {assignment.title}
+                  </CardTitle>
+                </div>
                 {isLecturer ? (
                   <Button
                     variant="ghost"

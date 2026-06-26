@@ -107,7 +107,7 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
           </TabsTrigger>
           <TabsTrigger value="assignments" className="gap-2">
             <Calendar className="h-4 w-4" />
-            Tasks
+            Assessments
           </TabsTrigger>
           <TabsTrigger value="attendance" className="gap-2">
             <ClipboardCheck className="h-4 w-4" />
@@ -136,6 +136,8 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
           {activeTab === "attendance" && (
             <CourseAttendanceSection
               courseId={courseId}
+              courseCode={course.code || course.course_code}
+              courseName={course.name}
               isLecturer={isLecturer}
             />
           )}

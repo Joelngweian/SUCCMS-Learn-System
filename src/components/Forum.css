@@ -34,7 +34,7 @@
 
 .dark .forum-filter-button.active,
 .dark .forum-filter-button.active * {
-  color: #111827 !important;
+  color: #f8fafc !important;
 }
 
 .forum-course-button {
@@ -53,7 +53,7 @@
 
 .dark .forum-course-button.active,
 .dark .forum-course-button.active * {
-  color: #1721b8 !important;
+  color: #93c5fd !important;
 }
 
 .dark .forum-root .text-gray-900,

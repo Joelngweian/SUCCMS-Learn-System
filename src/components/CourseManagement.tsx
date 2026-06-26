@@ -20,6 +20,18 @@ import { confirmAction } from "@/lib/confirm";
 import { notify } from "@/lib/notify";
 import { invalidateCourseCache } from "@/data/courseRepository";
 import { CourseCreationRequestDialog } from "./course/CourseCreationRequestDialog";
+import {
+  assessmentRowsToValues,
+  createCourseOfferingWithAssessment,
+  getCourseAssessmentStructures,
+  saveCourseAssessmentStructure,
+  type CourseAssessmentItem,
+  type CourseAssessmentValues,
+} from "@/data/courseAssessmentRepository";
+import {
+  CourseAssessmentDialog,
+  CourseAssessmentSummary,
+} from "./course/CourseAssessmentStructure";
 
 export function CourseManagement() {
   const { profile } = useAuth();
@@ -28,12 +40,18 @@ export function CourseManagement() {
   const [activeTab, setActiveTab] = useState("my-teaching");
   type CourseTemplate =
     Database["public"]["Functions"]["get_course_catalog_summary"]["Returns"][number];
+  type TeachingCourse = NormalizedCourseOffering & {
+    assessmentStructure?: CourseAssessmentItem[] | null;
+  };
   const [courses, setCourses] = useState<CourseTemplate[]>([]);
-  const [myCourses, setMyCourses] = useState<NormalizedCourseOffering[]>([]);
+  const [myCourses, setMyCourses] = useState<TeachingCourse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [droppingCourseId, setDroppingCourseId] = useState<string | null>(null);
   const [isRequestDialogOpen, setIsRequestDialogOpen] = useState(false);
+  const [courseToTeach, setCourseToTeach] = useState<CourseTemplate | null>(null);
+  const [assessmentCourseToEdit, setAssessmentCourseToEdit] =
+    useState<TeachingCourse | null>(null);
   
   // View Switching
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
@@ -88,11 +106,24 @@ export function CourseManagement() {
       .select(`course_id, course_offerings(${COURSE_OFFERING_SELECT})`)
       .eq('user_id', profileId);
     
-    setMyCourses(
+    const normalizedCourses =
       myData
         ?.map((row) => normalizeCourseOffering(row.course_offerings))
-        .filter((course) => Boolean(course.id)) || []
-    );
+        .filter((course) => Boolean(course.id)) || [];
+    try {
+      const assessmentStructures = await getCourseAssessmentStructures(
+        normalizedCourses.map(course => course.id),
+      );
+      setMyCourses(
+        normalizedCourses.map(course => ({
+          ...course,
+          assessmentStructure: assessmentStructures.get(course.id) || null,
+        })),
+      );
+    } catch (assessmentError) {
+      console.error("Failed to load assessment structures:", assessmentError);
+      setMyCourses(normalizedCourses);
+    }
     setIsLoading(false);
   }, [profileId]);
 
@@ -104,19 +135,30 @@ export function CourseManagement() {
     course: CourseTemplate | NormalizedCourseOffering,
   ) => course.course_code || course.code || "N/A";
 
-  const handleClaimCourse = async (courseId: string) => {
-    const { error } = await supabase.rpc('create_course_offering', {
-      p_course_id: courseId
+  const handleClaimCourse = async (values: CourseAssessmentValues) => {
+    if (!courseToTeach) return;
+
+    await createCourseOfferingWithAssessment({
+      courseTemplateId: courseToTeach.id,
+      values,
     });
-    
-    if (!error) {
-      invalidateCourseCache();
-      void fetchData();
-      setActiveTab("my-teaching");
-    } else {
-      console.error("Error creating course offering:", error);
-      notify.error(error, "Failed to add course.");
-    }
+    invalidateCourseCache();
+    setCourseToTeach(null);
+    await fetchData();
+    setActiveTab("my-teaching");
+    notify.success("Course and assessment structure created.");
+  };
+
+  const handleSaveAssessment = async (values: CourseAssessmentValues) => {
+    if (!assessmentCourseToEdit) return;
+
+    await saveCourseAssessmentStructure({
+      courseId: assessmentCourseToEdit.id,
+      values,
+    });
+    setAssessmentCourseToEdit(null);
+    await fetchData();
+    notify.success("Assessment structure updated.");
   };
 
   const handleDropCourse = async (course: NormalizedCourseOffering) => {
@@ -247,8 +289,25 @@ export function CourseManagement() {
                   <div className="text-sm text-muted-foreground mb-4">
                     {course.faculty}
                   </div>
-                  <div className="flex gap-2">
+                  <CourseAssessmentSummary
+                    structure={
+                      course.assessmentStructure
+                        ? assessmentRowsToValues(course.assessmentStructure)
+                        : null
+                    }
+                  />
+                  <div className="mt-4 flex gap-2">
                     <Button className="flex-1">Manage Course</Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={event => {
+                        event.stopPropagation();
+                        setAssessmentCourseToEdit(course);
+                      }}
+                    >
+                      Assessment
+                    </Button>
                     {course.owner_id === profile?.id && (
                       <Button
                         type="button"
@@ -291,7 +350,11 @@ export function CourseManagement() {
                     {isAlreadyTeaching ? (
                       <Button variant="secondary" className="w-full" disabled>Already Added</Button>
                     ) : (
-                      <Button className="w-full" variant="outline" onClick={() => handleClaimCourse(course.id)}>
+                      <Button
+                        className="w-full"
+                        variant="outline"
+                        onClick={() => setCourseToTeach(course)}
+                      >
                         <Plus className="mr-2 h-4 w-4" /> Teach this Course
                       </Button>
                     )}
@@ -327,6 +390,33 @@ export function CourseManagement() {
           )}
         </TabsContent>
       </Tabs>
+
+      <CourseAssessmentDialog
+        open={Boolean(courseToTeach)}
+        onOpenChange={open => {
+          if (!open) setCourseToTeach(null);
+        }}
+        courseName={courseToTeach?.name || "Course"}
+        mode="create"
+        onSubmit={handleClaimCourse}
+      />
+
+      <CourseAssessmentDialog
+        open={Boolean(assessmentCourseToEdit)}
+        onOpenChange={open => {
+          if (!open) setAssessmentCourseToEdit(null);
+        }}
+        courseName={assessmentCourseToEdit?.name || "Course"}
+        mode="edit"
+        initialValues={
+          assessmentCourseToEdit?.assessmentStructure
+            ? assessmentRowsToValues(
+                assessmentCourseToEdit.assessmentStructure,
+              )
+            : null
+        }
+        onSubmit={handleSaveAssessment}
+      />
     </div>
   );
 }

@@ -43,9 +43,16 @@ import {
 } from "lucide-react";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Label } from "./ui/label";
+import {
+  assessmentRowsToValues,
+  getCourseAssessmentStructures,
+  type CourseAssessmentItem,
+} from "@/data/courseAssessmentRepository";
+import { CourseAssessmentSummary } from "./course/CourseAssessmentStructure";
 
 // --- Types ---
 type Course = NormalizedCourseOffering & {
+  assessmentStructure?: CourseAssessmentItem[] | null;
   instructors?: CourseInstructor[];
 };
 
@@ -169,8 +176,23 @@ export function StudentCourses() {
         instructorsByCourse.set(instructor.courseId, current);
       });
 
+      let assessmentStructures =
+        new Map<string, CourseAssessmentItem[]>();
+      try {
+        assessmentStructures = await getCourseAssessmentStructures(
+          myCourses.map(course => course.id),
+        );
+      } catch (assessmentError) {
+        console.error(
+          "Error fetching course assessment structures",
+          assessmentError,
+        );
+      }
+
       const attachInstructors = (course: Course) => ({
         ...course,
+        assessmentStructure:
+          assessmentStructures.get(course.id) || null,
         instructors: instructorsByCourse.get(course.id) || [],
       });
 
@@ -378,6 +400,17 @@ export function StudentCourses() {
                         <div className="flex items-center gap-2">
                            <GraduationCap className="h-3 w-3" /> Lecturer: {getLecturerNames(course)}
                         </div>
+                     </div>
+                     <div className="mb-4">
+                       <CourseAssessmentSummary
+                         structure={
+                           course.assessmentStructure
+                             ? assessmentRowsToValues(
+                                 course.assessmentStructure,
+                               )
+                             : null
+                         }
+                       />
                      </div>
                      <Button className="w-full" onClick={(e: React.MouseEvent) => {
                          e.stopPropagation(); // Prevent double triggering

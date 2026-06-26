@@ -2,6 +2,8 @@ import type { Database } from "@/lib/database.types";
 
 export type AttendanceRecord =
   Database["public"]["Tables"]["attendance"]["Row"];
+export type AttendanceClassMeeting =
+  Database["public"]["Tables"]["attendance_class_meetings"]["Row"];
 export type AttendanceSession =
   Database["public"]["Tables"]["attendance_sessions"]["Row"];
 
@@ -45,6 +47,12 @@ export const formatTime = (date: string) =>
     minute: "2-digit",
   });
 
+export const formatSessionSlotLabel = (session: AttendanceSession) =>
+  session.slot_label || `Hour ${session.slot_no || 1}`;
+
+export const formatSessionWindow = (session: AttendanceSession) =>
+  `${formatTime(session.starts_at)} - ${formatTime(session.ends_at)}`;
+
 export const getRecordStatus = (
   record: AttendanceRecord
 ): AttendanceStatus => {
@@ -73,6 +81,7 @@ export interface AttendanceSummary {
 
 export interface SessionSummary {
   date: string;
+  slots: number;
   present: number;
   absent: number;
   total: number;

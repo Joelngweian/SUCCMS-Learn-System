@@ -24,43 +24,37 @@ import { formatClassDate, type AttendanceSession } from "./attendanceTypes";
 interface TeacherAttendanceDialogsProps {
   selectedDate: string;
   today: string;
+  classHours: string;
   sessionDuration: string;
   selectedSession: AttendanceSession | null;
   startOpen: boolean;
   correctionOpen: boolean;
-  deleteOpen: boolean;
   correctedDate: string;
   errorMessage: string;
   isCorrectingDate: boolean;
-  isDeletingClass: boolean;
   onStartOpenChange: (open: boolean) => void;
   onCorrectionOpenChange: (open: boolean) => void;
-  onDeleteOpenChange: (open: boolean) => void;
   onCorrectedDateChange: (value: string) => void;
   onConfirmStart: () => void;
   onCorrectDate: () => void;
-  onDeleteClass: () => void;
 }
 
 export function TeacherAttendanceDialogs({
   selectedDate,
   today,
+  classHours,
   sessionDuration,
   selectedSession,
   startOpen,
   correctionOpen,
-  deleteOpen,
   correctedDate,
   errorMessage,
   isCorrectingDate,
-  isDeletingClass,
   onStartOpenChange,
   onCorrectionOpenChange,
-  onDeleteOpenChange,
   onCorrectedDateChange,
   onConfirmStart,
   onCorrectDate,
-  onDeleteClass,
 }: TeacherAttendanceDialogsProps) {
   const classDate = formatClassDate(
     selectedSession?.class_date || selectedDate
@@ -81,8 +75,11 @@ export function TeacherAttendanceDialogs({
               <strong className="text-foreground">
                 {formatClassDate(selectedDate)}
               </strong>
-              . A new six-character code will remain valid for{" "}
-              {sessionDuration} minutes.
+              . The system will create{" "}
+              <strong className="text-foreground">
+                {selectedSession ? "a new code for this slot" : `${classHours} hourly slot${classHours === "1" ? "" : "s"}`}
+              </strong>
+              , and each code will remain valid for {sessionDuration} minutes.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -161,44 +158,6 @@ export function TeacherAttendanceDialogs({
         </DialogContent>
       </Dialog>
 
-      <AlertDialog
-        open={deleteOpen}
-        onOpenChange={(open) => {
-          if (!isDeletingClass) onDeleteOpenChange(open);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Delete This Class Record?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently deletes the check-in session and every student
-              attendance record for{" "}
-              <strong className="text-foreground">{classDate}</strong>. This
-              action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeletingClass}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-red-600 text-white hover:bg-red-700"
-              onClick={(event) => {
-                event.preventDefault();
-                onDeleteClass();
-              }}
-              disabled={isDeletingClass}
-            >
-              {isDeletingClass && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Delete Class
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }
