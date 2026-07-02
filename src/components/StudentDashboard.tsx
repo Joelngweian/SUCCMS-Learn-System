@@ -33,7 +33,6 @@ import {
   Sheet,
   SheetContent,
   SheetDescription,
-  SheetHeader,
   SheetTitle,
   SheetTrigger,
 } from "./ui/sheet";
@@ -1366,15 +1365,10 @@ export function StudentDashboard() {
                 side="right"
                 className="overflow-hidden p-0"
               >
-                <SheetHeader className="border-b pr-14">
-                  <SheetTitle className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-purple-500" />
-                    Your Study Panel
-                  </SheetTitle>
-                  <SheetDescription>
-                    Quick study actions, AI insights and course shortcuts.
-                  </SheetDescription>
-                </SheetHeader>
+                <SheetTitle className="sr-only">Your Study Panel</SheetTitle>
+                <SheetDescription className="sr-only">
+                  Quick study actions, AI insights and course shortcuts.
+                </SheetDescription>
                 <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
                   {studyPanel}
                 </div>

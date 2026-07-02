@@ -3,6 +3,17 @@ import type {
   SessionSummary,
 } from "./attendanceTypes";
 import { formatClassDate } from "./attendanceTypes";
+import { CalendarDays, Check } from "lucide-react";
+import { Button } from "../ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "../ui/dialog";
 
 interface AttendanceSummaryCardsProps {
   summary: AttendanceSummary;
@@ -46,18 +57,23 @@ export function AttendanceSummaryCards({
       className:
         "border-slate-200 bg-muted/30 text-muted-foreground dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300",
       valueClassName: "dark:text-slate-100",
+      spanClassName: "col-span-2 sm:col-span-1",
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
       {cards.map((card) => (
         <div
           key={card.label}
-          className={`rounded-lg border p-3 ${card.className}`}
+          className={`rounded-lg border p-2.5 sm:p-3 ${card.className} ${
+            card.spanClassName || ""
+          }`}
         >
           <p className="text-xs">{card.label}</p>
-          <p className={`mt-1 text-xl font-semibold ${card.valueClassName}`}>
+          <p
+            className={`mt-1 text-lg font-semibold sm:text-xl ${card.valueClassName}`}
+          >
             {card.value}
           </p>
         </div>
@@ -72,13 +88,99 @@ interface RecentClassesProps {
   onSelect: (date: string) => void;
 }
 
+export function RecentClassesDialogButton({
+  sessions,
+  selectedDate,
+  onSelect,
+}: RecentClassesProps) {
+  const selectedSession = sessions.find(
+    (session) => session.date === selectedDate,
+  );
+
+  return (
+    <div className="xl:hidden">
+      {sessions.length === 0 ? (
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 w-full justify-start gap-2 text-muted-foreground"
+          disabled
+        >
+          <CalendarDays className="h-4 w-4" />
+          No recent classes
+        </Button>
+      ) : (
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 w-full justify-between gap-3 px-3"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="truncate">Recent Classes</span>
+              </span>
+              <span className="truncate text-xs text-muted-foreground">
+                {selectedSession
+                  ? formatClassDate(selectedSession.date)
+                  : `${sessions.length} saved`}
+              </span>
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-md p-4 sm:p-6">
+            <DialogHeader className="pr-8 text-left">
+              <DialogTitle>Recent Classes</DialogTitle>
+              <DialogDescription>
+                Select a saved class date to review or edit attendance.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+              {sessions.slice(0, 12).map((session) => (
+                <DialogClose asChild key={session.date}>
+                  <button
+                    type="button"
+                    className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+                      selectedDate === session.date
+                        ? "border-primary bg-primary/5"
+                        : "bg-card hover:bg-muted/40"
+                    }`}
+                    onClick={() => onSelect(session.date)}
+                  >
+                    <Check
+                      className={`mt-0.5 h-4 w-4 shrink-0 ${
+                        selectedDate === session.date
+                          ? "opacity-100"
+                          : "opacity-0"
+                      }`}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium">
+                        {formatClassDate(session.date)}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        {session.slots} slot
+                        {session.slots === 1 ? "" : "s"} ·{" "}
+                        {session.present} credited · {session.absent} absent
+                      </span>
+                    </span>
+                  </button>
+                </DialogClose>
+              ))}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+}
 export function RecentClasses({
   sessions,
   selectedDate,
   onSelect,
 }: RecentClassesProps) {
   return (
-    <aside className="space-y-3">
+    <aside className="space-y-3 xl:sticky xl:top-4 xl:self-start">
       <div>
         <h3 className="text-sm font-semibold">Recent Classes</h3>
         <p className="text-xs text-muted-foreground">
@@ -91,13 +193,13 @@ export function RecentClasses({
           No saved class sessions yet.
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 xl:mx-0 xl:block xl:space-y-2 xl:overflow-visible xl:px-0 xl:pb-0">
           {sessions.slice(0, 8).map((session) => (
             <button
               type="button"
               key={session.date}
               onClick={() => onSelect(session.date)}
-              className={`w-full rounded-lg border p-3 text-left transition-colors ${
+              className={`min-w-[210px] rounded-lg border p-3 text-left transition-colors xl:w-full ${
                 selectedDate === session.date
                   ? "border-primary bg-primary/5"
                   : "bg-card hover:bg-muted/30"

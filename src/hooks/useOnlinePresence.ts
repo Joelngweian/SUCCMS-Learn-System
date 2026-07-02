@@ -12,7 +12,7 @@ import { supabase } from "@/lib/supabase";
 export interface OnlineUser {
   id: string;
   name: string;
-  role: "student" | "lecturer" | "admin";
+  role: "student" | "lecturer" | "staff" | "admin";
   avatarUrl?: string;
   onlineAt: string;
 }
@@ -39,7 +39,7 @@ const normalizeSampleUsers = (value: unknown): OnlineUser[] => {
     if (
       typeof user.id !== "string"
       || typeof user.name !== "string"
-      || !["student", "lecturer", "admin"].includes(String(user.role))
+      || !["student", "lecturer", "staff", "admin"].includes(String(user.role))
     ) return [];
 
     return [{

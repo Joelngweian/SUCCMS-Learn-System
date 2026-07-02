@@ -8,7 +8,7 @@ import { StoryAvatarRing } from "../stories/StoryAvatarRing"
 
 interface ProfileHeaderProps {
   name: string
-  role: "student" | "lecturer" | "admin"
+  role: "student" | "lecturer" | "staff" | "admin"
   profileImage?: string
   backgroundImage?: string
   bio: string
@@ -58,7 +58,7 @@ export function ProfileHeader({ name, role, profileImage, backgroundImage, bio, 
     <div className="mb-0 overflow-hidden rounded-xl bg-card shadow-sm border">
       {/* Background Image */}
       <div
-        className="relative h-32 w-full bg-gradient-to-br from-blue-100 to-purple-100"
+        className="relative h-24 w-full bg-gradient-to-br from-blue-100 to-purple-100 sm:h-32"
         onMouseEnter={() => setIsHoveringBg(true)}
         onMouseLeave={() => setIsHoveringBg(false)}
       >
@@ -91,9 +91,9 @@ export function ProfileHeader({ name, role, profileImage, backgroundImage, bio, 
       </div>
 
       {/* Profile Section with proper spacing */}
-      <div className="relative px-6 pb-4">
+      <div className="relative px-4 pb-4 sm:px-6">
         {/* Profile Picture - positioned with enough top padding */}
-        <div className="flex items-end justify-between" style={{ marginTop: '-48px' }}>
+        <div className="flex items-end justify-between -mt-10 sm:-mt-12">
           <div
             className={`relative ${hasActiveStory && !isEditing ? "cursor-pointer" : ""}`}
             onMouseEnter={() => setIsHoveringProfile(true)}
@@ -115,11 +115,11 @@ export function ProfileHeader({ name, role, profileImage, backgroundImage, bio, 
             }}
           >
             <StoryAvatarRing active={hasActiveStory && !isEditing}>
-              <Avatar className="h-32 w-32 border-4 border-card shadow-xl">
+              <Avatar className="h-24 w-24 border-4 border-card shadow-xl sm:h-32 sm:w-32">
                 {profileImage && (
                   <AvatarImage src={profileImage} className="object-cover" />
                 )}
-                <AvatarFallback className="text-4xl font-bold">
+                <AvatarFallback className="text-3xl font-bold sm:text-4xl">
                   {name?.charAt(0)?.toUpperCase() || 'U'}
                 </AvatarFallback>
               </Avatar>
@@ -142,11 +142,11 @@ export function ProfileHeader({ name, role, profileImage, backgroundImage, bio, 
 
         {/* User Info - positioned below avatar with proper spacing */}
         <div className="mt-3">
-          <h1 className="text-2xl font-bold">{name}</h1>
+          <h1 className="text-xl font-bold sm:text-2xl">{name}</h1>
           <p className="text-sm text-muted-foreground capitalize mt-0.5">{role}</p>
 
           {/* Stats Row */}
-          <div className="mt-4 flex gap-6 border-t pt-4">
+          <div className="mt-4 grid grid-cols-3 gap-2 border-t pt-4 sm:flex sm:gap-6">
             <div className="flex items-baseline gap-1">
               <span className="text-lg font-semibold">{stats.posts}</span>
               <span className="text-sm text-muted-foreground">posts</span>

@@ -2,20 +2,12 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs"
 import { ProfileInfo } from "./profile-info"
 import { CoursesSection } from "./courses-section"
-import { ActivitySection } from "./activity-section"
-import { Grid3x3, Heart, UserCheck, Users, ImageIcon } from "lucide-react"
+import { Grid3x3, UserCheck, Users, ImageIcon } from "lucide-react"
 
 interface Course {
   id: string
   name: string
   code: string
-}
-
-interface Activity {
-  id: string
-  type: string
-  content: string
-  time: string
 }
 
 interface ProfileConnection {
@@ -34,7 +26,6 @@ interface ProfileTabsProps {
   faculty: string
   programme: string
   courses: Course[]
-  recentActivity: Activity[]
   followers?: ProfileConnection[]
   following?: ProfileConnection[]
   onUserSelect?: (userId: string) => void
@@ -96,51 +87,41 @@ function ConnectionsList({
   )
 }
 
-export function ProfileTabs({ bio, email, faculty, programme, courses, recentActivity, followers = [], following = [], onUserSelect, isEditing = false, draftBio = "", onBioChange }: ProfileTabsProps) {
+export function ProfileTabs({ bio, email, faculty, programme, courses, followers = [], following = [], onUserSelect, isEditing = false, draftBio = "", onBioChange }: ProfileTabsProps) {
   return (
     <Tabs defaultValue="profile" className="w-full">
-      <TabsList
-        className="h-12 w-full rounded-none border-t bg-card"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
-        }}
-      >
-        <TabsTrigger value="profile" className="gap-2">
-          <Grid3x3 className="h-4 w-4" />
-          Profile
-        </TabsTrigger>
-        <TabsTrigger value="courses" className="gap-2">
-          <ImageIcon className="h-4 w-4" />
-          Courses
-        </TabsTrigger>
-        <TabsTrigger value="activity" className="gap-2">
-          <Heart className="h-4 w-4" />
-          Activity
-        </TabsTrigger>
-        <TabsTrigger value="followers" className="gap-2">
-          <UserCheck className="h-4 w-4" />
-          Followers
-        </TabsTrigger>
-        <TabsTrigger value="following" className="gap-2">
-          <Users className="h-4 w-4" />
-          Following
-        </TabsTrigger>
-      </TabsList>
+      <div className="-mx-3 overflow-x-auto border-t bg-card px-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:overflow-visible sm:px-0">
+        <TabsList
+          className="grid h-12 min-w-max grid-cols-[repeat(4,max-content)] rounded-none bg-transparent sm:w-full sm:min-w-0 sm:grid-cols-4"
+        >
+          <TabsTrigger value="profile" className="min-w-24 gap-2 px-4 sm:min-w-0">
+            <Grid3x3 className="h-4 w-4" />
+            Profile
+          </TabsTrigger>
+          <TabsTrigger value="courses" className="min-w-24 gap-2 px-4 sm:min-w-0">
+            <ImageIcon className="h-4 w-4" />
+            Courses
+          </TabsTrigger>
+          <TabsTrigger value="followers" className="min-w-28 gap-2 px-4 sm:min-w-0">
+            <UserCheck className="h-4 w-4" />
+            Followers
+          </TabsTrigger>
+          <TabsTrigger value="following" className="min-w-28 gap-2 px-4 sm:min-w-0">
+            <Users className="h-4 w-4" />
+            Following
+          </TabsTrigger>
+        </TabsList>
+      </div>
 
-      <TabsContent value="profile" className="mt-6">
+      <TabsContent value="profile" className="mt-4 sm:mt-6">
         <ProfileInfo bio={bio} email={email} faculty={faculty} programme={programme} isEditing={isEditing} draftBio={draftBio} onBioChange={onBioChange} />
       </TabsContent>
 
-      <TabsContent value="courses" className="mt-6">
+      <TabsContent value="courses" className="mt-4 sm:mt-6">
         <CoursesSection courses={courses} />
       </TabsContent>
 
-      <TabsContent value="activity" className="mt-6">
-        <ActivitySection activities={recentActivity} />
-      </TabsContent>
-
-      <TabsContent value="followers" className="mt-6">
+      <TabsContent value="followers" className="mt-4 sm:mt-6">
         <div className="rounded-lg border bg-card">
           <ConnectionsList
             connections={followers}
@@ -150,7 +131,7 @@ export function ProfileTabs({ bio, email, faculty, programme, courses, recentAct
         </div>
       </TabsContent>
 
-      <TabsContent value="following" className="mt-6">
+      <TabsContent value="following" className="mt-4 sm:mt-6">
         <div className="rounded-lg border bg-card">
           <ConnectionsList
             connections={following}

@@ -38,6 +38,11 @@ export type Database = {
           name: string
           starts_at: string | null
           ends_at: string | null
+          enrollment_starts_at: string | null
+          enrollment_ends_at: string | null
+          teaching_starts_at: string | null
+          teaching_ends_at: string | null
+          is_current_enrollment_term: boolean
           status: string
           created_at: string
           updated_at: string
@@ -320,6 +325,7 @@ export type Database = {
           starts_at: string
           ends_at: string
           check_in_window_minutes: number
+          opened_at: string | null
           closed_at: string | null
           created_by: string
           created_at: string
@@ -1613,6 +1619,23 @@ export type Database = {
           instructors: Json
           total_count: number
         }[]
+      }
+      get_current_enrollment_term: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          code: string
+          name: string
+          starts_at: string | null
+          ends_at: string | null
+          enrollment_starts_at: string | null
+          enrollment_ends_at: string | null
+          status: string | null
+        }[]
+      }
+      get_current_enrollment_term_id: {
+        Args: Record<PropertyKey, never>
+        Returns: string
       }
       get_course_posts_page: {
         Args: {

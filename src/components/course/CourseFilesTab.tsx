@@ -72,7 +72,7 @@ export function CourseFilesTab({
 }: CourseFilesTabProps) {
   return (
     <TabsContent value="files" className="space-y-4 flex-1">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 p-2">
+      <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-sm">
           {folderPath.map((folder, index) => (
             <div key={`${folder.id}-${index}`} className="flex items-center">
@@ -94,12 +94,12 @@ export function CourseFilesTab({
         </div>
 
         {userId && (
-          <div className="flex shrink-0 flex-wrap gap-2">
+          <div className="flex w-full shrink-0 gap-2 sm:w-auto sm:flex-wrap">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   size="sm"
-                  className="bg-indigo-100 hover:bg-indigo-200 text-indigo-900 font-semibold border-0 shadow-sm rounded-md px-4 dark:bg-indigo-900 dark:text-indigo-100 dark:hover:bg-indigo-800"
+                  className="flex-1 justify-center rounded-md border-0 bg-indigo-100 px-4 font-semibold text-indigo-900 shadow-sm hover:bg-indigo-200 dark:bg-indigo-900 dark:text-indigo-100 dark:hover:bg-indigo-800 sm:flex-none"
                 >
                   <Plus className="h-4 w-4 mr-1" />
                   New
@@ -146,7 +146,7 @@ export function CourseFilesTab({
               </DropdownMenuContent>
             </DropdownMenu>
 
-            <div className="flex items-center relative">
+            <div className="relative flex flex-1 items-center sm:flex-none">
               <input
                 type="file"
                 id="file-upload-input"
@@ -171,7 +171,7 @@ export function CourseFilesTab({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30"
+                    className="w-full justify-center font-semibold text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 sm:w-auto"
                     disabled={isUploading}
                   >
                     {isUploading

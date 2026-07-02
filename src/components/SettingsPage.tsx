@@ -809,7 +809,7 @@ const SettingSwitch = ({ title, desc, checked, onChange, icon, bg = "bg-muted", 
         onClick={() => onChange(!checked)}
         style={{
           width: '40px', height: '24px', 
-          backgroundColor: checked ? 'var(--primary, #000)' : '#cbd5e1',
+          backgroundColor: checked ? 'var(--primary, #2563eb)' : '#cbd5e1',
           borderRadius: '999px',
           position: 'relative',
           cursor: 'pointer',

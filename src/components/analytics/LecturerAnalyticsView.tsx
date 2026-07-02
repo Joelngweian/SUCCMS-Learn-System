@@ -95,21 +95,21 @@ export function LecturerAnalyticsView({
   onPeriodChange,
 }: LecturerAnalyticsViewProps) {
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
+    <div className="mx-auto max-w-7xl space-y-4 sm:space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="flex items-center gap-3 text-3xl font-bold">
-            <BarChart3 className="h-8 w-8 text-primary" />
+          <h1 className="flex items-center gap-2 text-2xl font-bold sm:gap-3 sm:text-3xl">
+            <BarChart3 className="h-6 w-6 text-primary sm:h-8 sm:w-8" />
             Learning Analytics
           </h1>
-          <p className="mt-1 text-muted-foreground">
+          <p className="mt-1 text-sm text-muted-foreground sm:text-base">
             Track student progress, engagement, grading workload, and course
             risk signals.
           </p>
           {loadError && <p className="mt-2 text-sm text-red-600">{loadError}</p>}
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
           <Select value={courseFilter} onValueChange={onCourseFilterChange}>
             <SelectTrigger className="h-10 w-full bg-background sm:w-[220px]">
               <SelectValue />
@@ -140,7 +140,7 @@ export function LecturerAnalyticsView({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <MetricCard
           icon={Users}
           label="Students"
@@ -175,12 +175,13 @@ export function LecturerAnalyticsView({
           value={totals.riskStudents.toString()}
           helper="Students to review"
           tone="red"
+          className="col-span-2 md:col-span-1"
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(360px,0.7fr)]">
+      <div className="grid grid-cols-1 gap-4 sm:gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(360px,0.7fr)]">
         <Card className="shadow-sm">
-          <CardHeader>
+          <CardHeader className="p-4 sm:p-6">
             <CardTitle className="flex items-center gap-2 text-lg">
               <TrendingUp className="h-5 w-5 text-primary" />
               Progress Trend
@@ -190,15 +191,15 @@ export function LecturerAnalyticsView({
               period.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Suspense fallback={<ChartFallback height="h-[300px]" />}>
+          <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
+            <Suspense fallback={<ChartFallback height="h-[220px] sm:h-[300px]" />}>
               <AnalyticsProgressChart data={weeklyTrend} />
             </Suspense>
           </CardContent>
         </Card>
 
         <Card className="shadow-sm">
-          <CardHeader>
+          <CardHeader className="p-4 sm:p-6">
             <CardTitle className="flex items-center gap-2 text-lg">
               <Brain className="h-5 w-5 text-purple-600" />
               Teaching Insights
@@ -207,12 +208,12 @@ export function LecturerAnalyticsView({
               Suggested actions based on current course signals.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-4 pt-0 sm:space-y-4 sm:p-6 sm:pt-0">
             {teachingInsights.map(insight => {
               const Icon = insight.icon;
 
               return (
-                <div key={insight.title} className="rounded-xl border p-4">
+                <div key={insight.title} className="rounded-xl border p-3 sm:p-4">
                   <div className="flex items-start gap-3">
                     <div className={`rounded-lg p-2 ${insight.bg}`}>
                       <Icon className={`h-4 w-4 ${insight.tone}`} />
@@ -231,9 +232,9 @@ export function LecturerAnalyticsView({
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="grid grid-cols-1 gap-4 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         <Card className="shadow-sm">
-          <CardHeader>
+          <CardHeader className="p-4 sm:p-6">
             <CardTitle className="flex items-center gap-2 text-lg">
               <BookOpen className="h-5 w-5 text-blue-600" />
               Course Comparison
@@ -242,7 +243,7 @@ export function LecturerAnalyticsView({
               Compare course completion, engagement, and assessment readiness.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent className="space-y-4 p-4 pt-0 sm:space-y-5 sm:p-6 sm:pt-0">
             {visibleCourses.length === 0 ? (
               <EmptyState
                 message={
@@ -253,7 +254,7 @@ export function LecturerAnalyticsView({
               />
             ) : (
               visibleCourses.map(course => (
-                <div key={course.id} className="rounded-xl border p-4">
+                <div key={course.id} className="rounded-xl border p-3 sm:p-4">
                   <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <div className="flex items-center gap-2">
@@ -276,7 +277,7 @@ export function LecturerAnalyticsView({
                     </Badge>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
                     <ProgressMetric
                       label="Completion"
                       value={course.completion}
@@ -297,7 +298,7 @@ export function LecturerAnalyticsView({
         </Card>
 
         <Card className="shadow-sm">
-          <CardHeader>
+          <CardHeader className="p-4 sm:p-6">
             <CardTitle className="flex items-center gap-2 text-lg">
               <AlertTriangle className="h-5 w-5 text-orange-600" />
               At-Risk Students
@@ -306,7 +307,7 @@ export function LecturerAnalyticsView({
               Students who may need follow-up before the next assessment.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-4 pt-0 sm:space-y-4 sm:p-6 sm:pt-0">
             {visibleRiskStudents.length === 0 ? (
               <EmptyState
                 message={
@@ -319,7 +320,7 @@ export function LecturerAnalyticsView({
               visibleRiskStudents.map(student => (
                 <div
                   key={`${student.courseId}-${student.id}`}
-                  className="rounded-xl border p-4"
+                  className="rounded-xl border p-3 sm:p-4"
                 >
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div>
@@ -349,9 +350,9 @@ export function LecturerAnalyticsView({
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-4 sm:gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
         <Card className="shadow-sm">
-          <CardHeader>
+          <CardHeader className="p-4 sm:p-6">
             <CardTitle className="flex items-center gap-2 text-lg">
               <MessageSquare className="h-5 w-5 text-emerald-600" />
               Engagement Mix
@@ -360,15 +361,15 @@ export function LecturerAnalyticsView({
               Forum activity and engagement by course.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Suspense fallback={<ChartFallback height="h-[260px]" />}>
+          <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
+            <Suspense fallback={<ChartFallback height="h-[220px] sm:h-[260px]" />}>
               <AnalyticsEngagementChart data={visibleCourses} />
             </Suspense>
           </CardContent>
         </Card>
 
         <Card className="shadow-sm">
-          <CardHeader>
+          <CardHeader className="p-4 sm:p-6">
             <CardTitle className="flex items-center gap-2 text-lg">
               <FileText className="h-5 w-5 text-orange-600" />
               Assignment Analytics
@@ -377,7 +378,7 @@ export function LecturerAnalyticsView({
               Submission status and grading workload by assignment.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-4 pt-0 sm:space-y-4 sm:p-6 sm:pt-0">
             {visibleAssignments.length === 0 ? (
               <EmptyState
                 message={
@@ -396,7 +397,7 @@ export function LecturerAnalyticsView({
                     : 0;
 
                 return (
-                  <div key={assignment.id} className="rounded-xl border p-4">
+                  <div key={assignment.id} className="rounded-xl border p-3 sm:p-4">
                     <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -407,7 +408,7 @@ export function LecturerAnalyticsView({
                           {assignment.submitted}/{assignment.total} submitted
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="secondary">
                           {assignment.average == null
                             ? "Avg N/A"
@@ -438,6 +439,7 @@ export function LecturerAnalyticsView({
 
 type MetricCardProps = {
   icon: React.ComponentType<{ className?: string }>;
+  className?: string;
   label: string;
   value: string;
   helper: string;
@@ -456,21 +458,24 @@ const toneClass = {
 
 const MetricCard = ({
   icon: Icon,
+  className = "",
   label,
   value,
   helper,
   tone,
 }: MetricCardProps) => (
-  <Card className="shadow-sm">
-    <CardContent className="p-5">
-      <div className="flex items-start gap-4">
-        <div className={`rounded-xl p-3 ${toneClass[tone]}`}>
-          <Icon className="h-5 w-5" />
+  <Card className={`shadow-sm ${className}`}>
+    <CardContent className="p-3 sm:p-5">
+      <div className="flex items-start gap-3 sm:gap-4">
+        <div className={`rounded-xl p-2.5 sm:p-3 ${toneClass[tone]}`}>
+          <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm text-muted-foreground">{label}</p>
-          <p className="mt-1 text-2xl font-semibold">{value}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{helper}</p>
+          <p className="text-xs text-muted-foreground sm:text-sm">{label}</p>
+          <p className="mt-1 text-xl font-semibold sm:text-2xl">{value}</p>
+          <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground sm:text-xs">
+            {helper}
+          </p>
         </div>
       </div>
     </CardContent>

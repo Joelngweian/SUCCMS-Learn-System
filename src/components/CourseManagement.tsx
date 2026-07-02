@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase.ts";
 import { useAuth } from "@/contexts/AuthContext.tsx";
@@ -8,21 +8,31 @@ import {
   removeCourseOfferingFiles,
   type NormalizedCourseOffering,
 } from "@/lib/courseOfferings";
-import type { Database } from "@/lib/database.types";
 import { CoursePage } from "./CoursePage"; 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { Search, Plus, Loader2, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import {
+  MoreHorizontal,
+  Search,
+  Loader2,
+  Trash2,
+} from "lucide-react";
 import { confirmAction } from "@/lib/confirm";
 import { notify } from "@/lib/notify";
-import { invalidateCourseCache } from "@/data/courseRepository";
+import {
+  getAcademicTermOptions,
+  getCurrentEnrollmentTerm,
+  invalidateCourseCache,
+  type AcademicTermOption,
+} from "@/data/courseRepository";
+import {
+  getFallbackCurrentAcademicTerm,
+} from "@/data/studyPlanUtils";
 import { CourseCreationRequestDialog } from "./course/CourseCreationRequestDialog";
 import {
   assessmentRowsToValues,
-  createCourseOfferingWithAssessment,
   getCourseAssessmentStructures,
   saveCourseAssessmentStructure,
   type CourseAssessmentItem,
@@ -32,35 +42,47 @@ import {
   CourseAssessmentDialog,
   CourseAssessmentSummary,
 } from "./course/CourseAssessmentStructure";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 
 export function CourseManagement() {
   const { profile } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState("my-teaching");
-  type CourseTemplate =
-    Database["public"]["Functions"]["get_course_catalog_summary"]["Returns"][number];
   type TeachingCourse = NormalizedCourseOffering & {
     assessmentStructure?: CourseAssessmentItem[] | null;
   };
-  const [courses, setCourses] = useState<CourseTemplate[]>([]);
   const [myCourses, setMyCourses] = useState<TeachingCourse[]>([]);
+  const [academicTerms, setAcademicTerms] = useState<AcademicTermOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [currentTermCode, setCurrentTermCode] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [semesterFilter, setSemesterFilter] = useState("all");
   const [droppingCourseId, setDroppingCourseId] = useState<string | null>(null);
   const [isRequestDialogOpen, setIsRequestDialogOpen] = useState(false);
-  const [courseToTeach, setCourseToTeach] = useState<CourseTemplate | null>(null);
   const [assessmentCourseToEdit, setAssessmentCourseToEdit] =
     useState<TeachingCourse | null>(null);
   
   // View Switching
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
 
-  // Pagination State (Same as Student View)
-  const ITEMS_PER_PAGE = 9;
-  const [currentPage, setCurrentPage] = useState(1);
-
   const profileId = profile?.id;
+  const isCalendarBackedAcademicTerm = (term?: AcademicTermOption | null) => Boolean(
+    term?.code
+    && (term.starts_at || term.teaching_starts_at)
+    && (term.ends_at || term.teaching_ends_at),
+  );
 
   // Open CoursePage directly when courseId is present in URL
   useEffect(() => {
@@ -70,83 +92,106 @@ export function CourseManagement() {
     }
   }, [searchParams, selectedCourseId]);
 
-  // Reset pagination when search changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery]);
-
   const fetchData = useCallback(async () => {
     if (!profileId) return;
     setIsLoading(true);
-    // 1. Fetch lightweight course catalog fields only
-    const { data: allData, error: catalogError } = await supabase.rpc(
-      "get_course_catalog_summary",
-    );
-    if (catalogError) {
-      const { data: fallbackData, error: fallbackError } = await supabase
-        .from("courses")
-        .select(
-          "id, code, name, course_code, chinese_name, faculty, programme, course_type, credits, credit_hours, status",
-        )
-        .order("code");
-
-      if (fallbackError) {
-        notify.error(catalogError, "Failed to load course catalog.");
-        setCourses([]);
-      } else {
-        setCourses((fallbackData || []) as CourseTemplate[]);
-      }
-    } else {
-      setCourses(allData || []);
-    }
-
-    // 2. Fetch the lecturer's course instances
-    const { data: myData } = await supabase
-      .from('course_instructors')
-      .select(`course_id, course_offerings(${COURSE_OFFERING_SELECT})`)
-      .eq('user_id', profileId);
-    
-    const normalizedCourses =
-      myData
-        ?.map((row) => normalizeCourseOffering(row.course_offerings))
-        .filter((course) => Boolean(course.id)) || [];
     try {
-      const assessmentStructures = await getCourseAssessmentStructures(
-        normalizedCourses.map(course => course.id),
-      );
-      setMyCourses(
-        normalizedCourses.map(course => ({
-          ...course,
-          assessmentStructure: assessmentStructures.get(course.id) || null,
-        })),
-      );
-    } catch (assessmentError) {
-      console.error("Failed to load assessment structures:", assessmentError);
-      setMyCourses(normalizedCourses);
+      let resolvedTermCode = getFallbackCurrentAcademicTerm().code;
+
+      try {
+        const term = await getCurrentEnrollmentTerm();
+        if (term?.code) {
+          resolvedTermCode = term.code;
+        }
+      } catch (termError) {
+        console.warn("Failed to resolve current semester:", termError);
+      }
+
+      setCurrentTermCode(resolvedTermCode);
+
+      try {
+        setAcademicTerms(await getAcademicTermOptions());
+      } catch (termOptionsError) {
+        console.warn("Failed to load academic term options:", termOptionsError);
+        setAcademicTerms([]);
+      }
+
+      // 2. Fetch the lecturer's course instances
+      const { data: myData } = await supabase
+        .from('course_instructors')
+        .select(`course_id, course_offerings(${COURSE_OFFERING_SELECT})`)
+        .eq('user_id', profileId);
+
+      const normalizedCourses =
+        myData
+          ?.map((row) => normalizeCourseOffering(row.course_offerings))
+          .filter((course) => Boolean(course.id)) || [];
+      try {
+        const assessmentStructures = await getCourseAssessmentStructures(
+          normalizedCourses.map(course => course.id),
+        );
+        setMyCourses(
+          normalizedCourses.map(course => ({
+            ...course,
+            assessmentStructure: assessmentStructures.get(course.id) || null,
+          })),
+        );
+      } catch (assessmentError) {
+        console.error("Failed to load assessment structures:", assessmentError);
+        setMyCourses(normalizedCourses);
+      }
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }, [profileId]);
 
   useEffect(() => {
     if (profileId) void fetchData();
   }, [fetchData, profileId]);
 
-  const getCourseCode = (
-    course: CourseTemplate | NormalizedCourseOffering,
-  ) => course.course_code || course.code || "N/A";
+  const getCourseCode = (course: NormalizedCourseOffering) =>
+    course.course_code || course.code || "N/A";
+  const formatAssessmentPercent = (value: number) =>
+    Number.isInteger(value) ? value.toString() : value.toFixed(1);
 
-  const handleClaimCourse = async (values: CourseAssessmentValues) => {
-    if (!courseToTeach) return;
+  const CompactAssessmentSummary = ({
+    structure,
+  }: {
+    structure?: CourseAssessmentValues | null;
+  }) => {
+    if (!structure?.length) {
+      return (
+        <p className="text-xs text-muted-foreground">
+          Assessment structure pending.
+        </p>
+      );
+    }
 
-    await createCourseOfferingWithAssessment({
-      courseTemplateId: courseToTeach.id,
-      values,
-    });
-    invalidateCourseCache();
-    setCourseToTeach(null);
-    await fetchData();
-    setActiveTab("my-teaching");
-    notify.success("Course and assessment structure created.");
+    const summary = [
+      { label: "Tests", types: ["test"] },
+      { label: "Assignments", types: ["individual_assignment"] },
+      { label: "Projects", types: ["group_project"] },
+      { label: "Final", types: ["final_exam"] },
+    ]
+      .map(group => ({
+        label: group.label,
+        weight: structure
+          .filter(item => group.types.includes(item.itemType))
+          .reduce((total, item) => total + item.weightPercentage, 0),
+      }))
+      .filter(group => group.weight > 0);
+
+    return (
+      <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+        <span className="font-medium text-foreground">Assessment:</span>{" "}
+        {summary
+          .map(
+            group =>
+              `${group.label} ${formatAssessmentPercent(group.weight)}%`,
+          )
+          .join(" 鐠?")}
+      </p>
+    );
   };
 
   const handleSaveAssessment = async (values: CourseAssessmentValues) => {
@@ -200,24 +245,49 @@ export function CourseManagement() {
     }
   };
 
+  const openCourse = (courseId: string) => {
+    if (!courseId) {
+      notify.error(
+        new Error("This course offering does not have a valid ID."),
+        "Cannot open course.",
+      );
+      return;
+    }
+    setSelectedCourseId(courseId);
+  };
+
+  const semesterOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return academicTerms
+      .filter(isCalendarBackedAcademicTerm)
+      .map(term => String(term.code || "").trim().toUpperCase())
+      .filter(code => /^\d{4}[ABC]$/.test(code))
+      .filter(code => {
+        if (seen.has(code)) return false;
+        seen.add(code);
+        return true;
+      });
+  }, [academicTerms]);
+
+
   // --- VIEW LOGIC ---
 
   if (selectedCourseId) {
     return <CoursePage courseId={selectedCourseId} onBack={() => { setSelectedCourseId(null); navigate('/courses', { replace: true }); }} />;
   }
 
-  // Filter Logic
-  const filteredAll = courses.filter(c => 
-    c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    getCourseCode(c).toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredMyCourses = myCourses.filter(course => {
+    const courseCode = getCourseCode(course).toLowerCase();
+    const query = searchQuery.trim().toLowerCase();
+    const matchesSearch =
+      !query
+      || course.name.toLowerCase().includes(query)
+      || courseCode.includes(query);
+    const matchesSemester =
+      semesterFilter === "all" || course.semester === semesterFilter;
 
-  // Pagination Logic
-  const totalPages = Math.ceil(filteredAll.length / ITEMS_PER_PAGE);
-  const paginatedCourses = filteredAll.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE, 
-    currentPage * ITEMS_PER_PAGE
-  );
+    return matchesSearch && matchesSemester;
+  });
 
   if (isLoading) {
     return (
@@ -229,10 +299,19 @@ export function CourseManagement() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Lecturer Dashboard</h1>
-        <Button variant="outline" onClick={() => setIsRequestDialogOpen(true)}>
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Lecturer Dashboard</h1>
+          <p className="text-sm text-muted-foreground sm:hidden">
+            Manage courses assigned by AARO Staff.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          className="w-full sm:w-auto"
+          onClick={() => setIsRequestDialogOpen(true)}
+        >
           Request New Course Creation
         </Button>
       </div>
@@ -243,52 +322,114 @@ export function CourseManagement() {
         onOpenChange={setIsRequestDialogOpen}
       />
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="my-teaching">My Teaching ({myCourses.length})</TabsTrigger>
-          <TabsTrigger value="all-courses">Course Catalog</TabsTrigger>
-        </TabsList>
-
-        <div className="my-4">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input 
-              placeholder="Search courses..." 
-              className="pl-8" 
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-            />
-          </div>
+      <div className="my-3 grid gap-2 sm:my-4 sm:grid-cols-[minmax(0,1fr)_220px]">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search assigned courses..."
+            className="pl-8"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
         </div>
+        <Select value={semesterFilter} onValueChange={setSemesterFilter}>
+          <SelectTrigger className="w-full bg-background">
+            <SelectValue placeholder="Filter semester" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All semesters</SelectItem>
+            {semesterOptions.map(termCode => (
+              <SelectItem key={termCode} value={termCode}>
+                {termCode}
+                {termCode === currentTermCode ? " (Current)" : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
-        {/* MY TEACHING TAB */}
-        <TabsContent value="my-teaching" className="space-y-4">
-          {myCourses.length === 0 && (
-            <div className="text-center py-10 border border-dashed rounded-lg bg-muted/30">
-                <p className="text-muted-foreground">You haven't added any courses yet.</p>
-                <Button variant="link" onClick={() => setActiveTab("all-courses")}>
-                    Go to Course Catalog to add them
-                </Button>
-            </div>
-          )}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {myCourses.map(course => (
-              <Card 
-                key={course.id} 
-                className="hover:border-primary cursor-pointer transition-colors border-l-4 border-l-blue-500" 
-                onClick={() => setSelectedCourseId(course.id)}
-              >
-                <CardHeader>
-                  <div className="flex justify-between">
+      {myCourses.length === 0 ? (
+        <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-10 text-center">
+          <p className="font-medium">No courses assigned yet.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            AARO Staff will assign teaching courses to your account.
+          </p>
+        </div>
+      ) : filteredMyCourses.length === 0 ? (
+        <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-10 text-center">
+          <p className="font-medium">No assigned courses match this filter.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Try another keyword or semester.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
+          {filteredMyCourses.map(course => (
+            <Card
+              key={course.id}
+              className="hover:border-primary cursor-pointer transition-colors border-l-4 border-l-blue-500"
+              onClick={() => openCourse(course.id)}
+            >
+              <CardHeader className="p-3 pb-2 sm:p-6">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{getCourseCode(course)}</Badge>
-                    <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 border-none">Teaching</Badge>
+                    <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 border-none">
+                      Teaching
+                    </Badge>
                   </div>
-                  <CardTitle className="mt-2 line-clamp-1">{course.name}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-sm text-muted-foreground mb-4">
-                    {course.faculty}
-                  </div>
+                  {course.owner_id === profile?.id && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="-mr-2 -mt-2 h-8 w-8 text-muted-foreground"
+                          disabled={droppingCourseId === course.id}
+                          onClick={event => event.stopPropagation()}
+                        >
+                          {droppingCourseId === course.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <MoreHorizontal className="h-4 w-4" />
+                          )}
+                          <span className="sr-only">Course actions</span>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onClick={event => {
+                            event.stopPropagation();
+                            handleDropCourse(course);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Drop Course
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
+                <CardTitle className="mt-2 line-clamp-2 text-base sm:text-lg">
+                  {course.name}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
+                <div className="mb-2 text-sm text-muted-foreground sm:mb-4">
+                  {course.faculty}
+                </div>
+                <div className="sm:hidden">
+                  <CompactAssessmentSummary
+                    structure={
+                      course.assessmentStructure
+                        ? assessmentRowsToValues(course.assessmentStructure)
+                        : null
+                    }
+                  />
+                </div>
+                <div className="hidden sm:block">
                   <CourseAssessmentSummary
                     structure={
                       course.assessmentStructure
@@ -296,110 +437,34 @@ export function CourseManagement() {
                         : null
                     }
                   />
-                  <div className="mt-4 flex gap-2">
-                    <Button className="flex-1">Manage Course</Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={event => {
-                        event.stopPropagation();
-                        setAssessmentCourseToEdit(course);
-                      }}
-                    >
-                      Assessment
-                    </Button>
-                    {course.owner_id === profile?.id && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="shrink-0 text-destructive hover:text-destructive"
-                        disabled={droppingCourseId === course.id}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleDropCourse(course);
-                        }}
-                      >
-                        {droppingCourseId === course.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                        <span className="sr-only">Drop Course</span>
-                      </Button>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        {/* ALL COURSES TAB (With Pagination) */}
-        <TabsContent value="all-courses" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-             {paginatedCourses.map(course => {
-               const isAlreadyTeaching = myCourses.some(m => m.template_id === course.id);
-               return (
-                <Card key={course.id}>
-                  <CardHeader>
-                    <Badge variant="outline" className="w-fit">{getCourseCode(course)}</Badge>
-                    <CardTitle className="mt-2 text-lg line-clamp-1">{course.name}</CardTitle>
-                    <CardDescription className="line-clamp-1">{course.chinese_name}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {isAlreadyTeaching ? (
-                      <Button variant="secondary" className="w-full" disabled>Already Added</Button>
-                    ) : (
-                      <Button
-                        className="w-full"
-                        variant="outline"
-                        onClick={() => setCourseToTeach(course)}
-                      >
-                        <Plus className="mr-2 h-4 w-4" /> Teach this Course
-                      </Button>
-                    )}
-                  </CardContent>
-                </Card>
-               );
-             })}
-          </div>
-
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-8">
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-              >
-                <ChevronLeft className="h-4 w-4" /> Previous
-              </Button>
-              <span className="text-sm text-muted-foreground">
-                Page {currentPage} of {totalPages}
-              </span>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-              >
-                Next <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
-
-      <CourseAssessmentDialog
-        open={Boolean(courseToTeach)}
-        onOpenChange={open => {
-          if (!open) setCourseToTeach(null);
-        }}
-        courseName={courseToTeach?.name || "Course"}
-        mode="create"
-        onSubmit={handleClaimCourse}
-      />
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:flex">
+                  <Button
+                    className="w-full sm:flex-1"
+                    onClick={event => {
+                      event.stopPropagation();
+                      openCourse(course.id);
+                    }}
+                  >
+                    Manage
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    onClick={event => {
+                      event.stopPropagation();
+                      setAssessmentCourseToEdit(course);
+                    }}
+                  >
+                    Assessment
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       <CourseAssessmentDialog
         open={Boolean(assessmentCourseToEdit)}

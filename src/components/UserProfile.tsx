@@ -332,17 +332,11 @@ export const UserProfile = () => {
     name: course.name,
     code: course.course_code,
   }));
-  const activitiesProps = posts.map(post => ({
-    id: post.id,
-    type: "post",
-    content: post.content,
-    time: new Date(post.created_at).toLocaleString(),
-  }));
 
   return (
     <div className="min-h-screen bg-muted/30">
-      <div className="mx-auto max-w-4xl">
-        <div className="pb-2 pt-4">
+      <div className="mx-auto max-w-4xl px-3 sm:px-0">
+        <div className="hidden pb-2 pt-4 sm:block">
           <Button variant="ghost" onClick={() => navigate(-1)}>
             Back
           </Button>
@@ -372,8 +366,8 @@ export const UserProfile = () => {
           onStoryClick={() => setStoryViewerOpen(true)}
         />
 
-        <div className="flex items-center justify-between gap-2 py-4">
-          <div>
+        <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:py-4">
+          <div className="min-h-0 sm:min-h-5">
             {isEditing && (
               <p className="text-sm text-muted-foreground">
                 Hover over your avatar or cover image to change it
@@ -384,13 +378,17 @@ export const UserProfile = () => {
             {isOwnProfile ? (
               isEditing ? (
                 <>
-                  <Button variant="ghost" onClick={handleCancelEdit}>
+                  <Button
+                    variant="ghost"
+                    onClick={handleCancelEdit}
+                    className="flex-1 sm:flex-none"
+                  >
                     Cancel
                   </Button>
                   <Button
                     onClick={handleSaveProfile}
                     disabled={isSaving}
-                    className="bg-black text-white hover:bg-black/90"
+                    className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 sm:flex-none"
                   >
                     {isSaving ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -401,7 +399,11 @@ export const UserProfile = () => {
                   </Button>
                 </>
               ) : (
-                <Button variant="outline" onClick={() => setIsEditing(true)}>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsEditing(true)}
+                  className="w-full sm:w-auto"
+                >
                   <Pencil className="mr-2 h-4 w-4" />
                   Edit Profile
                 </Button>
@@ -414,6 +416,7 @@ export const UserProfile = () => {
                     onClick={handleFollowToggle}
                     disabled={isFollowLoading}
                     aria-pressed={isFollowing}
+                    className="flex-1 sm:flex-none"
                   >
                     {isFollowLoading && (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -440,7 +443,6 @@ export const UserProfile = () => {
           faculty={profileData.faculty || ""}
           programme={profileData.programme || ""}
           courses={coursesProps}
-          recentActivity={activitiesProps}
           followers={followers}
           following={following}
           onUserSelect={userId => navigate(`/profile/${userId}`)}

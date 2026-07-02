@@ -17,18 +17,25 @@ export default function AnalyticsProgressChart({
   data,
 }: AnalyticsProgressChartProps) {
   return (
-    <div className="h-[300px]">
+    <div className="h-[220px] sm:h-[300px]">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart
           data={data}
-          margin={{ left: 0, right: 12, top: 10, bottom: 0 }}
+          margin={{ left: -18, right: 6, top: 10, bottom: 0 }}
         >
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-          <XAxis dataKey="week" tickLine={false} axisLine={false} tickMargin={10} />
+          <XAxis
+            dataKey="week"
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            tick={{ fontSize: 11 }}
+          />
           <YAxis
             tickLine={false}
             axisLine={false}
-            tickMargin={10}
+            tickMargin={6}
+            tick={{ fontSize: 11 }}
             domain={[0, 100]}
           />
           <Tooltip />

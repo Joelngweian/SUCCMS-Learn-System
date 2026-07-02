@@ -28,54 +28,65 @@ function SheetPortal({
   return <SheetPrimitive.Portal data-slot="sheet-portal" {...props} />;
 }
 
-function SheetOverlay({
-  className,
-  ...props
-}: React.ComponentProps<typeof SheetPrimitive.Overlay>) {
-  return (
-    <SheetPrimitive.Overlay
-      data-slot="sheet-overlay"
-      className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
+const SheetOverlay = React.forwardRef<
+  React.ElementRef<typeof SheetPrimitive.Overlay>,
+  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Overlay>
+>(({ className, ...props }, ref) => (
+  <SheetPrimitive.Overlay
+    ref={ref}
+    data-slot="sheet-overlay"
+    className={cn(
+      "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50",
+      className,
+    )}
+    {...props}
+  />
+));
+SheetOverlay.displayName = "SheetOverlay";
 
-function SheetContent({
-  className,
-  children,
-  side = "right",
-  ...props
-}: React.ComponentProps<typeof SheetPrimitive.Content> & {
-  side?: "top" | "right" | "bottom" | "left";
-}) {
-  return (
-    <SheetPortal>
-      <SheetOverlay />
-      <SheetPrimitive.Content
-        data-slot="sheet-content"
-        className={cn("bg-background shadow-lg flex flex-col", className)}
-        style={{
-          position: 'fixed',
-          zIndex: 51,
-          ...(side === 'right' && { top: 0, right: 0, bottom: 0, width: '100%', maxWidth: '560px' }),
-          ...(side === 'left' && { top: 0, left: 0, bottom: 0, width: '100%', maxWidth: '560px' }),
-          ...(side === 'top' && { top: 0, left: 0, right: 0 }),
-          ...(side === 'bottom' && { bottom: 0, left: 0, right: 0 }),
-        }}
-        {...props}
-      >
-        {children}
-        <SheetPrimitive.Close className="absolute top-4 right-4 h-8 w-8 rounded-full border bg-background shadow-sm flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
-          <XIcon className="h-4 w-4" />
-        </SheetPrimitive.Close>
-      </SheetPrimitive.Content>
-    </SheetPortal>
-  );
-}
+const SheetContent = React.forwardRef<
+  React.ElementRef<typeof SheetPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content> & {
+    side?: "top" | "right" | "bottom" | "left";
+  }
+>(({ className, children, side = "right", style, ...props }, ref) => (
+  <SheetPortal>
+    <SheetOverlay />
+    <SheetPrimitive.Content
+      ref={ref}
+      data-slot="sheet-content"
+      className={cn("bg-background shadow-lg flex flex-col", className)}
+      style={{
+        position: "fixed",
+        zIndex: 51,
+        ...(side === "right" && {
+          top: 0,
+          right: 0,
+          bottom: 0,
+          width: "100%",
+          maxWidth: "560px",
+        }),
+        ...(side === "left" && {
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: "100%",
+          maxWidth: "560px",
+        }),
+        ...(side === "top" && { top: 0, left: 0, right: 0 }),
+        ...(side === "bottom" && { bottom: 0, left: 0, right: 0 }),
+        ...style,
+      }}
+      {...props}
+    >
+      {children}
+      <SheetPrimitive.Close className="absolute top-4 right-4 h-8 w-8 rounded-full border bg-background shadow-sm flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
+        <XIcon className="h-4 w-4" />
+      </SheetPrimitive.Close>
+    </SheetPrimitive.Content>
+  </SheetPortal>
+));
+SheetContent.displayName = "SheetContent";
 
 function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (

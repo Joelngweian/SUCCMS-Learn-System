@@ -130,15 +130,18 @@ export async function getCourseAssessmentStructures(courseIds: string[]) {
 }
 
 export async function createCourseOfferingWithAssessment({
+  academicTermId,
   courseTemplateId,
   values,
 }: {
+  academicTermId?: string | null;
   courseTemplateId: string;
   values: CourseAssessmentValues;
 }) {
   const { data, error } = await supabase.rpc(
     "create_course_offering_with_assessment",
     {
+      p_academic_term_id: academicTermId || null,
       p_course_id: courseTemplateId,
       p_items: toRpcItems(values),
     },

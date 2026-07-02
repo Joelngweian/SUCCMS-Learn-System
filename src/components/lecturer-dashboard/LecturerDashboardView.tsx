@@ -37,7 +37,6 @@ import {
   Sheet,
   SheetContent,
   SheetDescription,
-  SheetHeader,
   SheetTitle,
   SheetTrigger,
 } from "../ui/sheet";
@@ -146,9 +145,14 @@ function LecturerStatsGrid({
 
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-      {items.map(item => (
-        <Card key={item.label} className="shadow-sm">
-          <CardContent className="p-4">
+      {items.map((item, index) => (
+        <Card
+          key={item.label}
+          className={`shadow-sm ${
+            index === items.length - 1 ? "col-span-2 md:col-span-1" : ""
+          }`}
+        >
+          <CardContent className="p-3 sm:p-4">
             <div className="flex items-center gap-3">
               <div className={`rounded-lg p-2 ${item.iconClassName}`}>
                 {item.icon}
@@ -157,7 +161,9 @@ function LecturerStatsGrid({
                 <p className="min-h-7 text-[11px] leading-tight text-muted-foreground">
                   {item.label}
                 </p>
-                <p className="text-2xl font-semibold">{item.value}</p>
+                <p className="text-xl font-semibold sm:text-2xl">
+                  {item.value}
+                </p>
               </div>
             </div>
           </CardContent>
@@ -617,7 +623,7 @@ export function LecturerDashboardView({
       <div className="min-w-0 space-y-8">
         <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
               Welcome back, {firstName}!
             </h1>
             <p className="mt-1 flex items-center gap-2 text-muted-foreground">
@@ -641,15 +647,10 @@ export function LecturerDashboardView({
               </Button>
             </SheetTrigger>
             <SheetContent side="right" className="overflow-hidden p-0">
-              <SheetHeader className="border-b pr-14">
-                <SheetTitle className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-purple-500" />
-                  Teaching Panel
-                </SheetTitle>
-                <SheetDescription>
-                  Course shortcuts, grading queue and teaching insights.
-                </SheetDescription>
-              </SheetHeader>
+              <SheetTitle className="sr-only">Teaching Panel</SheetTitle>
+              <SheetDescription className="sr-only">
+                Course shortcuts, grading queue and teaching insights.
+              </SheetDescription>
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
                 {teachingPanel}
               </div>
@@ -664,7 +665,7 @@ export function LecturerDashboardView({
           </div>
         )}
 
-        <div className="overflow-hidden rounded-2xl border bg-card px-4 pt-4 shadow-sm sm:px-6 sm:pt-5">
+        <div className="overflow-hidden rounded-2xl border bg-card px-3 py-3 shadow-sm sm:px-6 sm:pb-0 sm:pt-5">
           <Stories
             currentUserName={profile.fullName || "Your Story"}
             currentUserInitials={(profile.fullName || "YS")

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext.tsx";
 import { subscribeToPrivateBroadcast } from "@/lib/realtime";
@@ -7,12 +7,20 @@ import {
   type NormalizedCourseOffering,
 } from "@/lib/courseOfferings";
 import {
+  getActiveCourseOfferingsByCodes,
   enrollStudentInCourseWithKey,
-  getAvailableCourseOfferings,
+  getCurrentEnrollmentTerm,
   getCourseInstructorSummaries,
   getStudentCourseOfferings,
   invalidateCourseCache,
+  type CurrentEnrollmentTerm,
 } from "@/data/courseRepository";
+import {
+  getFallbackCurrentAcademicTerm,
+  isConcreteStudyPlanEntry,
+  type StudyPlanCourseEntry,
+} from "@/data/studyPlanUtils";
+import { getDbStudyPlanCoursesForStudent } from "@/data/academicPlanningRepository";
 import { CoursePage } from "./CoursePage"; // <--- IMPORT THIS
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Button } from "./ui/button";
@@ -54,6 +62,10 @@ import { CourseAssessmentSummary } from "./course/CourseAssessmentStructure";
 type Course = NormalizedCourseOffering & {
   assessmentStructure?: CourseAssessmentItem[] | null;
   instructors?: CourseInstructor[];
+  isOffered?: boolean;
+  isEnrolled?: boolean;
+  isPlaceholder?: boolean;
+  studyPlanEntry?: StudyPlanCourseEntry;
 };
 
 interface CourseInstructor {
@@ -79,7 +91,6 @@ export function StudentCourses() {
   // Data State
   const [enrolledCourses, setEnrolledCourses] = useState<Course[]>([]);
   const [availableCourses, setAvailableCourses] = useState<Course[]>([]);
-  const [availableCourseCount, setAvailableCourseCount] = useState(0);
   const [programmeOptions, setProgrammeOptions] = useState<{faculty: string, programme: string}[]>([]);
   
   // UI State
@@ -98,9 +109,12 @@ export function StudentCourses() {
   
   // Enrollment State
   const [selectedCourseForEnrollment, setSelectedCourseForEnrollment] = useState<Course | null>(null);
+  const [assessmentCourseToView, setAssessmentCourseToView] =
+    useState<Course | null>(null);
   const [enrollmentKeyInput, setEnrollmentKeyInput] = useState("");
   const [enrollmentError, setEnrollmentError] = useState("");
   const [isEnrolling, setIsEnrolling] = useState(false);
+  const [studyPlanMessage, setStudyPlanMessage] = useState<string | null>(null);
 
   // Profile Setup State
   const [showProfileSetup, setShowProfileSetup] = useState(false);
@@ -112,6 +126,7 @@ export function StudentCourses() {
   const [profileSetupError, setProfileSetupError] = useState("");
 
   const profileId = profile?.id;
+  const profileEmail = profile?.email;
   const profileRole = profile?.role;
   const profileFaculty = profile?.faculty;
   const profileProgramme = profile?.programme;
@@ -146,21 +161,60 @@ export function StudentCourses() {
     if (!profileId) return;
     setIsLoading(true);
     try {
-      const [myCourses, availablePage] = await Promise.all([
+      const [myCourses, resolvedTerm] = await Promise.all([
         getStudentCourseOfferings(profileId),
-        getAvailableCourseOfferings({
-          page: currentPage,
-          pageSize: ITEMS_PER_PAGE,
-          searchTerm: debouncedSearchTerm,
+        getCurrentEnrollmentTerm().catch(() => {
+          const fallback = getFallbackCurrentAcademicTerm();
+          return {
+            ...fallback,
+            id: fallback.id || "",
+          } as CurrentEnrollmentTerm;
         }),
       ]);
-      setAvailableCourseCount(availablePage.totalCount);
-      setAvailableCourses(availablePage.courses);
+
+      const termCode = resolvedTerm?.code || getFallbackCurrentAcademicTerm().code;
+      let studyPlanResult = await getDbStudyPlanCoursesForStudent({
+        email: profileEmail,
+        programme: profileProgramme,
+        studentProfileId: profileId,
+        termCode,
+      });
+
+      if (!studyPlanResult) {
+        const { getStudyPlanCoursesForStudent } = await import("@/data/studyPlanCatalog");
+        studyPlanResult = getStudyPlanCoursesForStudent({
+          email: profileEmail,
+          programme: profileProgramme,
+          termCode,
+        });
+      }
+      setStudyPlanMessage(studyPlanResult.message || null);
+
+      const concreteStudyPlanEntries = studyPlanResult.entries.filter(
+        isConcreteStudyPlanEntry,
+      );
+      const activeOfferings =
+        resolvedTerm?.id
+          ? await getActiveCourseOfferingsByCodes({
+              courseCodes: concreteStudyPlanEntries
+                .map(entry => entry.courseCode)
+                .filter((code): code is string => Boolean(code)),
+              termId: resolvedTerm.id,
+            })
+          : [];
+
+      const offeringsByCode = new Map(
+        activeOfferings.map(course => [getCourseCode(course), course]),
+      );
+      const enrolledCourseIds = new Set(myCourses.map(course => course.id));
 
       let instructorRows = [];
       try {
         instructorRows =
-          await getCourseInstructorSummaries(myCourses.map(course => course.id));
+          await getCourseInstructorSummaries([
+            ...myCourses.map(course => course.id),
+            ...activeOfferings.map(course => course.id),
+          ]);
       } catch (instructorError) {
         console.error("Error fetching course instructors", instructorError);
       }
@@ -197,6 +251,47 @@ export function StudentCourses() {
       });
 
       setEnrolledCourses(myCourses.map(attachInstructors));
+      setAvailableCourses(
+        studyPlanResult.entries.map((entry, index) => {
+          const offeredCourse = entry.courseCode
+            ? offeringsByCode.get(entry.courseCode)
+            : null;
+
+          if (offeredCourse) {
+            return attachInstructors({
+              ...offeredCourse,
+              isOffered: true,
+              isEnrolled: enrolledCourseIds.has(offeredCourse.id),
+              isPlaceholder: false,
+              studyPlanEntry: entry,
+            });
+          }
+
+          return {
+            id: `study-plan-${entry.programmeKey}-${entry.intakeYear}${entry.intakeSemester}-${entry.termCode}-${entry.planCourseKey}-${index}`,
+            template_id: "",
+            course_code: entry.courseCode || "Requirement",
+            code: entry.courseCode || "Requirement",
+            name: entry.courseName,
+            chinese_name: null,
+            faculty: profileFaculty || "",
+            programme: profileProgramme || "",
+            course_type: "elective_open",
+            credits: entry.creditHours || 0,
+            credit_hours: entry.creditHours || 0,
+            max_capacity: 0,
+            enrollment_key: null,
+            status: "unavailable",
+            semester: resolvedTerm?.code || entry.termCode,
+            created_at: "",
+            isOffered: false,
+            isEnrolled: false,
+            isPlaceholder: entry.isPlaceholder,
+            studyPlanEntry: entry,
+            instructors: [],
+          } satisfies Course;
+        }),
+      );
     } catch (error) {
       console.error(
         "Error fetching courses",
@@ -207,7 +302,7 @@ export function StudentCourses() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentPage, debouncedSearchTerm, profileId]);
+  }, [profileEmail, profileFaculty, profileId, profileProgramme]);
 
   // --- 1. Initial Load & Checks ---
   useEffect(() => {
@@ -320,10 +415,72 @@ export function StudentCourses() {
     return course.instructors.map((instructor) => instructor.full_name).join(", ");
   };
   const hasAssignedLecturer = (course: Course) => Boolean(course.instructors?.length);
+  const formatAssessmentPercent = (value: number) =>
+    Number.isInteger(value) ? value.toString() : value.toFixed(1);
+
+  const CompactAssessmentSummary = ({
+    structure,
+  }: {
+    structure?: ReturnType<typeof assessmentRowsToValues> | null;
+  }) => {
+    if (!structure?.length) {
+      return (
+        <p className="text-xs text-muted-foreground">
+          Assessment structure pending.
+        </p>
+      );
+    }
+
+    const summary = [
+      { label: "Tests", types: ["test"] },
+      { label: "Assignments", types: ["individual_assignment"] },
+      { label: "Projects", types: ["group_project"] },
+      { label: "Final", types: ["final_exam"] },
+    ]
+      .map(group => ({
+        label: group.label,
+        weight: structure
+          .filter(item => group.types.includes(item.itemType))
+          .reduce((total, item) => total + item.weightPercentage, 0),
+      }))
+      .filter(group => group.weight > 0);
+
+    return (
+      <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+        <span className="font-medium text-foreground">Assessment:</span>{" "}
+        {summary
+          .map(
+            group =>
+              `${group.label} ${formatAssessmentPercent(group.weight)}%`,
+          )
+          .join(" 璺?")}
+      </p>
+    );
+  };
+
+  const filteredAvailableCourses = useMemo(() => {
+    const search = debouncedSearchTerm.toLowerCase();
+    if (!search) return availableCourses;
+    return availableCourses.filter(course =>
+      course.name.toLowerCase().includes(search)
+      || getCourseCode(course).toLowerCase().includes(search)
+      || (course.studyPlanEntry?.category || "").toLowerCase().includes(search),
+    );
+  }, [availableCourses, debouncedSearchTerm]);
+  const totalPages = Math.ceil(filteredAvailableCourses.length / ITEMS_PER_PAGE);
+  const paginatedCourses = filteredAvailableCourses.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE,
+  );
+
+  const filteredProgrammes = programmeOptions.filter(p => 
+    p.programme.toLowerCase().includes(programmeSearch.toLowerCase())
+  );
 
   // --- 4. Render Logic ---
 
-  // *** IF VIEWING A COURSE, SHOW THE TEAMS VIEW ***
+  // Keep this return after all hooks. If it runs before useMemo/useEffect hooks,
+  // React sees a different hook count when switching between the list and CoursePage.
   if (viewingCourseId) {
     return <CoursePage courseId={viewingCourseId} onBack={() => {
       setViewingCourseId(null);
@@ -332,31 +489,24 @@ export function StudentCourses() {
     }} />;
   }
 
-  const totalPages = Math.ceil(availableCourseCount / ITEMS_PER_PAGE);
-  const paginatedCourses = availableCourses;
-
-  const filteredProgrammes = programmeOptions.filter(p => 
-    p.programme.toLowerCase().includes(programmeSearch.toLowerCase())
-  );
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight">My Studies</h1>
-        <p className="text-muted-foreground">
+        <p className="text-sm text-muted-foreground sm:text-base">
           {profile?.programme || "Manage your courses"}
         </p>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="my-courses" className="gap-2">
+        <TabsList className="grid h-auto w-full grid-cols-2 p-1 sm:w-auto">
+          <TabsTrigger value="my-courses" className="gap-1 px-2 text-xs sm:gap-2 sm:px-3 sm:text-sm">
             <BookOpen className="h-4 w-4" />
             Enrolled
             <Badge variant="secondary" className="ml-1">{enrolledCourses.length}</Badge>
           </TabsTrigger>
-          <TabsTrigger value="browse" className="gap-2">
+          <TabsTrigger value="browse" className="gap-1 px-2 text-xs sm:gap-2 sm:px-3 sm:text-sm">
             <Search className="h-4 w-4" />
             Browse Available
           </TabsTrigger>
@@ -367,30 +517,30 @@ export function StudentCourses() {
           {isLoading ? (
             <div className="flex justify-center py-8"><Loader2 className="animate-spin text-primary" /></div>
           ) : enrolledCourses.length === 0 ? (
-            <div className="text-center py-12 border rounded-lg bg-muted/20 border-dashed">
+            <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-12 text-center">
               <GraduationCap className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <h3 className="text-lg font-medium">No courses yet</h3>
               <p className="text-muted-foreground mb-4">Start your semester by enrolling in courses.</p>
-              <Button onClick={() => setActiveTab("browse")}>Browse Courses</Button>
+              <Button onClick={() => setActiveTab("browse")}>Browse Available Courses</Button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
               {enrolledCourses.map(course => (
                 <Card 
                     key={course.id} 
                     className="hover:shadow-md transition-all border-l-4 border-l-green-500 cursor-pointer"
                     onClick={() => setViewingCourseId(course.id)} // Click card to open
                 >
-                  <CardHeader>
-                    <div className="flex justify-between items-start">
+                  <CardHeader className="p-3 pb-2 sm:p-6">
+                    <div className="flex items-start justify-between gap-2">
                       <Badge variant="outline">{getCourseCode(course)}</Badge>
                       <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-none">Enrolled</Badge>
                     </div>
-                    <CardTitle className="mt-2 line-clamp-1">{course.name}</CardTitle>
-                    <CardDescription className="line-clamp-1">{course.chinese_name}</CardDescription>
+                    <CardTitle className="mt-2 line-clamp-2 text-base sm:text-lg">{course.name}</CardTitle>
+                    <CardDescription className="line-clamp-1 text-xs sm:text-sm">{course.chinese_name}</CardDescription>
                   </CardHeader>
-                  <CardContent>
-                     <div className="text-xs text-muted-foreground space-y-2 mb-4">
+                  <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
+                     <div className="mb-2 space-y-1.5 text-xs text-muted-foreground sm:mb-4 sm:space-y-2">
                         <div className="flex items-center gap-2">
                            <Clock className="h-3 w-3" /> {course.credit_hours} Credits
                         </div>
@@ -401,16 +551,42 @@ export function StudentCourses() {
                            <GraduationCap className="h-3 w-3" /> Lecturer: {getLecturerNames(course)}
                         </div>
                      </div>
-                     <div className="mb-4">
-                       <CourseAssessmentSummary
-                         structure={
-                           course.assessmentStructure
-                             ? assessmentRowsToValues(
-                                 course.assessmentStructure,
-                               )
-                             : null
-                         }
-                       />
+                     <div className="mb-3 sm:mb-4">
+                       <div className="sm:hidden">
+                         <CompactAssessmentSummary
+                           structure={
+                             course.assessmentStructure
+                               ? assessmentRowsToValues(
+                                   course.assessmentStructure,
+                                 )
+                               : null
+                           }
+                         />
+                         <Button
+                           type="button"
+                           variant="outline"
+                           size="sm"
+                           className="mt-2 h-8 rounded-full px-3 text-xs"
+                           onClick={event => {
+                             event.stopPropagation();
+                             setAssessmentCourseToView(course);
+                           }}
+                         >
+                           <BookOpen className="mr-1.5 h-3.5 w-3.5" />
+                           View Assessment
+                         </Button>
+                       </div>
+                       <div className="hidden sm:block">
+                         <CourseAssessmentSummary
+                           structure={
+                             course.assessmentStructure
+                               ? assessmentRowsToValues(
+                                   course.assessmentStructure,
+                                 )
+                               : null
+                           }
+                         />
+                       </div>
                      </div>
                      <Button className="w-full" onClick={(e: React.MouseEvent) => {
                          e.stopPropagation(); // Prevent double triggering
@@ -426,12 +602,12 @@ export function StudentCourses() {
         </TabsContent>
 
         {/* --- TAB: BROWSE (With Pagination) --- */}
-        <TabsContent value="browse" className="space-y-6">
+        <TabsContent value="browse" className="space-y-4 sm:space-y-6">
           <div className="flex gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input 
-                placeholder="Search by name or code..." 
+                placeholder="Search available courses..." 
                 className="pl-8"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -439,31 +615,70 @@ export function StudentCourses() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 min-h-[400px]">
+          <div className="grid min-h-[400px] grid-cols-2 gap-3 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
+            {studyPlanMessage && (
+              <Alert className="col-span-full">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{studyPlanMessage}</AlertDescription>
+              </Alert>
+            )}
+            {paginatedCourses.length === 0 && (
+              <div className="col-span-full rounded-lg border border-dashed bg-muted/20 px-4 py-12 text-center text-muted-foreground">
+                {studyPlanMessage || "No study plan courses found for this semester."}
+              </div>
+            )}
             {paginatedCourses.map(course => (
-              <Card key={course.id} className="flex flex-col hover:border-primary/50 transition-colors">
-                <CardHeader>
-                  <div className="flex justify-between items-start">
-                    <Badge variant="outline">{getCourseCode(course)}</Badge>
-                    <Badge variant={course.course_type === 'common_core' ? 'secondary' : 'outline'}>
-                      {course.course_type?.replace('_', ' ')}
+              <Card key={course.id} className="flex min-h-44 flex-col hover:border-primary/50 transition-colors sm:min-h-0">
+                <CardHeader className="p-3 sm:p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-1.5">
+                    <Badge variant="outline" className="px-1.5 text-[10px] sm:px-2.5 sm:text-xs">
+                      {getCourseCode(course)}
+                    </Badge>
+                    <Badge
+                      variant={course.isEnrolled || course.isOffered ? 'secondary' : 'outline'}
+                      className="px-1.5 text-[10px] capitalize sm:px-2.5 sm:text-xs"
+                    >
+                      {course.isEnrolled
+                        ? "Enrolled"
+                        : course.isOffered
+                          ? "Offered"
+                        : course.isPlaceholder
+                          ? "Requirement"
+                          : "Not offered"}
                     </Badge>
                   </div>
-                  <CardTitle className="mt-2 text-lg line-clamp-1" title={course.name}>{course.name}</CardTitle>
-                  <CardDescription className="font-noto-sans-sc line-clamp-1">{course.chinese_name}</CardDescription>
+                  <CardTitle className="mt-2 line-clamp-3 text-sm leading-snug sm:line-clamp-1 sm:text-lg" title={course.name}>{course.name}</CardTitle>
+                  <CardDescription className="font-noto-sans-sc line-clamp-1 text-xs sm:text-sm">
+                    {course.studyPlanEntry?.category || course.chinese_name}
+                  </CardDescription>
                 </CardHeader>
-                <CardContent className="mt-auto">
-                   <div className="space-y-3 text-sm text-muted-foreground mb-4">
-                      <div className="flex items-center gap-2">
+                <CardContent className="mt-auto p-3 pt-0 sm:p-6 sm:pt-0">
+                   <div className="mb-3 space-y-2 text-xs text-muted-foreground sm:mb-4 sm:text-sm">
+                      <div className="hidden items-center gap-2 sm:flex">
                         <GraduationCap className="h-4 w-4" />
-                        <span>Lecturer: {getLecturerNames(course)}</span>
+                        <span>
+                          {course.isOffered
+                            ? `Lecturer: ${getLecturerNames(course)}`
+                            : "Waiting for an active class"}
+                        </span>
                       </div>
                       <div className="flex justify-end items-center">
                         <span>{course.credit_hours} Credits</span>
                       </div>
                    </div>
-                   <Button className="w-full" onClick={() => handleEnrollClick(course)} disabled={!hasAssignedLecturer(course)}>
-                      <Plus className="h-4 w-4 mr-2" /> {hasAssignedLecturer(course) ? "Enroll" : "No Lecturer Assigned"}
+                   <Button
+                     className="h-8 w-full px-2 text-xs sm:h-10 sm:text-sm"
+                     onClick={() => handleEnrollClick(course)}
+                     disabled={course.isEnrolled || !course.isOffered || !hasAssignedLecturer(course)}
+                   >
+                      <Plus className="mr-1 h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4" />
+                      {course.isEnrolled
+                        ? "Already Enrolled"
+                        : course.isOffered
+                          ? "Enroll"
+                        : course.isPlaceholder
+                          ? "Requirement Only"
+                          : "Not Offered Yet"}
                    </Button>
                 </CardContent>
               </Card>
@@ -472,7 +687,7 @@ export function StudentCourses() {
 
           {/* Pagination Controls */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-8">
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-2 sm:mt-8">
               <Button 
                 variant="outline" 
                 size="sm" 
@@ -481,7 +696,7 @@ export function StudentCourses() {
               >
                 <ChevronLeft className="h-4 w-4" /> Previous
               </Button>
-              <span className="text-sm text-muted-foreground">
+              <span className="min-w-24 text-center text-sm text-muted-foreground">
                 Page {currentPage} of {totalPages}
               </span>
               <Button 
@@ -496,6 +711,31 @@ export function StudentCourses() {
           )}
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={Boolean(assessmentCourseToView)}
+        onOpenChange={open => {
+          if (!open) setAssessmentCourseToView(null);
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Assessment Structure</DialogTitle>
+            <DialogDescription>
+              {assessmentCourseToView?.name || "Course assessment details"}
+            </DialogDescription>
+          </DialogHeader>
+          <CourseAssessmentSummary
+            structure={
+              assessmentCourseToView?.assessmentStructure
+                ? assessmentRowsToValues(
+                    assessmentCourseToView.assessmentStructure,
+                  )
+                : null
+            }
+          />
+        </DialogContent>
+      </Dialog>
 
       {/* --- DIALOG: PROFILE SETUP --- */}
       <Dialog open={showProfileSetup} onOpenChange={() => {}}>

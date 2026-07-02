@@ -372,7 +372,7 @@ export function Stories({
       {/* Stories Carousel */}
       {mode === "carousel" && (
       <div className="relative">
-        <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide px-1">
+        <div className="flex gap-3 overflow-x-auto pb-3 scrollbar-hide px-1 sm:gap-4 sm:pb-4">
           {storyUsers.map((user, index) => {
             const isMe = index === 0;
 
@@ -380,14 +380,14 @@ export function Stories({
               <div
                 key={user.id}
                 onClick={() => handleStoryClick(user)}
-                className="flex-shrink-0 flex flex-col items-center gap-2 group cursor-pointer"
+                className="flex-shrink-0 flex flex-col items-center gap-1.5 group cursor-pointer sm:gap-2"
               >
                 <div className="relative">
                   <StoryAvatarRing
                     active={user.hasActiveStories}
                     viewed={user.viewed}
                   >
-                    <Avatar className="h-16 w-16 border-2 border-background">
+                    <Avatar className="h-14 w-14 border-2 border-background sm:h-16 sm:w-16">
                       <AvatarImage src={user.avatar_url} className="object-cover" />
                       <AvatarFallback className="bg-blue-100 text-blue-700 font-bold">
                         {user.initials}

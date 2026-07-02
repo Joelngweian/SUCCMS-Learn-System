@@ -119,9 +119,8 @@ export function NotificationPanel({
 
   return (
     <div
-      className="absolute right-0 top-full z-[100] mt-2 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg"
+      className="fixed left-3 right-3 top-16 z-[100] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[min(380px,calc(100vw-24px))]"
       style={{
-        width: "min(380px, calc(100vw - 24px))",
         backgroundColor: "var(--popover)",
         color: "var(--popover-foreground)",
       }}
@@ -148,7 +147,7 @@ export function NotificationPanel({
         )}
       </div>
 
-      <div className="h-[360px] overflow-y-auto">
+      <div className="max-h-[calc(100vh-11rem)] overflow-y-auto sm:h-[360px] sm:max-h-none">
         {isLoading ? (
           <div className="flex h-40 items-center justify-center">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

@@ -41,6 +41,16 @@ const AdminDashboard = lazy(() =>
     default: module.AdminDashboard,
   }))
 );
+const StaffDashboard = lazy(() =>
+  import("./components/staff/AaroDashboardHome").then((module) => ({
+    default: module.AaroDashboardHome,
+  }))
+);
+const StaffAcademicPlanning = lazy(() =>
+  import("./components/staff/StaffAcademicPlanning").then((module) => ({
+    default: module.StaffAcademicPlanning,
+  }))
+);
 const UserProfile = lazy(() =>
   import("./components/UserProfile").then((module) => ({
     default: module.UserProfile,
@@ -94,7 +104,7 @@ const PageLoadingFallback = () => (
 );
 
 // Types
-type UserRole = 'student' | 'lecturer' | 'admin';
+type UserRole = 'student' | 'lecturer' | 'staff' | 'admin';
 
 type NavigationItem = {
   id: string; // Used as the URL path
@@ -255,6 +265,11 @@ export default function App() {
     { id: 'analytics', label: 'Analytics', icon: BarChart3, description: 'Student progress reports' }
   ];
 
+  const staffNavigationItems: NavigationItem[] = [
+    { id: '', label: 'AARO Dashboard', icon: LayoutDashboard, description: 'Stories & campus posts' },
+    { id: 'study-plan-management', label: 'Study Plan Management', icon: ClipboardList, description: 'Study plans & class assignment' }
+  ];
+
   const adminNavigationItems: NavigationItem[] = [
     { id: '', label: 'Dashboard', icon: LayoutDashboard, description: 'Overview & AI insights' }
   ];
@@ -264,7 +279,9 @@ export default function App() {
       ? studentNavigationItems
       : userRole === 'lecturer'
         ? lecturerNavigationItems
-        : adminNavigationItems;
+        : userRole === 'staff'
+          ? staffNavigationItems
+          : adminNavigationItems;
   const isDarkMode = resolvedTheme === "dark";
   
   const isActive = (path: string) => {
@@ -298,6 +315,8 @@ export default function App() {
       ? 'Student'
       : userRole === 'lecturer'
         ? 'Lecturer'
+        : userRole === 'staff'
+          ? 'AARO Staff'
           : 'Admin';
 
   return (
@@ -444,6 +463,15 @@ export default function App() {
                     <Route path="/assignments" element={<Assignments />} />
                     <Route path="/forum" element={<Forum />} />
                     <Route path="/analytics" element={<LecturerAnalytics />} />
+                  </>
+                )}
+
+                {/* Staff Routes */}
+                {userRole === 'staff' && (
+                  <>
+                    <Route path="/" element={<StaffDashboard />} />
+                    <Route path="/study-plan-management" element={<StaffAcademicPlanning />} />
+                    <Route path="/academic-planning" element={<Navigate to="/study-plan-management" replace />} />
                   </>
                 )}
 

@@ -319,17 +319,24 @@ export function StudentStatsGrid({
   ];
 
   return (
-    <div className="grid grid-cols-1 gap-6 md:grid-cols-5">
-      {items.map((item) => (
-        <Card key={item.label}>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      {items.map((item, index) => (
+        <Card
+          key={item.label}
+          className={index === items.length - 1 ? "col-span-2 md:col-span-1" : ""}
+        >
+          <CardContent className="p-3 sm:p-6">
+            <div className="flex items-center gap-3 sm:gap-4">
               <div className={`rounded-lg p-2 ${item.iconClassName}`}>
                 {item.icon}
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">{item.label}</p>
-                <p className="text-2xl font-semibold">{item.value}</p>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground sm:text-sm">
+                  {item.label}
+                </p>
+                <p className="text-xl font-semibold sm:text-2xl">
+                  {item.value}
+                </p>
               </div>
             </div>
           </CardContent>

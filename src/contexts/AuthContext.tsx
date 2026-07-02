@@ -6,7 +6,7 @@ import { getBroadcastNewRecord, subscribeToPrivateBroadcast } from '@/lib/realti
 const AUTH_PROFILE_SELECT =
   'id, full_name, username, role, faculty, programme, avatar_url, cover_url, bio, is_active';
 
-type PublicSignupRole = 'student' | 'lecturer' | 'admin';
+type PublicSignupRole = 'student' | 'lecturer' | 'staff' | 'admin';
 
 const SUC_EMAIL_DOMAIN = '@sc.edu.my';
 
@@ -19,7 +19,7 @@ const resolveSignupRoleFromEmail = (email: string): PublicSignupRole | null => {
 
   const emailPrefix = normalizedEmail.slice(0, -SUC_EMAIL_DOMAIN.length);
 
-  if (emailPrefix.startsWith('st')) return 'admin';
+  if (emailPrefix.startsWith('st')) return 'staff';
   if (emailPrefix.startsWith('lc')) return 'lecturer';
   if (
     emailPrefix.startsWith('d') ||
@@ -38,7 +38,7 @@ export type UserProfile = {
   full_name: string;
   username?: string | null;
   email: string;
-  role: 'student' | 'lecturer' | 'admin';
+  role: 'student' | 'lecturer' | 'staff' | 'admin';
   faculty?: string;   
   programme?: string; 
   avatar_url?: string; // <--- Added this
@@ -262,7 +262,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           data: null,
           error: {
             message:
-              "We could not identify your account type from this SUC email. Admin staff emails must start with ST, lecturer emails with LC, and student emails with D, B, or P.",
+              "We could not identify your account type from this SUC email. AARO staff emails must start with ST, lecturer emails with LC, and student emails with D, B, or P.",
           },
         };
       }

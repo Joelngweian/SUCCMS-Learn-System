@@ -50,8 +50,49 @@ export const formatTime = (date: string) =>
 export const formatSessionSlotLabel = (session: AttendanceSession) =>
   session.slot_label || `Hour ${session.slot_no || 1}`;
 
+export const getSessionScheduledEnd = (session: AttendanceSession) => {
+  const startsAt = new Date(session.starts_at).getTime();
+  const endsAt = new Date(session.ends_at).getTime();
+  const oneHourEnd = startsAt + 60 * 60_000;
+
+  if (Number.isFinite(endsAt) && endsAt - startsAt >= 45 * 60_000) {
+    return new Date(endsAt);
+  }
+
+  return new Date(oneHourEnd);
+};
+
+export const getSessionCheckInStart = (session: AttendanceSession) =>
+  session.opened_at || session.starts_at;
+
+export const getSessionCheckInEnd = (session: AttendanceSession) => {
+  const checkInStart = new Date(getSessionCheckInStart(session)).getTime();
+  const checkInWindowMinutes = session.check_in_window_minutes || 15;
+
+  return new Date(checkInStart + checkInWindowMinutes * 60_000);
+};
+
+export const getSessionTimingState = (
+  session: AttendanceSession,
+  now = Date.now(),
+) => {
+  if (session.status === "closed") return "closed";
+
+  const scheduledStart = new Date(session.starts_at).getTime();
+  const checkInStart = new Date(getSessionCheckInStart(session)).getTime();
+  const checkInEnd = getSessionCheckInEnd(session).getTime();
+
+  if (!session.opened_at && scheduledStart > now) return "upcoming";
+  if (checkInStart <= now && checkInEnd > now) return "open";
+  if (checkInEnd <= now) return "expired";
+
+  return "upcoming";
+};
+
 export const formatSessionWindow = (session: AttendanceSession) =>
-  `${formatTime(session.starts_at)} - ${formatTime(session.ends_at)}`;
+  `${formatTime(session.starts_at)} - ${formatTime(
+    getSessionScheduledEnd(session).toISOString(),
+  )}`;
 
 export const getRecordStatus = (
   record: AttendanceRecord

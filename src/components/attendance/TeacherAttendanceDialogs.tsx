@@ -19,7 +19,11 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
-import { formatClassDate, type AttendanceSession } from "./attendanceTypes";
+import {
+  formatClassDate,
+  getSessionTimingState,
+  type AttendanceSession,
+} from "./attendanceTypes";
 
 interface TeacherAttendanceDialogsProps {
   selectedDate: string;
@@ -59,6 +63,9 @@ export function TeacherAttendanceDialogs({
   const classDate = formatClassDate(
     selectedSession?.class_date || selectedDate
   );
+  const selectedSessionIsUpcoming =
+    selectedSession != null &&
+    getSessionTimingState(selectedSession) === "upcoming";
 
   return (
     <>
@@ -66,9 +73,11 @@ export function TeacherAttendanceDialogs({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {selectedSession
-                ? "Reopen Student Check-In?"
-                : "Start Student Check-In?"}
+              {selectedSessionIsUpcoming
+                ? "Open This Hour Now?"
+                : selectedSession
+                  ? "Reopen Student Check-In?"
+                  : "Start Student Check-In?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               Confirm that this class is on{" "}
@@ -77,7 +86,11 @@ export function TeacherAttendanceDialogs({
               </strong>
               . The system will create{" "}
               <strong className="text-foreground">
-                {selectedSession ? "a new code for this slot" : `${classHours} hourly slot${classHours === "1" ? "" : "s"}`}
+                {selectedSession
+                  ? selectedSessionIsUpcoming
+                    ? "a check-in code for this hour without changing its scheduled time"
+                    : "a check-in code for the selected hour"
+                  : `${classHours} hourly slot${classHours === "1" ? "" : "s"}`}
               </strong>
               , and each code will remain valid for {sessionDuration} minutes.
             </AlertDialogDescription>

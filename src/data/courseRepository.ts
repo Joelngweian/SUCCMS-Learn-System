@@ -18,6 +18,45 @@ export type CourseInstructorSummary = {
   id: string;
 };
 
+export type CurrentEnrollmentTerm = {
+  code: string;
+  ends_at: string | null;
+  enrollment_ends_at: string | null;
+  enrollment_starts_at: string | null;
+  id: string;
+  name: string;
+  starts_at: string | null;
+  status: string | null;
+};
+
+export type CourseTemplateSummary = {
+  chinese_name: string | null;
+  code: string;
+  course_code: string | null;
+  course_type: string | null;
+  credit_hours: number | null;
+  credits: number | null;
+  faculty: string | null;
+  id: string;
+  name: string;
+  programme: string | null;
+  status: string | null;
+};
+
+export type AcademicTermOption = {
+  code: string;
+  ends_at: string | null;
+  enrollment_ends_at?: string | null;
+  enrollment_starts_at?: string | null;
+  id: string;
+  is_current_enrollment_term?: boolean | null;
+  name: string;
+  starts_at: string | null;
+  status: string | null;
+  teaching_ends_at?: string | null;
+  teaching_starts_at?: string | null;
+};
+
 export type AvailableCourseOffering = NormalizedCourseOffering & {
   instructors: Array<{
     avatar_url: string | null;
@@ -90,6 +129,115 @@ export async function getAvailableCourseOfferings({
     courses: rows.map(asAvailableCourseOffering),
     totalCount: Number(rows[0]?.total_count || 0),
   };
+}
+
+export async function getCurrentEnrollmentTerm() {
+  const { data, error } = await supabase.rpc("get_current_enrollment_term");
+  if (error) throw error;
+  return ((data || [])[0] || null) as CurrentEnrollmentTerm | null;
+}
+
+export async function getAcademicTermOptions(): Promise<AcademicTermOption[]> {
+  const { data, error } = await supabase
+    .from("academic_terms")
+    .select("id, code, name, starts_at, ends_at, enrollment_starts_at, enrollment_ends_at, teaching_starts_at, teaching_ends_at, is_current_enrollment_term, status")
+    .order("starts_at", { ascending: false, nullsFirst: false })
+    .order("code", { ascending: false });
+
+  if (error) throw error;
+  return (data || []) as AcademicTermOption[];
+}
+
+export async function upsertAcademicTermsFromCalendar(
+  terms: Array<{
+    code: string;
+    endsAt: string | null;
+    enrollmentEndsAt: string | null;
+    enrollmentStartsAt: string | null;
+    name: string;
+    startsAt: string | null;
+    status: "planned" | "active" | "closed";
+    teachingEndsAt: string | null;
+    teachingStartsAt: string | null;
+  }>,
+): Promise<AcademicTermOption[]> {
+  const payload = terms.map(term => ({
+    code: term.code,
+    ends_at: term.endsAt,
+    enrollment_ends_at: term.enrollmentEndsAt,
+    enrollment_starts_at: term.enrollmentStartsAt,
+    name: term.name,
+    starts_at: term.startsAt,
+    status: term.status,
+    teaching_ends_at: term.teachingEndsAt,
+    teaching_starts_at: term.teachingStartsAt,
+  }));
+
+  const { data, error } = await (supabase as any).rpc("staff_upsert_academic_terms", {
+    p_terms: payload,
+  });
+
+  if (error) throw error;
+  return (data || []) as AcademicTermOption[];
+}
+
+export async function getCourseCatalogTemplates(): Promise<CourseTemplateSummary[]> {
+  const { data, error } = await supabase.rpc("get_course_catalog_summary");
+
+  if (!error) {
+    return (data || []) as CourseTemplateSummary[];
+  }
+
+  const { data: fallbackData, error: fallbackError } = await supabase
+    .from("courses")
+    .select(
+      "id, code, name, course_code, chinese_name, faculty, programme, course_type, credits, credit_hours, status",
+    )
+    .order("course_code", { ascending: true, nullsFirst: false })
+    .order("code", { ascending: true });
+
+  if (fallbackError) throw fallbackError;
+  return (fallbackData || []) as CourseTemplateSummary[];
+}
+
+export async function getCourseTemplatesByCodes(
+  courseCodes: string[],
+): Promise<CourseTemplateSummary[]> {
+  const codes = normalizeIds(courseCodes.map(code => code.toUpperCase()));
+  if (codes.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("courses")
+    .select(
+      "id, code, name, course_code, chinese_name, faculty, programme, course_type, credits, credit_hours, status",
+    )
+    .in("course_code", codes)
+    .order("course_code", { ascending: true });
+
+  if (error) throw error;
+  return (data || []) as CourseTemplateSummary[];
+}
+
+export async function getActiveCourseOfferingsByCodes({
+  courseCodes,
+  termId,
+}: {
+  courseCodes: string[];
+  termId: string;
+}): Promise<NormalizedCourseOffering[]> {
+  const templates = await getCourseTemplatesByCodes(courseCodes);
+  const templateIds = normalizeIds(templates.map(course => course.id));
+  if (templateIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("course_offerings")
+    .select(COURSE_OFFERING_SELECT)
+    .eq("academic_term_id", termId)
+    .eq("status", "active")
+    .in("course_id", templateIds);
+
+  if (error) throw error;
+  return (data || []).map(normalizeCourseOffering);
 }
 
 export async function getCourseOffering(
