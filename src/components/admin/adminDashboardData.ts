@@ -5,7 +5,6 @@ import type {
   AdminAnnouncement,
   AdminStats,
   AnnouncementAttachment,
-  CourseCreationRequest,
   ReportedItem,
 } from "./AdminDashboardTypes";
 
@@ -19,10 +18,6 @@ interface ReportProfile {
 
 interface ReportStory {
   image_url: string | null;
-}
-
-interface CourseRequestProfile {
-  full_name: string | null;
 }
 
 interface AdminReportRow {
@@ -40,23 +35,6 @@ interface AdminReportRow {
   reporter: JoinedRecord<ReportProfile>;
   reported_user: JoinedRecord<ReportProfile>;
   story: JoinedRecord<ReportStory>;
-}
-
-interface CourseCreationRequestRow {
-  id: string;
-  requested_by: string;
-  subject_code: string;
-  subject_name: string;
-  faculty: string | null;
-  programme: string | null;
-  credits: number | null;
-  reason: string;
-  status: "pending" | "approved" | "rejected";
-  admin_notes: string | null;
-  reviewed_at: string | null;
-  generated_course_id: string | null;
-  created_at: string;
-  requester: JoinedRecord<CourseRequestProfile>;
 }
 
 const getJoinedRecord = <T>(value: JoinedRecord<T>) =>
@@ -105,7 +83,6 @@ export const formatDateTimeLocal = (value: string | null) => {
 export const loadAdminDashboardData = async (): Promise<{
   announcements: AdminAnnouncement[];
   reports: ReportedItem[];
-  courseRequests: CourseCreationRequest[];
   stats: AdminStats;
 }> => {
   const now = new Date().toISOString();
@@ -115,7 +92,6 @@ export const loadAdminDashboardData = async (): Promise<{
     storiesResult,
     announcementsResult,
     reportsResult,
-    courseRequestsResult,
   ] = await Promise.all([
     supabase.from("user_profiles").select("id", { count: "exact", head: true }),
     supabase
@@ -148,25 +124,6 @@ export const loadAdminDashboardData = async (): Promise<{
         story:stories!reports_story_id_fkey(image_url)
       `)
       .order("created_at", { ascending: false }),
-    supabase
-      .from("course_creation_requests")
-      .select(`
-        id,
-        requested_by,
-        subject_code,
-        subject_name,
-        faculty,
-        programme,
-        credits,
-        reason,
-        status,
-        admin_notes,
-        reviewed_at,
-        generated_course_id,
-        created_at,
-        requester:user_profiles!course_creation_requests_requested_by_fkey(full_name)
-      `)
-      .order("created_at", { ascending: false }),
   ]);
 
   const firstError = [
@@ -175,7 +132,6 @@ export const loadAdminDashboardData = async (): Promise<{
     storiesResult.error,
     announcementsResult.error,
     reportsResult.error,
-    courseRequestsResult.error,
   ].find(Boolean);
   if (firstError) throw firstError;
 
@@ -230,35 +186,10 @@ export const loadAdminDashboardData = async (): Promise<{
     };
   });
 
-  const courseRequestRows = (
-    courseRequestsResult.data || []
-  ) as unknown as CourseCreationRequestRow[];
-  const courseRequests = courseRequestRows.map((request): CourseCreationRequest => {
-    const requester = getJoinedRecord(request.requester);
-
-    return {
-      id: request.id,
-      requestedBy: request.requested_by,
-      requesterName: requester?.full_name || "Unknown lecturer",
-      subjectCode: request.subject_code,
-      subjectName: request.subject_name,
-      faculty: request.faculty,
-      programme: request.programme,
-      credits: request.credits,
-      reason: request.reason,
-      status: request.status,
-      adminNotes: request.admin_notes,
-      reviewedAt: request.reviewed_at,
-      generatedCourseId: request.generated_course_id,
-      createdAt: request.created_at,
-    };
-  });
-
   const today = new Date().toDateString();
   return {
     announcements,
     reports,
-    courseRequests,
     stats: {
       totalUsers: usersResult.count || 0,
       activeReports: reports.filter((report) => report.status === "pending").length,
@@ -270,9 +201,6 @@ export const loadAdminDashboardData = async (): Promise<{
       suspendedUsers: suspendedUsersResult.count || 0,
       totalStories: storiesResult.count || 0,
       announcements: announcements.length,
-      pendingCourseRequests: courseRequests.filter(
-        (request) => request.status === "pending",
-      ).length,
     },
   };
 };

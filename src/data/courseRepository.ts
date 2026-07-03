@@ -173,7 +173,7 @@ export async function upsertAcademicTermsFromCalendar(
     teaching_starts_at: term.teachingStartsAt,
   }));
 
-  const { data, error } = await (supabase as any).rpc("staff_upsert_academic_terms", {
+  const { data, error } = await supabase.rpc("staff_upsert_academic_terms", {
     p_terms: payload,
   });
 

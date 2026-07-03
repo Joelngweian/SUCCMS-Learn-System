@@ -500,49 +500,6 @@ export type Database = {
           },
         ]
       >
-      course_creation_requests: Table<
-        {
-          id: string
-          requested_by: string
-          subject_code: string
-          subject_name: string
-          faculty: string | null
-          programme: string | null
-          credits: number | null
-          reason: string
-          status: string
-          admin_notes: string | null
-          reviewed_by: string | null
-          reviewed_at: string | null
-          generated_course_id: string | null
-          created_at: string
-          updated_at: string
-        },
-        "requested_by" | "subject_code" | "subject_name" | "reason",
-        [
-          {
-            foreignKeyName: "course_creation_requests_generated_course_id_fkey"
-            columns: ["generated_course_id"]
-            isOneToOne: false
-            referencedRelation: "courses"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "course_creation_requests_requested_by_fkey"
-            columns: ["requested_by"]
-            isOneToOne: false
-            referencedRelation: "user_profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "course_creation_requests_reviewed_by_fkey"
-            columns: ["reviewed_by"]
-            isOneToOne: false
-            referencedRelation: "user_profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      >
       course_instructors: Table<
         {
           id: string
@@ -1310,6 +1267,42 @@ export type Database = {
           },
         ]
       >
+      student_study_plan_assignments: Table<
+        {
+          id: string
+          student_id: string
+          study_plan_version_id: string
+          assigned_by: string | null
+          status: "active" | "inactive"
+          notes: string | null
+          created_at: string
+          updated_at: string
+        },
+        "student_id" | "study_plan_version_id",
+        [
+          {
+            foreignKeyName: "student_study_plan_assignments_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_study_plan_assignments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_study_plan_assignments_study_plan_version_id_fkey"
+            columns: ["study_plan_version_id"]
+            isOneToOne: false
+            referencedRelation: "study_plan_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
       student_xp_summary: Table<
         {
           student_id: string
@@ -1323,6 +1316,75 @@ export type Database = {
             foreignKeyName: "student_xp_summary_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: true
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      study_plan_courses: Table<
+        {
+          id: string
+          study_plan_version_id: string
+          term_code: string
+          course_code: string | null
+          course_name: string
+          category: string | null
+          credit_hours: number | null
+          is_placeholder: boolean
+          mpu_level: "diploma" | "bachelor" | null
+          mpu_student_type: "local" | "international" | "all" | null
+          mpu_unit: "U1" | "U2" | "U3" | "U4" | null
+          offer_until_term_code: string | null
+          position: number
+          plan_course_key: string
+          source_files: Json
+          created_at: string
+          updated_at: string
+        },
+        "study_plan_version_id" | "term_code" | "course_name" | "plan_course_key",
+        [
+          {
+            foreignKeyName: "study_plan_courses_study_plan_version_id_fkey"
+            columns: ["study_plan_version_id"]
+            isOneToOne: false
+            referencedRelation: "study_plan_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
+      study_plan_versions: Table<
+        {
+          id: string
+          programme_key: "IT" | "CS" | "BOSE"
+          programme_name: string
+          level: "Diploma" | "Bachelor"
+          intake_year: number | null
+          intake_semester: "A" | "B" | "C" | null
+          track_code: string | null
+          entry_type: "normal" | "direct_year_2" | null
+          version_code: string
+          status: "draft" | "active" | "archived"
+          effective_from_term_code: string | null
+          source_label: string | null
+          notes: string | null
+          created_by: string | null
+          updated_by: string | null
+          created_at: string
+          updated_at: string
+        },
+        "programme_key" | "programme_name" | "level" | "version_code",
+        [
+          {
+            foreignKeyName: "study_plan_versions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_plan_versions_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
             referencedRelation: "user_profiles"
             referencedColumns: ["id"]
           },
@@ -1512,10 +1574,6 @@ export type Database = {
       can_view_forum_course: {
         Args: { target_course_id: string }
         Returns: boolean
-      }
-      approve_course_creation_request: {
-        Args: { p_request_id: string; p_admin_notes?: string | null }
-        Returns: string
       }
       check_in_attendance: {
         Args: { p_course_id: string; p_code: string }
@@ -1860,16 +1918,59 @@ export type Database = {
           is_going: boolean
         }[]
       }
-      reject_course_creation_request: {
-        Args: { p_request_id: string; p_admin_notes?: string | null }
-        Returns: boolean
-      }
       save_course_assessment_structure: {
         Args: {
           p_course_id: string
           p_items: Json
         }
         Returns: Database["public"]["Tables"]["course_assessment_items"]["Row"][]
+      }
+      staff_assign_course_offering: {
+        Args: {
+          p_course_id: string
+          p_academic_term_id: string
+          p_lecturer_id: string
+        }
+        Returns: string
+      }
+      staff_assign_student_study_plan: {
+        Args: {
+          p_student_id: string
+          p_study_plan_version_id: string
+          p_notes?: string | null
+        }
+        Returns: string
+      }
+      staff_list_assignable_students: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          email: string | null
+          full_name: string
+          avatar_url: string | null
+          faculty: string | null
+          programme: string | null
+          role: string | null
+        }[]
+      }
+      staff_list_lecturer_options: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          email: string | null
+          full_name: string
+          avatar_url: string | null
+          faculty: string | null
+          programme: string | null
+        }[]
+      }
+      staff_unassign_student_study_plan: {
+        Args: { p_student_id: string }
+        Returns: number
+      }
+      staff_upsert_academic_terms: {
+        Args: { p_terms: Json }
+        Returns: Database["public"]["Tables"]["academic_terms"]["Row"][]
       }
       handle_new_user: {
         Args: Record<PropertyKey, never>

@@ -20,7 +20,7 @@ import { Input } from "./ui/input";
 import {
   Search, Plus, MessageCircle,
   Loader2, Coffee, Layers, ArrowLeft,
-  X, AtSign
+  X
 } from "lucide-react";
 import {
   CreateDiscussionDialog,
@@ -30,6 +30,10 @@ import { ForumEmojiPicker } from "./forum/ForumEmojiPicker";
 import { ForumReactionBar } from "./forum/ForumReactionBar";
 import { ForumThreadCard } from "./forum/ForumThreadCard";
 import { ForumCommentNode } from "./forum/ForumCommentNode";
+import {
+  ForumMentionSuggestions,
+  type ForumMentionOption,
+} from "./forum/ForumMentionSuggestions";
 import {
   ForumRootCommentComposer,
   ForumThreadDetailCard,
@@ -50,7 +54,6 @@ import {
 } from "./forum/forumTypes";
 import {
   formatForumDate,
-  getActiveMentionQuery,
   getErrorMessage,
   getMentionToken,
   getThreadCategory,
@@ -613,7 +616,7 @@ export function Forum() {
   const getCourseBadge = (courseId: string | null) =>
     renderCourseBadge(courseId, courses);
 
-  const mentionOptions = [
+  const mentionOptions: ForumMentionOption[] = [
     { id: "everyone", label: "Everyone", detail: "All course members", token: "@everyone" },
     ...mentionMembers
       .filter(member => member?.full_name && member.role !== 'admin')
@@ -625,43 +628,8 @@ export function Forum() {
       })),
   ];
 
-  const getFilteredMentionOptions = (value: string) => {
-    const query = getActiveMentionQuery(value);
-    if (query === null) return [];
-
-    return mentionOptions
-      .filter(option => {
-        return !query
-          || option.label.toLowerCase().includes(query)
-          || option.token.toLowerCase().includes(query);
-      })
-      .slice(0, 8);
-  };
-
   const applyMention = (value: string, token: string) => {
     return value.replace(/(^|\s)@([^\s@]*)$/, `$1${token} `);
-  };
-
-  const MentionSuggestions = ({ value, onSelect }: { value: string, onSelect: (token: string) => void }) => {
-    const options = getFilteredMentionOptions(value);
-    if (options.length === 0) return null;
-
-    return (
-      <div className="absolute left-0 right-0 top-full z-20 mt-2 rounded-xl border border-gray-200 bg-white p-2 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
-        {options.map(option => (
-          <button
-            key={option.id}
-            type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-zinc-800"
-            onClick={() => onSelect(option.token)}
-          >
-            <AtSign className="h-4 w-4 text-blue-500" />
-            <span className="font-semibold text-gray-900 dark:text-white">{option.label}</span>
-            <span className="text-xs text-gray-500 dark:text-gray-400">{option.detail}</span>
-          </button>
-        ))}
-      </div>
-    );
   };
 
   const renderEmojiPicker = (onSelect: (emoji: string) => void) => (
@@ -724,7 +692,11 @@ export function Forum() {
       renderMentionedText={renderMentionedText}
       renderEmojiPicker={renderEmojiPicker}
       renderMentionSuggestions={(value, onSelect) => (
-        <MentionSuggestions value={value} onSelect={onSelect} />
+        <ForumMentionSuggestions
+          options={mentionOptions}
+          value={value}
+          onSelect={onSelect}
+        />
       )}
       onNavigateProfile={navigateToProfile}
       onOpenImage={setLightboxImage}
@@ -927,7 +899,8 @@ export function Forum() {
                           fileInputRef={replyFileInputRef}
                           renderEmojiPicker={renderEmojiPicker}
                           renderMentionSuggestions={(value, onSelect) => (
-                            <MentionSuggestions
+                            <ForumMentionSuggestions
+                              options={mentionOptions}
                               value={value}
                               onSelect={onSelect}
                             />

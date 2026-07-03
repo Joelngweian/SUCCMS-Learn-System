@@ -13,7 +13,6 @@ import { notify } from "@/lib/notify";
 import { Badge } from "./ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import {
-  BookOpen,
   Shield,
   Flag,
   Megaphone,
@@ -24,11 +23,9 @@ import {
 } from "./admin/AdminOverview";
 import { AdminModerationPanel } from "./admin/AdminModerationPanel";
 import { AdminAnnouncementsPanel } from "./admin/AdminAnnouncementsPanel";
-import { AdminCourseRequestsPanel } from "./admin/AdminCourseRequestsPanel";
 import type {
   AdminAnnouncement,
   AnnouncementAttachment,
-  CourseCreationRequest,
   ReportedItem,
 } from "./admin/AdminDashboardTypes";
 import {
@@ -37,7 +34,6 @@ import {
   loadAdminDashboardData,
 } from "./admin/adminDashboardData";
 import { EMPTY_ADMIN_STATS } from "./admin/AdminDashboardTypes";
-import { invalidateCourseCache } from "@/data/courseRepository";
 
 export function AdminDashboard() {
   const { user, profile } = useAuth();
@@ -45,15 +41,12 @@ export function AdminDashboard() {
   const announcementFormRef = useRef<HTMLDivElement>(null);
   const [reports, setReports] = useState<ReportedItem[]>([]);
   const [announcements, setAnnouncements] = useState<AdminAnnouncement[]>([]);
-  const [courseRequests, setCourseRequests] = useState<CourseCreationRequest[]>([]);
   const [stats, setStats] = useState(EMPTY_ADMIN_STATS);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
   const [reportPage, setReportPage] = useState(1);
   const [selectedReport, setSelectedReport] = useState<ReportedItem | null>(null);
   const [moderatingReportId, setModeratingReportId] = useState<string | null>(null);
-  const [reviewingCourseRequestId, setReviewingCourseRequestId] =
-    useState<string | null>(null);
   const [announcementTitle, setAnnouncementTitle] = useState("");
   const [announcementContent, setAnnouncementContent] = useState("");
   const [announcementPriority, setAnnouncementPriority] =
@@ -72,7 +65,6 @@ export function AdminDashboard() {
       const data = await loadAdminDashboardData();
       setAnnouncements(data.announcements);
       setReports(data.reports);
-      setCourseRequests(data.courseRequests);
       setStats(data.stats);
     } catch (error) {
       console.error("Failed to load admin dashboard statistics:", error);
@@ -90,15 +82,6 @@ export function AdminDashboard() {
 
     return subscribeToPrivateBroadcast({
       topic: "admin:moderation",
-      onMessage: () => void loadDashboardStats(),
-    });
-  }, [user?.id, profile?.role, loadDashboardStats]);
-
-  useEffect(() => {
-    if (!user?.id || profile?.role !== "admin") return;
-
-    return subscribeToPrivateBroadcast({
-      topic: "admin:course-requests",
       onMessage: () => void loadDashboardStats(),
     });
   }, [user?.id, profile?.role, loadDashboardStats]);
@@ -468,57 +451,6 @@ export function AdminDashboard() {
     }
   };
 
-  const handleApproveCourseRequest = async (
-    request: CourseCreationRequest,
-    notes: string,
-  ) => {
-    setReviewingCourseRequestId(request.id);
-    try {
-      const { error } = await supabase.rpc(
-        "approve_course_creation_request",
-        {
-          p_request_id: request.id,
-          p_admin_notes: notes.trim() || null,
-        },
-      );
-      if (error) throw error;
-
-      invalidateCourseCache();
-      await loadDashboardStats();
-      notify.success(`${request.subjectCode} added to the course catalog.`);
-    } catch (error) {
-      console.error("Failed to approve course request:", error);
-      notify.error(error, "Failed to approve course request.");
-    } finally {
-      setReviewingCourseRequestId(null);
-    }
-  };
-
-  const handleRejectCourseRequest = async (
-    request: CourseCreationRequest,
-    notes: string,
-  ) => {
-    setReviewingCourseRequestId(request.id);
-    try {
-      const { error } = await supabase.rpc(
-        "reject_course_creation_request",
-        {
-          p_request_id: request.id,
-          p_admin_notes: notes.trim() || null,
-        },
-      );
-      if (error) throw error;
-
-      await loadDashboardStats();
-      notify.success(`${request.subjectCode} request rejected.`);
-    } catch (error) {
-      console.error("Failed to reject course request:", error);
-      notify.error(error, "Failed to reject course request.");
-    } finally {
-      setReviewingCourseRequestId(null);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <input
@@ -548,14 +480,10 @@ export function AdminDashboard() {
 
       {/* Main Content Tabs */}
       <Tabs defaultValue="moderation">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="moderation">
             <Flag className="h-4 w-4 mr-2" />
             Moderation Queue
-          </TabsTrigger>
-          <TabsTrigger value="course-requests">
-            <BookOpen className="h-4 w-4 mr-2" />
-            Course Requests
           </TabsTrigger>
           <TabsTrigger value="announcements">
             <Megaphone className="h-4 w-4 mr-2" />
@@ -588,19 +516,6 @@ export function AdminDashboard() {
             onSuspendUser={(report) => void handleSuspendUser(report)}
             onResolveReport={(report) => void handleResolveReport(report)}
             onRestoreUser={(report) => void handleRestoreUser(report)}
-          />
-        </TabsContent>
-
-        <TabsContent value="course-requests" className="space-y-4">
-          <AdminCourseRequestsPanel
-            requests={courseRequests}
-            reviewingId={reviewingCourseRequestId}
-            onApprove={(request, notes) =>
-              void handleApproveCourseRequest(request, notes)
-            }
-            onReject={(request, notes) =>
-              void handleRejectCourseRequest(request, notes)
-            }
           />
         </TabsContent>
 

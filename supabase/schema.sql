@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT NOT NULL,
   full_name TEXT NOT NULL UNIQUE, -- Username must be unique for login
-  role TEXT NOT NULL CHECK (role IN ('student', 'lecturer', 'admin')),
+  role TEXT NOT NULL CHECK (role IN ('student', 'lecturer', 'admin', 'staff')),
   program_or_department TEXT, -- e.g., "Computer Science" or "Faculty of Engineering"
   faculty TEXT,
   programme TEXT,
@@ -60,31 +60,6 @@ CREATE TABLE IF NOT EXISTS public.courses (
   max_capacity INTEGER,
   enrollment_key TEXT,
   status TEXT DEFAULT 'open',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.course_creation_requests (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  requested_by UUID NOT NULL
-    CONSTRAINT course_creation_requests_requested_by_fkey
-    REFERENCES public.user_profiles(id) ON DELETE CASCADE,
-  subject_code TEXT NOT NULL,
-  subject_name TEXT NOT NULL,
-  faculty TEXT,
-  programme TEXT,
-  credits INTEGER CHECK (credits IS NULL OR credits > 0),
-  reason TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'approved', 'rejected')),
-  admin_notes TEXT,
-  reviewed_by UUID
-    CONSTRAINT course_creation_requests_reviewed_by_fkey
-    REFERENCES public.user_profiles(id) ON DELETE SET NULL,
-  reviewed_at TIMESTAMPTZ,
-  generated_course_id UUID
-    CONSTRAINT course_creation_requests_generated_course_id_fkey
-    REFERENCES public.courses(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -417,13 +392,6 @@ CREATE TABLE IF NOT EXISTS public.weekly_xp_summary (
 CREATE INDEX IF NOT EXISTS idx_user_profiles_role ON public.user_profiles(role);
 CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON public.user_profiles(email);
 CREATE INDEX IF NOT EXISTS idx_courses_lecturer_id ON public.courses(lecturer_id);
-CREATE INDEX IF NOT EXISTS idx_course_creation_requests_requested_by
-  ON public.course_creation_requests(requested_by, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_course_creation_requests_status_created
-  ON public.course_creation_requests(status, created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_course_creation_requests_pending_code
-  ON public.course_creation_requests(LOWER(subject_code))
-  WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS idx_course_enrollments_student_id ON public.course_enrollments(student_id);
 CREATE INDEX IF NOT EXISTS idx_course_enrollments_course_id ON public.course_enrollments(course_id);
 CREATE INDEX IF NOT EXISTS idx_follows_follower_created ON public.follows(follower_id, created_at DESC);
@@ -636,7 +604,6 @@ CREATE TRIGGER protect_course_material_descendants
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.follows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.courses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.course_creation_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.course_enrollments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.course_instructors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.course_materials ENABLE ROW LEVEL SECURITY;
@@ -734,61 +701,6 @@ CREATE POLICY "Allow lecturers to manage their courses"
     auth.uid() = lecturer_id OR
     auth.uid() IN (SELECT id FROM public.user_profiles WHERE role = 'admin')
   );
-
--- COURSE_CREATION_REQUESTS RLS Policies
-CREATE POLICY "Lecturers can create course creation requests"
-  ON public.course_creation_requests FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    requested_by = auth.uid()
-    AND status = 'pending'
-    AND EXISTS (
-      SELECT 1
-      FROM public.user_profiles profile
-      WHERE profile.id = auth.uid()
-        AND profile.role = 'lecturer'
-        AND COALESCE(profile.is_active, TRUE)
-    )
-  );
-
-CREATE POLICY "Request owners and admins can view course creation requests"
-  ON public.course_creation_requests FOR SELECT
-  TO authenticated
-  USING (
-    requested_by = auth.uid()
-    OR EXISTS (
-      SELECT 1
-      FROM public.user_profiles profile
-      WHERE profile.id = auth.uid()
-        AND profile.role = 'admin'
-        AND COALESCE(profile.is_active, TRUE)
-    )
-  );
-
-CREATE POLICY "Admins can update course creation requests"
-  ON public.course_creation_requests FOR UPDATE
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1
-      FROM public.user_profiles profile
-      WHERE profile.id = auth.uid()
-        AND profile.role = 'admin'
-        AND COALESCE(profile.is_active, TRUE)
-    )
-  )
-  WITH CHECK (
-    EXISTS (
-      SELECT 1
-      FROM public.user_profiles profile
-      WHERE profile.id = auth.uid()
-        AND profile.role = 'admin'
-        AND COALESCE(profile.is_active, TRUE)
-    )
-  );
-
-GRANT SELECT, INSERT, UPDATE ON public.course_creation_requests
-  TO authenticated;
 
 -- COURSE_ENROLLMENTS RLS Policies
 -- Students can view their own enrollments
@@ -1407,11 +1319,6 @@ CREATE TRIGGER update_courses_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_course_creation_requests_updated_at
-  BEFORE UPDATE ON public.course_creation_requests
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
-
 CREATE TRIGGER update_assignments_updated_at
   BEFORE UPDATE ON public.assignments
   FOR EACH ROW
@@ -1480,157 +1387,6 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog;
 
 REVOKE EXECUTE ON FUNCTION public.handle_new_user()
   FROM PUBLIC, anon, authenticated;
-
-CREATE OR REPLACE FUNCTION public.approve_course_creation_request(
-  p_request_id UUID,
-  p_admin_notes TEXT DEFAULT NULL
-)
-RETURNS UUID
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_catalog
-AS $$
-DECLARE
-  actor_id UUID := auth.uid();
-  request_row public.course_creation_requests%ROWTYPE;
-  normalized_code TEXT;
-  new_course_id UUID;
-BEGIN
-  IF actor_id IS NULL OR NOT EXISTS (
-    SELECT 1
-    FROM public.user_profiles profile
-    WHERE profile.id = actor_id
-      AND profile.role = 'admin'
-      AND COALESCE(profile.is_active, TRUE)
-  ) THEN
-    RAISE EXCEPTION 'Only active administrators can approve course creation requests';
-  END IF;
-
-  SELECT *
-  INTO request_row
-  FROM public.course_creation_requests
-  WHERE id = p_request_id
-  FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Course creation request not found';
-  END IF;
-
-  IF request_row.status <> 'pending' THEN
-    RAISE EXCEPTION 'Only pending course creation requests can be approved';
-  END IF;
-
-  normalized_code := UPPER(TRIM(request_row.subject_code));
-
-  IF normalized_code = '' THEN
-    RAISE EXCEPTION 'Subject code is required';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM public.courses course_row
-    WHERE LOWER(course_row.code) = LOWER(normalized_code)
-       OR LOWER(COALESCE(course_row.course_code, '')) = LOWER(normalized_code)
-  ) THEN
-    RAISE EXCEPTION 'A course with this subject code already exists';
-  END IF;
-
-  INSERT INTO public.courses (
-    code,
-    course_code,
-    name,
-    description,
-    faculty,
-    programme,
-    credits,
-    credit_hours,
-    course_type,
-    status
-  )
-  VALUES (
-    normalized_code,
-    normalized_code,
-    TRIM(request_row.subject_name),
-    NULLIF(TRIM(request_row.reason), ''),
-    NULLIF(TRIM(COALESCE(request_row.faculty, '')), ''),
-    NULLIF(TRIM(COALESCE(request_row.programme, '')), ''),
-    request_row.credits,
-    request_row.credits,
-    'requested',
-    'open'
-  )
-  RETURNING id INTO new_course_id;
-
-  UPDATE public.course_creation_requests
-  SET
-    status = 'approved',
-    admin_notes = NULLIF(TRIM(COALESCE(p_admin_notes, '')), ''),
-    reviewed_by = actor_id,
-    reviewed_at = NOW(),
-    generated_course_id = new_course_id
-  WHERE id = p_request_id;
-
-  RETURN new_course_id;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION public.reject_course_creation_request(
-  p_request_id UUID,
-  p_admin_notes TEXT DEFAULT NULL
-)
-RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_catalog
-AS $$
-DECLARE
-  actor_id UUID := auth.uid();
-  request_status TEXT;
-BEGIN
-  IF actor_id IS NULL OR NOT EXISTS (
-    SELECT 1
-    FROM public.user_profiles profile
-    WHERE profile.id = actor_id
-      AND profile.role = 'admin'
-      AND COALESCE(profile.is_active, TRUE)
-  ) THEN
-    RAISE EXCEPTION 'Only active administrators can reject course creation requests';
-  END IF;
-
-  SELECT status
-  INTO request_status
-  FROM public.course_creation_requests
-  WHERE id = p_request_id
-  FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Course creation request not found';
-  END IF;
-
-  IF request_status <> 'pending' THEN
-    RAISE EXCEPTION 'Only pending course creation requests can be rejected';
-  END IF;
-
-  UPDATE public.course_creation_requests
-  SET
-    status = 'rejected',
-    admin_notes = NULLIF(TRIM(COALESCE(p_admin_notes, '')), ''),
-    reviewed_by = actor_id,
-    reviewed_at = NOW()
-  WHERE id = p_request_id;
-
-  RETURN TRUE;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.approve_course_creation_request(UUID, TEXT)
-  FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.reject_course_creation_request(UUID, TEXT)
-  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.approve_course_creation_request(UUID, TEXT)
-  TO authenticated;
-GRANT EXECUTE ON FUNCTION public.reject_course_creation_request(UUID, TEXT)
-  TO authenticated;
 
 -- Trigger to create user profile on signup
 CREATE TRIGGER on_auth_user_created
@@ -1715,4 +1471,435 @@ JOIN public.user_profiles up ON s.user_id = up.id
 LEFT JOIN public.story_views sv ON s.id = sv.story_id
 WHERE s.is_active = TRUE AND s.expires_at > NOW()
 GROUP BY s.id, s.user_id, up.full_name, s.content_type, s.created_at, s.expires_at;
+
+-- ============================================================================
+-- AARO ACADEMIC PLANNING
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.study_plan_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  programme_key TEXT NOT NULL CHECK (programme_key IN ('IT', 'CS', 'BOSE')),
+  programme_name TEXT NOT NULL,
+  level TEXT NOT NULL CHECK (level IN ('Diploma', 'Bachelor')),
+  intake_year INTEGER,
+  intake_semester TEXT CHECK (intake_semester IN ('A', 'B', 'C')),
+  track_code TEXT CHECK (track_code IS NULL OR track_code ~ '^[ABC][12]$'),
+  entry_type TEXT CHECK (entry_type IS NULL OR entry_type IN ('normal', 'direct_year_2')),
+  version_code TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'archived')),
+  effective_from_term_code TEXT,
+  source_label TEXT,
+  notes TEXT,
+  created_by UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL,
+  updated_by UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (programme_key, intake_year, intake_semester, version_code)
+);
+
+ALTER TABLE public.study_plan_versions
+  ADD COLUMN IF NOT EXISTS track_code TEXT,
+  ADD COLUMN IF NOT EXISTS entry_type TEXT;
+
+CREATE TABLE IF NOT EXISTS public.study_plan_courses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  study_plan_version_id UUID NOT NULL REFERENCES public.study_plan_versions(id) ON DELETE CASCADE,
+  term_code TEXT NOT NULL,
+  course_code TEXT,
+  course_name TEXT NOT NULL,
+  category TEXT,
+  credit_hours INTEGER,
+  is_placeholder BOOLEAN NOT NULL DEFAULT FALSE,
+  mpu_level TEXT CHECK (mpu_level IS NULL OR mpu_level IN ('diploma', 'bachelor')),
+  mpu_unit TEXT CHECK (mpu_unit IS NULL OR mpu_unit IN ('U1', 'U2', 'U3', 'U4')),
+  mpu_student_type TEXT CHECK (mpu_student_type IS NULL OR mpu_student_type IN ('local', 'international', 'all')),
+  offer_until_term_code TEXT,
+  position INTEGER NOT NULL DEFAULT 1,
+  plan_course_key TEXT NOT NULL,
+  source_files JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (study_plan_version_id, term_code, plan_course_key, position)
+);
+
+ALTER TABLE public.study_plan_courses
+  ADD COLUMN IF NOT EXISTS mpu_level TEXT,
+  ADD COLUMN IF NOT EXISTS mpu_unit TEXT,
+  ADD COLUMN IF NOT EXISTS mpu_student_type TEXT,
+  ADD COLUMN IF NOT EXISTS offer_until_term_code TEXT;
+
+CREATE TABLE IF NOT EXISTS public.student_study_plan_assignments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id UUID NOT NULL REFERENCES public.user_profiles(id) ON DELETE CASCADE,
+  study_plan_version_id UUID NOT NULL REFERENCES public.study_plan_versions(id) ON DELETE RESTRICT,
+  assigned_by UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_study_plan_versions_programme
+  ON public.study_plan_versions(programme_key, level, intake_year, intake_semester, status);
+CREATE INDEX IF NOT EXISTS idx_study_plan_versions_track
+  ON public.study_plan_versions(programme_key, level, intake_year, intake_semester, track_code, status);
+CREATE INDEX IF NOT EXISTS idx_study_plan_courses_version_term
+  ON public.study_plan_courses(study_plan_version_id, term_code, position);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_student_study_plan_assignments_active_student
+  ON public.student_study_plan_assignments(student_id)
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_student_study_plan_assignments_student_status
+  ON public.student_study_plan_assignments(student_id, status);
+CREATE INDEX IF NOT EXISTS idx_student_study_plan_assignments_version_status
+  ON public.student_study_plan_assignments(study_plan_version_id, status);
+CREATE INDEX IF NOT EXISTS idx_student_study_plan_assignments_assigned_by
+  ON public.student_study_plan_assignments(assigned_by);
+
+ALTER TABLE public.study_plan_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.study_plan_courses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.student_study_plan_assignments ENABLE ROW LEVEL SECURITY;
+
+GRANT SELECT ON public.study_plan_versions, public.study_plan_courses
+  TO authenticated;
+GRANT INSERT, UPDATE, DELETE ON public.study_plan_versions, public.study_plan_courses
+  TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.student_study_plan_assignments
+  TO authenticated;
+GRANT ALL ON public.study_plan_versions, public.study_plan_courses, public.student_study_plan_assignments
+  TO service_role;
+
+CREATE POLICY "Authenticated users can view study plan versions"
+  ON public.study_plan_versions FOR SELECT
+  TO authenticated
+  USING (TRUE);
+
+CREATE POLICY "AARO staff can insert study plan versions"
+  ON public.study_plan_versions FOR INSERT
+  TO authenticated
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.user_profiles profile
+    WHERE profile.id = (SELECT auth.uid())
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ));
+
+CREATE POLICY "AARO staff can update study plan versions"
+  ON public.study_plan_versions FOR UPDATE
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.user_profiles profile
+    WHERE profile.id = (SELECT auth.uid())
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.user_profiles profile
+    WHERE profile.id = (SELECT auth.uid())
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ));
+
+CREATE POLICY "AARO staff can delete study plan versions"
+  ON public.study_plan_versions FOR DELETE
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.user_profiles profile
+    WHERE profile.id = (SELECT auth.uid())
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ));
+
+CREATE POLICY "Authenticated users can view study plan courses"
+  ON public.study_plan_courses FOR SELECT
+  TO authenticated
+  USING (TRUE);
+
+CREATE POLICY "AARO staff can insert study plan courses"
+  ON public.study_plan_courses FOR INSERT
+  TO authenticated
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.user_profiles profile
+    WHERE profile.id = (SELECT auth.uid())
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ));
+
+CREATE POLICY "AARO staff can update study plan courses"
+  ON public.study_plan_courses FOR UPDATE
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.user_profiles profile
+    WHERE profile.id = (SELECT auth.uid())
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.user_profiles profile
+    WHERE profile.id = (SELECT auth.uid())
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ));
+
+CREATE POLICY "AARO staff can delete study plan courses"
+  ON public.study_plan_courses FOR DELETE
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.user_profiles profile
+    WHERE profile.id = (SELECT auth.uid())
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ));
+
+CREATE POLICY "Students and AARO staff can view study plan assignments"
+  ON public.student_study_plan_assignments FOR SELECT
+  TO authenticated
+  USING (
+    student_id = (SELECT auth.uid())
+    OR EXISTS (
+      SELECT 1 FROM public.user_profiles profile
+      WHERE profile.id = (SELECT auth.uid())
+        AND profile.role IN ('staff', 'admin')
+        AND COALESCE(profile.is_active, TRUE)
+    )
+  );
+
+CREATE POLICY "AARO staff can insert student study plan assignments"
+  ON public.student_study_plan_assignments FOR INSERT
+  TO authenticated
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.user_profiles profile
+    WHERE profile.id = (SELECT auth.uid())
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ));
+
+CREATE POLICY "AARO staff can update student study plan assignments"
+  ON public.student_study_plan_assignments FOR UPDATE
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.user_profiles profile
+    WHERE profile.id = (SELECT auth.uid())
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.user_profiles profile
+    WHERE profile.id = (SELECT auth.uid())
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ));
+
+CREATE POLICY "AARO staff can delete student study plan assignments"
+  ON public.student_study_plan_assignments FOR DELETE
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.user_profiles profile
+    WHERE profile.id = (SELECT auth.uid())
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ));
+
+CREATE OR REPLACE FUNCTION public.staff_assign_student_study_plan(
+  p_student_id UUID,
+  p_study_plan_version_id UUID,
+  p_notes TEXT DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  actor_id UUID := auth.uid();
+  inserted_id UUID;
+BEGIN
+  IF actor_id IS NULL OR NOT EXISTS (
+    SELECT 1
+    FROM public.user_profiles profile
+    WHERE profile.id = actor_id
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ) THEN
+    RAISE EXCEPTION 'Only AARO staff or administrators can assign study plans to students';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.user_profiles profile
+    WHERE profile.id = p_student_id
+      AND profile.role = 'student'
+      AND COALESCE(profile.is_active, TRUE)
+  ) THEN
+    RAISE EXCEPTION 'Target user is not an active student';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.study_plan_versions version
+    WHERE version.id = p_study_plan_version_id
+      AND version.status = 'active'
+  ) THEN
+    RAISE EXCEPTION 'Study plan version is not active or does not exist';
+  END IF;
+
+  UPDATE public.student_study_plan_assignments
+  SET status = 'inactive', updated_at = NOW()
+  WHERE student_id = p_student_id
+    AND status = 'active';
+
+  INSERT INTO public.student_study_plan_assignments (
+    assigned_by,
+    notes,
+    status,
+    student_id,
+    study_plan_version_id
+  )
+  VALUES (
+    actor_id,
+    NULLIF(TRIM(COALESCE(p_notes, '')), ''),
+    'active',
+    p_student_id,
+    p_study_plan_version_id
+  )
+  RETURNING id INTO inserted_id;
+
+  RETURN inserted_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.staff_unassign_student_study_plan(
+  p_student_id UUID
+)
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  actor_id UUID := auth.uid();
+  affected_count INTEGER := 0;
+BEGIN
+  IF actor_id IS NULL OR NOT EXISTS (
+    SELECT 1
+    FROM public.user_profiles profile
+    WHERE profile.id = actor_id
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ) THEN
+    RAISE EXCEPTION 'Only AARO staff or administrators can remove student study plan assignments';
+  END IF;
+
+  UPDATE public.student_study_plan_assignments
+  SET status = 'inactive', updated_at = NOW()
+  WHERE student_id = p_student_id
+    AND status = 'active';
+
+  GET DIAGNOSTICS affected_count = ROW_COUNT;
+  RETURN affected_count;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.staff_list_assignable_students()
+RETURNS TABLE (
+  id UUID,
+  email TEXT,
+  full_name TEXT,
+  avatar_url TEXT,
+  faculty TEXT,
+  programme TEXT,
+  role TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  actor_id UUID := auth.uid();
+BEGIN
+  IF actor_id IS NULL OR NOT EXISTS (
+    SELECT 1
+    FROM public.user_profiles profile
+    WHERE profile.id = actor_id
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ) THEN
+    RAISE EXCEPTION 'Only AARO staff or administrators can list assignable students';
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    profile.id,
+    profile.email::TEXT,
+    profile.full_name::TEXT,
+    profile.avatar_url::TEXT,
+    profile.faculty::TEXT,
+    profile.programme::TEXT,
+    profile.role::TEXT
+  FROM public.user_profiles profile
+  WHERE profile.role = 'student'
+    AND COALESCE(profile.is_active, TRUE)
+  ORDER BY profile.full_name NULLS LAST, profile.email NULLS LAST;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.staff_list_lecturer_options()
+RETURNS TABLE (
+  id UUID,
+  email TEXT,
+  full_name TEXT,
+  avatar_url TEXT,
+  faculty TEXT,
+  programme TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  actor_id UUID := auth.uid();
+BEGIN
+  IF actor_id IS NULL OR NOT EXISTS (
+    SELECT 1
+    FROM public.user_profiles profile
+    WHERE profile.id = actor_id
+      AND profile.role IN ('staff', 'admin')
+      AND COALESCE(profile.is_active, TRUE)
+  ) THEN
+    RAISE EXCEPTION 'Only AARO staff or administrators can list lecturer options';
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    profile.id,
+    profile.email::TEXT,
+    profile.full_name::TEXT,
+    profile.avatar_url::TEXT,
+    profile.faculty::TEXT,
+    profile.programme::TEXT
+  FROM public.user_profiles profile
+  WHERE profile.role = 'lecturer'
+    AND COALESCE(profile.is_active, TRUE)
+  ORDER BY profile.full_name NULLS LAST, profile.email NULLS LAST;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.staff_assign_student_study_plan(UUID, UUID, TEXT)
+  FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.staff_assign_student_study_plan(UUID, UUID, TEXT)
+  TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.staff_unassign_student_study_plan(UUID)
+  FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.staff_unassign_student_study_plan(UUID)
+  TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.staff_list_assignable_students()
+  FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.staff_list_assignable_students()
+  TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.staff_list_lecturer_options()
+  FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.staff_list_lecturer_options()
+  TO authenticated, service_role;
 

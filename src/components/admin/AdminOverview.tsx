@@ -1,6 +1,5 @@
 import {
   Ban,
-  BookOpen,
   CheckCircle2,
   FileText,
   Flag,
@@ -40,12 +39,11 @@ const STAT_ITEMS = [
   { key: "suspendedUsers", label: "Suspended", icon: Ban, color: "text-orange-600" },
   { key: "totalStories", label: "Total Stories", icon: FileText, color: "text-purple-600" },
   { key: "announcements", label: "Active Announcements", icon: Megaphone, color: "text-green-600" },
-  { key: "pendingCourseRequests", label: "Course Requests", icon: BookOpen, color: "text-blue-600" },
 ] as const;
 
 export function AdminStatsOverview({ stats }: { stats: AdminStats }) {
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-7">
+    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
       {STAT_ITEMS.map(item => {
         const Icon = item.icon;
         return (

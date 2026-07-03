@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import type { Database, Json } from "@/lib/database.types";
 import type { AcademicTermOption, CourseTemplateSummary } from "./courseRepository";
 import type {
   ParsedStudyPlanImport,
@@ -16,11 +17,80 @@ import {
   type StudyPlanProgrammeKey,
 } from "./studyPlanUtils";
 
-const db = supabase as any;
-
 type SupabaseLikeError = {
   code?: string;
   message?: string;
+};
+
+type CourseCatalogInsert = Database["public"]["Tables"]["courses"]["Insert"];
+type CourseCatalogRow = Pick<Database["public"]["Tables"]["courses"]["Row"], "course_code" | "id">;
+type StudyPlanCourseRow = Database["public"]["Tables"]["study_plan_courses"]["Row"];
+type StudyPlanVersionRow = Database["public"]["Tables"]["study_plan_versions"]["Row"];
+type SelectedStudyPlanCourseRow = Pick<
+  StudyPlanCourseRow,
+  | "category"
+  | "course_code"
+  | "course_name"
+  | "credit_hours"
+  | "id"
+  | "is_placeholder"
+  | "mpu_level"
+  | "mpu_student_type"
+  | "mpu_unit"
+  | "offer_until_term_code"
+  | "plan_course_key"
+  | "position"
+  | "source_files"
+  | "study_plan_version_id"
+  | "term_code"
+>;
+type SelectedStudyPlanVersionRow = Pick<
+  StudyPlanVersionRow,
+  | "created_at"
+  | "effective_from_term_code"
+  | "entry_type"
+  | "id"
+  | "intake_semester"
+  | "intake_year"
+  | "level"
+  | "notes"
+  | "programme_key"
+  | "programme_name"
+  | "source_label"
+  | "status"
+  | "track_code"
+  | "updated_at"
+  | "version_code"
+>;
+type PlannedCourseJoinRow = SelectedStudyPlanCourseRow & {
+  study_plan_versions: Pick<
+    StudyPlanVersionRow,
+    | "entry_type"
+    | "id"
+    | "intake_semester"
+    | "intake_year"
+    | "level"
+    | "programme_key"
+    | "programme_name"
+    | "status"
+    | "track_code"
+  > | Array<Pick<
+    StudyPlanVersionRow,
+    | "entry_type"
+    | "id"
+    | "intake_semester"
+    | "intake_year"
+    | "level"
+    | "programme_key"
+    | "programme_name"
+    | "status"
+    | "track_code"
+  >>;
+};
+type AssignedStudyPlanJoinRow = {
+  id: string;
+  study_plan_version_id: string;
+  study_plan_versions: SelectedStudyPlanVersionRow | SelectedStudyPlanVersionRow[] | null;
 };
 
 const isAcademicPlanningSchemaMissing = (error: SupabaseLikeError | null | undefined) => {
@@ -69,7 +139,7 @@ const courseTypeFromStudyPlanCategory = (category?: string | null, mpuUnit?: str
 };
 
 const syncCourseCatalogFromStudyPlan = async (preview: ParsedStudyPlanImport) => {
-  const coursesByCode = new Map<string, any>();
+  const coursesByCode = new Map<string, CourseCatalogInsert>();
 
   for (const course of preview.courses) {
     if (course.isPlaceholder) continue;
@@ -96,18 +166,18 @@ const syncCourseCatalogFromStudyPlan = async (preview: ParsedStudyPlanImport) =>
   const existingCourses = new Map<string, { id: string }>();
 
   for (let index = 0; index < courseCodes.length; index += 100) {
-    const { data, error } = await db
+    const { data, error } = await supabase
       .from("courses")
       .select("id, course_code")
       .in("course_code", courseCodes.slice(index, index + 100));
 
     if (error) throw error;
-    for (const course of data || []) {
+    for (const course of (data || []) as CourseCatalogRow[]) {
       if (course.course_code) existingCourses.set(course.course_code, { id: course.id });
     }
   }
 
-  const coursesToInsert: any[] = [];
+  const coursesToInsert: CourseCatalogInsert[] = [];
 
   for (const course of courseRows) {
     const existingCourse = existingCourses.get(course.course_code);
@@ -116,7 +186,7 @@ const syncCourseCatalogFromStudyPlan = async (preview: ParsedStudyPlanImport) =>
       continue;
     }
 
-    const { error } = await db
+    const { error } = await supabase
       .from("courses")
       .update({
         course_type: course.course_type,
@@ -133,7 +203,7 @@ const syncCourseCatalogFromStudyPlan = async (preview: ParsedStudyPlanImport) =>
   }
 
   for (let index = 0; index < coursesToInsert.length; index += 100) {
-    const { error } = await db
+    const { error } = await supabase
       .from("courses")
       .insert(coursesToInsert.slice(index, index + 100));
 
@@ -253,10 +323,10 @@ const mapCoursesToEntries = ({
   courses,
   version,
 }: {
-  courses: any[];
-  version: any;
+  courses: SelectedStudyPlanCourseRow[];
+  version: SelectedStudyPlanVersionRow;
 }): StudyPlanCourseEntry[] =>
-  (courses || []).map((row: any) => ({
+  (courses || []).map(row => ({
     programmeKey: version.programme_key,
     programmeName: version.programme_name,
     level: version.level,
@@ -288,7 +358,7 @@ export async function getDbStudyPlanCoursesForStudent({
   const parsedStudentId = parseStudentIdFromEmail(email);
 
   if (studentProfileId) {
-    const { data: assignment, error: assignmentError } = await db
+    const { data: assignment, error: assignmentError } = await supabase
       .from("student_study_plan_assignments")
       .select(`id, study_plan_version_id, study_plan_versions!inner(${STUDY_PLAN_VERSION_SELECT})`)
       .eq("student_id", studentProfileId)
@@ -297,7 +367,7 @@ export async function getDbStudyPlanCoursesForStudent({
 
     if (assignmentError) {
       if (isAcademicPlanningSchemaMissing(assignmentError)) return null;
-      console.warn("Failed to load student study plan assignment; falling back to bundled study plan.", assignmentError);
+      console.warn("Failed to load student study plan assignment.", assignmentError);
       return null;
     }
 
@@ -305,7 +375,7 @@ export async function getDbStudyPlanCoursesForStudent({
       const version = Array.isArray(assignment.study_plan_versions)
         ? assignment.study_plan_versions[0]
         : assignment.study_plan_versions;
-      const { data: courses, error: coursesError } = await db
+      const { data: courses, error: coursesError } = await supabase
         .from("study_plan_courses")
         .select(STUDY_PLAN_COURSE_SELECT)
         .eq("study_plan_version_id", version.id)
@@ -315,7 +385,7 @@ export async function getDbStudyPlanCoursesForStudent({
 
       if (coursesError) {
         if (isAcademicPlanningSchemaMissing(coursesError)) return null;
-        console.warn("Failed to load assigned DB study plan courses; falling back to bundled study plan.", coursesError);
+        console.warn("Failed to load assigned DB study plan courses.", coursesError);
         return null;
       }
 
@@ -339,7 +409,7 @@ export async function getDbStudyPlanCoursesForStudent({
 
   if (!programmeKey || !parsedStudentId) return null;
 
-  const { data: version, error: versionError } = await db
+  const { data: version, error: versionError } = await supabase
     .from("study_plan_versions")
     .select(STUDY_PLAN_VERSION_SELECT)
     .eq("programme_key", programmeKey)
@@ -353,13 +423,13 @@ export async function getDbStudyPlanCoursesForStudent({
 
   if (versionError) {
     if (isAcademicPlanningSchemaMissing(versionError)) return null;
-    console.warn("Failed to load DB study plan version; falling back to bundled study plan.", versionError);
+    console.warn("Failed to load DB study plan version.", versionError);
     return null;
   }
 
   if (!version?.id) return null;
 
-  const { data: courses, error: coursesError } = await db
+  const { data: courses, error: coursesError } = await supabase
     .from("study_plan_courses")
     .select(STUDY_PLAN_COURSE_SELECT)
     .eq("study_plan_version_id", version.id)
@@ -369,7 +439,7 @@ export async function getDbStudyPlanCoursesForStudent({
 
   if (coursesError) {
     if (isAcademicPlanningSchemaMissing(coursesError)) return null;
-    console.warn("Failed to load DB study plan courses; falling back to bundled study plan.", coursesError);
+    console.warn("Failed to load DB study plan courses.", coursesError);
     return null;
   }
 
@@ -384,7 +454,7 @@ export async function getDbStudyPlanCoursesForStudent({
 
 
 export async function listStudyPlanVersions(): Promise<StudyPlanVersion[]> {
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from("study_plan_versions")
     .select(
       STUDY_PLAN_VERSION_SELECT,
@@ -400,7 +470,7 @@ export async function listStudyPlanVersions(): Promise<StudyPlanVersion[]> {
 
 export async function listStudyPlanCourses(versionId: string): Promise<DbStudyPlanCourse[]> {
   if (!versionId) return [];
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from("study_plan_courses")
     .select(
       STUDY_PLAN_COURSE_SELECT,
@@ -411,7 +481,7 @@ export async function listStudyPlanCourses(versionId: string): Promise<DbStudyPl
     .order("course_code", { ascending: true, nullsFirst: false });
 
   if (error) throw error;
-  return (data || []).map((row: any) => ({
+  return ((data || []) as SelectedStudyPlanCourseRow[]).map(row => ({
     ...row,
     source_files: asStringArray(row.source_files),
   })) as DbStudyPlanCourse[];
@@ -436,7 +506,7 @@ export async function addStudyPlanCourse(input: {
     courseName.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "") ||
     "REQUIREMENT";
 
-  const { error } = await db.from("study_plan_courses").insert({
+  const { error } = await supabase.from("study_plan_courses").insert({
     category: input.category?.trim() || null,
     course_code: courseCode,
     course_name: courseName,
@@ -453,12 +523,12 @@ export async function addStudyPlanCourse(input: {
 }
 
 export async function deleteStudyPlanCourse(courseId: string) {
-  const { error } = await db.from("study_plan_courses").delete().eq("id", courseId);
+  const { error } = await supabase.from("study_plan_courses").delete().eq("id", courseId);
   if (error) throw error;
 }
 
 export async function importStudyPlanVersion(preview: ParsedStudyPlanImport): Promise<StudyPlanVersion> {
-  const { data: version, error: versionError } = await db
+  const { data: version, error: versionError } = await supabase
     .from("study_plan_versions")
     .upsert(
       {
@@ -509,7 +579,7 @@ export async function importStudyPlanVersion(preview: ParsedStudyPlanImport): Pr
   );
 
   for (let index = 0; index < courseRows.length; index += 100) {
-    const { error: upsertCoursesError } = await db
+    const { error: upsertCoursesError } = await supabase
       .from("study_plan_courses")
       .upsert(courseRows.slice(index, index + 100), {
         onConflict: "study_plan_version_id,term_code,plan_course_key,position",
@@ -517,22 +587,25 @@ export async function importStudyPlanVersion(preview: ParsedStudyPlanImport): Pr
     if (upsertCoursesError) throw upsertCoursesError;
   }
 
-  const { data: existingCourses, error: existingCoursesError } = await db
+  const { data: existingCourses, error: existingCoursesError } = await supabase
     .from("study_plan_courses")
     .select("id, term_code, plan_course_key, position")
     .eq("study_plan_version_id", importedVersion.id);
 
   if (existingCoursesError) throw existingCoursesError;
 
-  const staleCourseIds = (existingCourses || [])
-    .filter((course: any) =>
+  const staleCourseIds = ((existingCourses || []) as Pick<
+    StudyPlanCourseRow,
+    "id" | "plan_course_key" | "position" | "term_code"
+  >[])
+    .filter(course =>
       !importedCourseKeys.has(course.term_code + "::" + course.plan_course_key + "::" + course.position),
     )
-    .map((course: any) => course.id)
+    .map(course => course.id)
     .filter(Boolean);
 
   for (let index = 0; index < staleCourseIds.length; index += 100) {
-    const { error: deleteStaleCoursesError } = await db
+    const { error: deleteStaleCoursesError } = await supabase
       .from("study_plan_courses")
       .delete()
       .in("id", staleCourseIds.slice(index, index + 100));
@@ -545,14 +618,14 @@ export async function importStudyPlanVersion(preview: ParsedStudyPlanImport): Pr
 
 
 export async function listAssignableStudents(): Promise<AssignableStudent[]> {
-  const { data, error } = await db.rpc("staff_list_assignable_students");
+  const { data, error } = await supabase.rpc("staff_list_assignable_students");
 
   if (error) throw error;
   return (data || []) as AssignableStudent[];
 }
 
 export async function listStudentStudyPlanAssignments(): Promise<StudentStudyPlanAssignment[]> {
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from("student_study_plan_assignments")
     .select("id, student_id, study_plan_version_id, assigned_by, status, notes, created_at, updated_at")
     .eq("status", "active")
@@ -571,7 +644,7 @@ export async function assignStudentStudyPlan({
   studentId: string;
   studyPlanVersionId: string;
 }) {
-  const { data, error } = await db.rpc("staff_assign_student_study_plan", {
+  const { data, error } = await supabase.rpc("staff_assign_student_study_plan", {
     p_notes: notes || null,
     p_student_id: studentId,
     p_study_plan_version_id: studyPlanVersionId,
@@ -582,7 +655,7 @@ export async function assignStudentStudyPlan({
 }
 
 export async function unassignStudentStudyPlan(studentId: string) {
-  const { data, error } = await db.rpc("staff_unassign_student_study_plan", {
+  const { data, error } = await supabase.rpc("staff_unassign_student_study_plan", {
     p_student_id: studentId,
   });
 
@@ -592,7 +665,7 @@ export async function unassignStudentStudyPlan(studentId: string) {
 
 
 export async function listLecturerOptions(): Promise<LecturerOption[]> {
-  const { data, error } = await db.rpc("staff_list_lecturer_options");
+  const { data, error } = await supabase.rpc("staff_list_lecturer_options");
 
   if (error) throw error;
   return (data || []) as LecturerOption[];
@@ -602,7 +675,7 @@ export async function listPlannedCoursesForTerm(termCode: string): Promise<Plann
   const normalizedTermCode = termCode.trim().toUpperCase();
   if (!normalizedTermCode) return [];
 
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from("study_plan_courses")
     .select(
       "id, study_plan_version_id, term_code, course_code, course_name, category, credit_hours, is_placeholder, mpu_level, mpu_student_type, mpu_unit, offer_until_term_code, position, plan_course_key, study_plan_versions!inner(id, programme_key, programme_name, level, intake_year, intake_semester, track_code, entry_type, status)",
@@ -614,7 +687,7 @@ export async function listPlannedCoursesForTerm(termCode: string): Promise<Plann
 
   if (error) throw error;
 
-  return (data || []).map((row: any) => {
+  return ((data || []) as PlannedCourseJoinRow[]).map(row => {
     const version = Array.isArray(row.study_plan_versions)
       ? row.study_plan_versions[0]
       : row.study_plan_versions;
@@ -648,7 +721,7 @@ export async function listPlannedCoursesForTerm(termCode: string): Promise<Plann
 export async function listCourseAssignmentsForTerm(termId: string): Promise<CourseAssignmentSummary[]> {
   if (!termId) return [];
 
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from("course_offerings")
     .select("id, course_id, academic_term_id, owner_id, section_code, enrollment_key, status, created_at")
     .eq("academic_term_id", termId)
@@ -660,7 +733,7 @@ export async function listCourseAssignmentsForTerm(termId: string): Promise<Cour
 }
 
 export async function listRecentCourseAssignments(): Promise<CourseAssignmentSummary[]> {
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from("course_offerings")
     .select("id, course_id, academic_term_id, owner_id, section_code, enrollment_key, status, created_at")
     .order("created_at", { ascending: false })
@@ -679,7 +752,7 @@ export async function assignCourseOfferingToLecturer({
   lecturerId: string;
   termId: string;
 }) {
-  const { data, error } = await db.rpc("staff_assign_course_offering", {
+  const { data, error } = await supabase.rpc("staff_assign_course_offering", {
     p_academic_term_id: termId,
     p_course_id: courseId,
     p_lecturer_id: lecturerId,

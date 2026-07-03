@@ -1,27 +1,16 @@
-import { lazy, Suspense, type ChangeEvent, useCallback, useEffect, useState } from "react";
-import {
-  BookOpen,
-  CalendarDays,
-  ClipboardList,
-  GraduationCap,
-  Loader2,
-  RefreshCw,
-} from "lucide-react";
+import { type ChangeEvent, useCallback, useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useSearchParams } from "react-router-dom";
 import { notify } from "@/lib/notify";
 import {
-  addStudyPlanCourse,
   assignCourseOfferingToLecturer,
   assignStudentStudyPlan,
-  deleteStudyPlanCourse,
   importStudyPlanVersion,
   listCourseAssignmentsForTerm,
   listLecturerOptions,
   listAssignableStudents,
   listPlannedCoursesForTerm,
   listStudentStudyPlanAssignments,
-  unassignStudentStudyPlan,
   listStudyPlanCourses,
   listStudyPlanVersions,
   type AssignableStudent,
@@ -46,11 +35,10 @@ import {
   type CurrentEnrollmentTerm,
 } from "@/data/courseRepository";
 import { Alert, AlertDescription } from "../ui/alert";
-import { Button } from "../ui/button";
-import { Card, CardContent } from "../ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { AppErrorBoundary } from "../common/AppErrorBoundary";
 import { StaffAcademicPlanningProvider } from "./academic-planning/AcademicPlanningProvider";
+import { AcademicPlanningOverviewCards } from "./academic-planning/AcademicPlanningOverviewCards";
+import { AcademicPlanningPageHeader } from "./academic-planning/AcademicPlanningPageHeader";
+import { AcademicPlanningTabsShell } from "./academic-planning/AcademicPlanningTabsShell";
 import type {
   AssignmentImportPreview,
   AssignmentImportPreviewRow,
@@ -88,51 +76,20 @@ import {
   useClassAssignmentView,
   useStudentStudyPlanAssignmentView,
   useStudyPlanVersionView,
-  type AssignmentListItem,
 } from "./academic-planning/useAcademicPlanningViews";
-
-const StudyPlansTabContent = lazy(() =>
-  import("./academic-planning/StudyPlansTabContent").then(module => ({ default: module.StudyPlansTabContent })),
-);
-const AcademicCalendarTabContent = lazy(() =>
-  import("./academic-planning/AcademicCalendarTabContent").then(module => ({ default: module.AcademicCalendarTabContent })),
-);
-const StudentStudyPlansTabContent = lazy(() =>
-  import("./academic-planning/StudentStudyPlansTabContent").then(module => ({ default: module.StudentStudyPlansTabContent })),
-);
-const ClassAssignmentTabContent = lazy(() =>
-  import("./academic-planning/ClassAssignmentTabContent").then(module => ({ default: module.ClassAssignmentTabContent })),
-);
-
-const emptyCourseForm = {
-  category: "",
-  courseCode: "",
-  courseName: "",
-  creditHours: "3",
-  isPlaceholder: "false",
-  termCode: "2026B",
-};
-
-const academicPlanningTabs = ["study-plans", "academic-calendar", "student-study-plans", "assignments"] as const;
-type AcademicPlanningTab = (typeof academicPlanningTabs)[number];
-const parseAcademicPlanningTab = (value?: string | null): AcademicPlanningTab =>
-  academicPlanningTabs.includes(value as AcademicPlanningTab)
-    ? (value as AcademicPlanningTab)
-    : "study-plans";
-function AcademicPlanningTabFallback() {
-  return (
-    <div className="flex min-h-[220px] items-center justify-center rounded-lg border">
-      <Loader2 className="h-7 w-7 animate-spin text-primary" />
-    </div>
-  );
-}
+import { useAcademicPlanningTabState } from "./academic-planning/useAcademicPlanningTabState";
+import {
+  emptyCourseForm,
+  useStudyPlanCourseHandlers,
+} from "./academic-planning/useStudyPlanCourseHandlers";
+import { useVisibleSelection } from "./academic-planning/useVisibleSelection";
+import { useStudentStudyPlanAssignmentHandlers } from "./academic-planning/useStudentStudyPlanAssignmentHandlers";
+import { useClassAssignmentHandlers } from "./academic-planning/useClassAssignmentHandlers";
 
 export function StaffAcademicPlanning() {
   const { session } = useAuth();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [activePlanningTab, setActivePlanningTab] = useState<AcademicPlanningTab>(
-    parseAcademicPlanningTab(searchParams.get("tab")),
-  );
+  const { activePlanningTab, handlePlanningTabChange } =
+    useAcademicPlanningTabState();
   const [versions, setVersions] = useState<StudyPlanVersion[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState<string>("");
   const [versionProgrammeFilter, setVersionProgrammeFilter] = useState(ALL_FILTER_VALUE);
@@ -161,7 +118,6 @@ export function StaffAcademicPlanning() {
     useState<StudentAssignmentImportPreview | null>(null);
   const [isParsingStudentAssignmentImport, setIsParsingStudentAssignmentImport] = useState(false);
   const [isApplyingStudentAssignmentImport, setIsApplyingStudentAssignmentImport] = useState(false);
-  const [isAssigningStudents, setIsAssigningStudents] = useState(false);
   const [versionCourseTermFilter, setVersionCourseTermFilter] = useState(ALL_FILTER_VALUE);
   const [lecturers, setLecturers] = useState<LecturerOption[]>([]);
   const [courseTemplates, setCourseTemplates] = useState<CourseTemplateSummary[]>([]);
@@ -181,26 +137,12 @@ export function StaffAcademicPlanning() {
   const [isApplyingAssignmentImport, setIsApplyingAssignmentImport] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSavingCourse, setIsSavingCourse] = useState(false);
-  const [isAssigning, setIsAssigning] = useState(false);
   const [isLoadingAssignments, setIsLoadingAssignments] = useState(false);
   const [courseForm, setCourseForm] = useState(emptyCourseForm);
   const [assignmentForm, setAssignmentForm] = useState({
     termCode: "",
   });
 
-  useEffect(() => {
-    const nextTab = parseAcademicPlanningTab(searchParams.get("tab"));
-    setActivePlanningTab(current => (current === nextTab ? current : nextTab));
-  }, [searchParams]);
-
-  const handlePlanningTabChange = (value: string) => {
-    const nextTab = parseAcademicPlanningTab(value);
-    setActivePlanningTab(nextTab);
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.set("tab", nextTab);
-    setSearchParams(nextParams, { replace: true });
-  };
   const {
     courseByCode,
     courseById,
@@ -304,6 +246,14 @@ export function StaffAcademicPlanning() {
     plannedAssignmentCourses,
     selectedAssignmentKeys,
   });
+  const {
+    setSelected: setStudentSelected,
+    toggleVisibleSelection: toggleVisibleStudentSelection,
+  } = useVisibleSelection(visibleStudentIds, setSelectedStudentIds);
+  const {
+    setSelected: setAssignmentKeySelected,
+    toggleVisibleSelection: toggleVisibleAssignmentSelection,
+  } = useVisibleSelection(visibleAssignableKeys, setSelectedAssignmentKeys);
   const loadAll = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
@@ -429,6 +379,17 @@ export function StaffAcademicPlanning() {
       setVersionCourses([]);
     }
   }, []);
+  const {
+    handleAddCourse,
+    handleDeleteCourse,
+    isSavingCourse,
+  } = useStudyPlanCourseHandlers({
+    courseForm,
+    loadVersionCourses,
+    selectedVersionId,
+    setCourseForm,
+    versionCourses,
+  });
 
   const loadAssignmentWorkbench = useCallback(async (termCode: string) => {
     const normalizedTermCode = normalizeTermCode(termCode);
@@ -633,45 +594,6 @@ export function StaffAcademicPlanning() {
       setIsImportingAcademicCalendar(false);
     }
   };
-  const handleAddCourse = async () => {
-    if (!selectedVersionId || !courseForm.courseName.trim()) return;
-    const nextPosition =
-      versionCourses
-        .filter(course => course.term_code === courseForm.termCode)
-        .reduce((maxPosition, course) => Math.max(maxPosition, Number(course.position) || 0), 0) + 1;
-
-    setIsSavingCourse(true);
-    try {
-      await addStudyPlanCourse({
-        category: courseForm.category,
-        courseCode: courseForm.courseCode,
-        courseName: courseForm.courseName,
-        creditHours: courseForm.creditHours ? Number(courseForm.creditHours) : null,
-        isPlaceholder: courseForm.isPlaceholder === "true",
-        position: nextPosition,
-        studyPlanVersionId: selectedVersionId,
-        termCode: courseForm.termCode,
-      });
-      notify.success("Study plan course added.");
-      setCourseForm(current => ({ ...emptyCourseForm, termCode: current.termCode }));
-      await loadVersionCourses(selectedVersionId);
-    } catch (error) {
-      notify.error(error, "Failed to add study plan course.");
-    } finally {
-      setIsSavingCourse(false);
-    }
-  };
-
-  const handleDeleteCourse = async (courseId: string) => {
-    try {
-      await deleteStudyPlanCourse(courseId);
-      notify.success("Study plan course removed.");
-      await loadVersionCourses(selectedVersionId);
-    } catch (error) {
-      notify.error(error, "Failed to remove study plan course.");
-    }
-  };
-
   const refreshStudentAssignments = async () => {
     try {
       setStudentAssignments(await listStudentStudyPlanAssignments());
@@ -679,77 +601,17 @@ export function StaffAcademicPlanning() {
       notify.error(error, "Failed to refresh student study plan assignments.");
     }
   };
-
-  const setStudentSelected = (studentId: string, checked: boolean | "indeterminate") => {
-    setSelectedStudentIds(current => {
-      const next = new Set(current);
-      if (checked === true) {
-        next.add(studentId);
-      } else {
-        next.delete(studentId);
-      }
-      return Array.from(next);
-    });
-  };
-
-  const toggleVisibleStudentSelection = (checked: boolean | "indeterminate") => {
-    setSelectedStudentIds(current => {
-      const next = new Set(current);
-      for (const studentId of visibleStudentIds) {
-        if (checked === true) {
-          next.add(studentId);
-        } else {
-          next.delete(studentId);
-        }
-      }
-      return Array.from(next);
-    });
-  };
-
-  const handleAssignStudents = async (studentIds = selectedStudentIds) => {
-    if (!selectedStudentAssignmentVersionId || studentIds.length === 0) {
-      notify.info("Select a study plan version and at least one student first.");
-      return;
-    }
-
-    setIsAssigningStudents(true);
-    try {
-      for (const studentId of studentIds) {
-        await assignStudentStudyPlan({
-          studentId,
-          studyPlanVersionId: selectedStudentAssignmentVersionId,
-        });
-      }
-      notify.success(`Assigned ${studentIds.length} student${studentIds.length === 1 ? "" : "s"} to ${selectedStudentAssignmentVersion?.version_code || "the selected study plan"}.`);
-      setSelectedStudentIds([]);
-      await refreshStudentAssignments();
-    } catch (error) {
-      notify.error(error, "Failed to assign student study plan.");
-    } finally {
-      setIsAssigningStudents(false);
-    }
-  };
-
-  const handleUnassignStudents = async (studentIds = selectedStudentIds) => {
-    if (studentIds.length === 0) {
-      notify.info("Select at least one student first.");
-      return;
-    }
-
-    setIsAssigningStudents(true);
-    try {
-      for (const studentId of studentIds) {
-        await unassignStudentStudyPlan(studentId);
-      }
-      notify.success(`Removed study plan assignment for ${studentIds.length} student${studentIds.length === 1 ? "" : "s"}.`);
-      setSelectedStudentIds([]);
-      await refreshStudentAssignments();
-    } catch (error) {
-      notify.error(error, "Failed to remove student study plan assignment.");
-    } finally {
-      setIsAssigningStudents(false);
-    }
-  };
+  const {
+    handleAssignStudents,
+    handleUnassignStudents,
+    isAssigningStudents,
+  } = useStudentStudyPlanAssignmentHandlers({
+    refreshStudentAssignments,
+    selectedStudentAssignmentVersion,
+    selectedStudentAssignmentVersionId,
+    selectedStudentIds,
+    setSelectedStudentIds,
+  });
 
   const buildStudentAssignmentImportPreview = (
     parsedRows: ParsedStudentStudyPlanAssignmentRow[],
@@ -841,83 +703,20 @@ export function StaffAcademicPlanning() {
     if (!assignmentForm.termCode) return;
     await loadAssignmentWorkbench(assignmentForm.termCode);
   };
-
-  const setAssignmentKeySelected = (key: string, checked: boolean | "indeterminate") => {
-    setSelectedAssignmentKeys(current => {
-      const next = new Set(current);
-      if (checked === true) {
-        next.add(key);
-      } else {
-        next.delete(key);
-      }
-      return Array.from(next);
-    });
-  };
-
-  const toggleVisibleAssignmentSelection = (checked: boolean | "indeterminate") => {
-    setSelectedAssignmentKeys(current => {
-      const next = new Set(current);
-      for (const key of visibleAssignableKeys) {
-        if (checked === true) {
-          next.add(key);
-        } else {
-          next.delete(key);
-        }
-      }
-      return Array.from(next);
-    });
-  };
-
-  const handleAssignCourse = async (item: AssignmentListItem, lecturerId: string) => {
-    if (!selectedAssignmentTerm?.id || !item.courseId || !lecturerId) {
-      notify.info("This semester needs an academic term before lecturer assignments can be saved.");
-      return;
-    }
-    setIsAssigning(true);
-    try {
-      await assignCourseOfferingToLecturer({
-        courseId: item.courseId,
-        lecturerId,
-        termId: selectedAssignmentTerm.id,
-      });
-      notify.success(`${item.courseCode} assigned to ${lecturerLabel(lecturerById.get(lecturerId))}.`);
-      await refreshAssignmentWorkbench();
-    } catch (error) {
-      notify.error(error, "Failed to assign course to lecturer.");
-    } finally {
-      setIsAssigning(false);
-    }
-  };
-
-
-  const handleBulkAssign = async () => {
-    if (!selectedAssignmentTerm?.id || !bulkLecturerId || selectedAssignmentItems.length === 0) {
-      notify.info("This semester needs an academic term before lecturer assignments can be saved.");
-      return;
-    }
-    setIsAssigning(true);
-    try {
-      let assignedCount = 0;
-      for (const item of selectedAssignmentItems) {
-        if (!item.courseId) continue;
-        await assignCourseOfferingToLecturer({
-          courseId: item.courseId,
-          lecturerId: bulkLecturerId,
-          termId: selectedAssignmentTerm.id,
-        });
-        assignedCount += 1;
-      }
-      notify.success(`Assigned ${assignedCount} course${assignedCount === 1 ? "" : "s"} to ${lecturerLabel(lecturerById.get(bulkLecturerId))}.`);
-      setBulkLecturerId("");
-      setSelectedAssignmentKeys([]);
-      setAssignmentRowLecturers({});
-      await refreshAssignmentWorkbench();
-    } catch (error) {
-      notify.error(error, "Failed to bulk assign courses.");
-    } finally {
-      setIsAssigning(false);
-    }
-  };
+  const {
+    handleAssignCourse,
+    handleBulkAssign,
+    isAssigning,
+  } = useClassAssignmentHandlers({
+    bulkLecturerId,
+    lecturerById,
+    refreshAssignmentWorkbench,
+    selectedAssignmentItems,
+    selectedAssignmentTerm,
+    setAssignmentRowLecturers,
+    setBulkLecturerId,
+    setSelectedAssignmentKeys,
+  });
 
   const buildAssignmentImportPreview = (
     parsedRows: ParsedLecturerAssignmentRow[],
@@ -1156,17 +955,10 @@ export function StaffAcademicPlanning() {
   return (
     <StaffAcademicPlanningProvider value={academicPlanningContextValue}>
       <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">AARO Staff Dashboard</h1>
-          <p className="text-muted-foreground">
-            Manage study plan versions, course structures and lecturer class assignment.
-          </p>
-        </div>
-        <Button variant="outline" onClick={() => void loadAll()} disabled={isLoading}>
-          <RefreshCw className="mr-2 h-4 w-4" /> Refresh
-        </Button>
-      </div>
+      <AcademicPlanningPageHeader
+        isLoading={isLoading}
+        onRefresh={() => void loadAll()}
+      />
 
       {loadError && (
         <Alert>
@@ -1176,114 +968,22 @@ export function StaffAcademicPlanning() {
         </Alert>
       )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <BookOpen className="h-9 w-9 rounded-lg bg-blue-100 p-2 text-blue-700" />
-            <div>
-              <p className="text-sm text-muted-foreground">Study Plans</p>
-              <p className="text-2xl font-bold">{versions.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <ClipboardList className="h-9 w-9 rounded-lg bg-green-100 p-2 text-green-700" />
-            <div>
-              <p className="text-sm text-muted-foreground">Selected Courses</p>
-              <p className="text-2xl font-bold">{versionCourses.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <GraduationCap className="h-9 w-9 rounded-lg bg-purple-100 p-2 text-purple-700" />
-            <div>
-              <p className="text-sm text-muted-foreground">Lecturers</p>
-              <p className="text-2xl font-bold">{lecturers.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <CalendarDays className="h-9 w-9 rounded-lg bg-orange-100 p-2 text-orange-700" />
-            <div>
-              <p className="text-sm text-muted-foreground">Semesters</p>
-              <p className="text-2xl font-bold">{calendarTerms.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <AcademicPlanningOverviewCards
+        lecturersCount={lecturers.length}
+        semestersCount={calendarTerms.length}
+        selectedCoursesCount={versionCourses.length}
+        studyPlansCount={versions.length}
+      />
 
       {isLoading ? (
         <div className="flex min-h-[320px] items-center justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : (
-        <Tabs value={activePlanningTab} onValueChange={handlePlanningTabChange} className="space-y-4">
-          <TabsList className="grid h-auto w-full grid-cols-2 p-1 sm:grid-cols-4">
-            <TabsTrigger value="study-plans" className="text-xs sm:text-sm">Study Plans</TabsTrigger>
-            <TabsTrigger value="academic-calendar" className="text-xs sm:text-sm">Academic Calendar</TabsTrigger>
-            <TabsTrigger value="student-study-plans" className="text-xs sm:text-sm">Student Study Plans</TabsTrigger>
-            <TabsTrigger value="assignments" className="text-xs sm:text-sm">Class Assignment</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="study-plans" className="space-y-4">
-            {activePlanningTab === "study-plans" && (
-              <AppErrorBoundary
-                resetKey={activePlanningTab}
-                title="Study Plans could not be displayed."
-                description="The study plan import and course structure tab hit a render error. Try again or refresh the data."
-              >
-                <Suspense fallback={<AcademicPlanningTabFallback />}>
-                  <StudyPlansTabContent />
-                </Suspense>
-              </AppErrorBoundary>
-            )}
-          </TabsContent>
-
-          <TabsContent value="academic-calendar" className="space-y-4">
-            {activePlanningTab === "academic-calendar" && (
-              <AppErrorBoundary
-                resetKey={activePlanningTab}
-                title="Academic Calendar could not be displayed."
-                description="The calendar tab hit a render error. Try again or refresh the data."
-              >
-                <Suspense fallback={<AcademicPlanningTabFallback />}>
-                  <AcademicCalendarTabContent />
-                </Suspense>
-              </AppErrorBoundary>
-            )}
-          </TabsContent>
-
-          <TabsContent value="student-study-plans" className="space-y-4">
-            {activePlanningTab === "student-study-plans" && (
-              <AppErrorBoundary
-                resetKey={activePlanningTab}
-                title="Student Study Plans could not be displayed."
-                description="The student assignment tab hit a render error. Try again or refresh the data."
-              >
-                <Suspense fallback={<AcademicPlanningTabFallback />}>
-                  <StudentStudyPlansTabContent />
-                </Suspense>
-              </AppErrorBoundary>
-            )}
-          </TabsContent>
-
-          <TabsContent value="assignments" className="space-y-4">
-            {activePlanningTab === "assignments" && (
-              <AppErrorBoundary
-                resetKey={activePlanningTab}
-                title="Class Assignment could not be displayed."
-                description="The lecturer assignment tab hit a render error. Try again or refresh the data."
-              >
-                <Suspense fallback={<AcademicPlanningTabFallback />}>
-                  <ClassAssignmentTabContent />
-                </Suspense>
-              </AppErrorBoundary>
-            )}
-          </TabsContent>
-        </Tabs>
+        <AcademicPlanningTabsShell
+          activePlanningTab={activePlanningTab}
+          onTabChange={handlePlanningTabChange}
+        />
       )}
       <ImportTemplateHelpDialog />
       </div>

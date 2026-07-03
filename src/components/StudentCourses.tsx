@@ -59,6 +59,10 @@ import {
 import { CourseAssessmentSummary } from "./course/CourseAssessmentStructure";
 
 // --- Types ---
+type DbStudyPlanResult = NonNullable<
+  Awaited<ReturnType<typeof getDbStudyPlanCoursesForStudent>>
+>;
+
 type Course = NormalizedCourseOffering & {
   assessmentStructure?: CourseAssessmentItem[] | null;
   instructors?: CourseInstructor[];
@@ -181,12 +185,14 @@ export function StudentCourses() {
       });
 
       if (!studyPlanResult) {
-        const { getStudyPlanCoursesForStudent } = await import("@/data/studyPlanCatalog");
-        studyPlanResult = getStudyPlanCoursesForStudent({
-          email: profileEmail,
-          programme: profileProgramme,
-          termCode,
-        });
+        studyPlanResult = {
+          entries: [] as StudyPlanCourseEntry[],
+          programmeKey: null,
+          studentId: null,
+          isExactMatch: false,
+          message:
+            "No imported study plan is available for your profile yet. Please contact AARO or your department if this is unexpected.",
+        } as DbStudyPlanResult;
       }
       setStudyPlanMessage(studyPlanResult.message || null);
 

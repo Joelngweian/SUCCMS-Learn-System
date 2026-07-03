@@ -30,7 +30,6 @@ import {
 import {
   getFallbackCurrentAcademicTerm,
 } from "@/data/studyPlanUtils";
-import { CourseCreationRequestDialog } from "./course/CourseCreationRequestDialog";
 import {
   assessmentRowsToValues,
   getCourseAssessmentStructures,
@@ -70,7 +69,6 @@ export function CourseManagement() {
   const [searchQuery, setSearchQuery] = useState("");
   const [semesterFilter, setSemesterFilter] = useState("all");
   const [droppingCourseId, setDroppingCourseId] = useState<string | null>(null);
-  const [isRequestDialogOpen, setIsRequestDialogOpen] = useState(false);
   const [assessmentCourseToEdit, setAssessmentCourseToEdit] =
     useState<TeachingCourse | null>(null);
   
@@ -307,20 +305,7 @@ export function CourseManagement() {
             Manage courses assigned by AARO Staff.
           </p>
         </div>
-        <Button
-          variant="outline"
-          className="w-full sm:w-auto"
-          onClick={() => setIsRequestDialogOpen(true)}
-        >
-          Request New Course Creation
-        </Button>
       </div>
-
-      <CourseCreationRequestDialog
-        open={isRequestDialogOpen}
-        requesterId={profileId || null}
-        onOpenChange={setIsRequestDialogOpen}
-      />
 
       <div className="my-3 grid gap-2 sm:my-4 sm:grid-cols-[minmax(0,1fr)_220px]">
         <div className="relative">

@@ -13,17 +13,29 @@ import { TeacherAttendanceRoster } from "./TeacherAttendanceRoster";
 import { TeacherAttendanceDialogs } from "./TeacherAttendanceDialogs";
 import { exportAttendanceWorkbook } from "./exportAttendanceWorkbook";
 import {
+  ATTENDANCE_SESSION_SELECT,
+  fetchAllCourseAttendanceRecords,
+  fetchAllCourseAttendanceSessions,
+  listCourseAttendanceRecords,
+  listCourseAttendanceSessions,
+} from "./attendanceRepository";
+import {
+  generateCheckInCode,
+  getLocalDateValue,
+  getLocalTimeValue,
+} from "./attendanceSessionUtils";
+import { useAttendanceSessionSelection } from "./useAttendanceSessionSelection";
+import {
   formatClassDate,
   formatSessionSlotLabel,
   getSessionTimingState,
   getRecordStatus,
   receivesAttendanceCredit,
-  type AttendanceFilter,
   type AttendanceRecord,
   type AttendanceSession,
-  type AttendanceStatus,
   type CourseStudent,
 } from "./attendanceTypes";
+import { useAttendanceRosterState } from "./useAttendanceRosterState";
 
 type CourseAttendanceProps = {
   courseId: string;
@@ -32,38 +44,6 @@ type CourseAttendanceProps = {
   userId: string | null;
   isLecturer: boolean;
   students: CourseStudent[];
-};
-
-const PAGE_SIZE = 25;
-
-const ATTENDANCE_SELECT =
-  "id, course_id, student_id, class_date, marked_present, marked_at, marked_by, class_meeting_id, session_id, status, check_in_at, check_in_method";
-
-const ATTENDANCE_SESSION_SELECT =
-  "id, course_id, class_meeting_id, class_date, slot_no, slot_label, check_in_code, status, starts_at, ends_at, check_in_window_minutes, opened_at, closed_at, created_by, created_at, updated_at";
-
-const EXPORT_PAGE_SIZE = 1000;
-
-const getLocalDateValue = () => {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60_000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
-};
-
-const getLocalTimeValue = () => {
-  const now = new Date();
-  return `${String(now.getHours()).padStart(2, "0")}:${String(
-    now.getMinutes(),
-  ).padStart(2, "0")}`;
-};
-
-const generateCheckInCode = () => {
-  const characters = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-  const values = new Uint32Array(6);
-  crypto.getRandomValues(values);
-  return Array.from(values, (value) => characters[value % characters.length]).join(
-    ""
-  );
 };
 
 export function CourseAttendance({
@@ -81,16 +61,6 @@ export function CourseAttendance({
   );
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
-  const [draft, setDraft] = useState<
-    Record<string, AttendanceStatus | null>
-  >({});
-  const [dirtyStudentIds, setDirtyStudentIds] = useState<Set<string>>(
-    new Set()
-  );
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] =
-    useState<AttendanceFilter>("all");
-  const [currentPage, setCurrentPage] = useState(1);
   const [classHours, setClassHours] = useState("3");
   const [classStartTime, setClassStartTime] = useState(getLocalTimeValue);
   const [sessionDuration, setSessionDuration] = useState("15");
@@ -112,6 +82,11 @@ export function CourseAttendance({
   const [completionNoticeDate, setCompletionNoticeDate] = useState<string | null>(null);
   const [reviewingCompletedDate, setReviewingCompletedDate] = useState<string | null>(null);
 
+  const clearAttendanceMessages = useCallback(() => {
+    setErrorMessage("");
+    setSuccessMessage("");
+  }, []);
+
   const sortedStudents = useMemo(
     () =>
       [...students]
@@ -122,39 +97,19 @@ export function CourseAttendance({
     [students]
   );
 
-  const sessionsForSelectedDate = useMemo(
-    () =>
-      sessions
-        .filter((session) => session.class_date === selectedDate)
-        .sort((a, b) => {
-          const slotSort = (a.slot_no || 1) - (b.slot_no || 1);
-          if (slotSort !== 0) return slotSort;
-          return a.starts_at.localeCompare(b.starts_at);
-        }),
-    [selectedDate, sessions],
-  );
-
-  const selectedSession = useMemo(() => {
-    if (sessionsForSelectedDate.length === 0) return null;
-    return (
-      sessionsForSelectedDate.find(
-        (session) => session.id === selectedSessionId,
-      ) || sessionsForSelectedDate[0]
-    );
-  }, [selectedSessionId, sessionsForSelectedDate]);
-
-  const missingSlotNumbers = useMemo(() => {
-    const targetSlots = Number(classHours);
-    if (!Number.isFinite(targetSlots) || targetSlots <= 0) return [];
-
-    const existingSlotNumbers = new Set(
-      sessionsForSelectedDate.map((session) => session.slot_no || 1),
-    );
-
-    return Array.from({ length: targetSlots }, (_, index) => index + 1).filter(
-      (slotNo) => !existingSlotNumbers.has(slotNo),
-    );
-  }, [classHours, sessionsForSelectedDate]);
+  const {
+    missingSlotNumbers,
+    selectedSession,
+    sessionsForSelectedDate,
+  } = useAttendanceSessionSelection({
+    classHours,
+    clock,
+    isLecturer,
+    selectedDate,
+    selectedSessionId,
+    sessions,
+    setSelectedSessionId,
+  });
 
   const selectedSessionTiming = selectedSession
     ? getSessionTimingState(selectedSession, clock)
@@ -186,25 +141,10 @@ export function CourseAttendance({
     if (showLoading) setIsLoading(true);
     setErrorMessage("");
 
-    let attendanceQuery = supabase
-      .from("attendance")
-      .select(ATTENDANCE_SELECT)
-      .eq("course_id", courseId)
-      .order("class_date", { ascending: false });
-
-    if (!isLecturer && userId) {
-      attendanceQuery = attendanceQuery.eq("student_id", userId);
-    }
-
-    const attendanceResult = await attendanceQuery;
-    const sessionResult = isLecturer
-      ? await supabase
-          .from("attendance_sessions")
-          .select(ATTENDANCE_SESSION_SELECT)
-          .eq("course_id", courseId)
-          .order("class_date", { ascending: false })
-          .order("slot_no", { ascending: true })
-      : { data: [] as AttendanceSession[], error: null };
+    const [attendanceResult, sessionResult] = await Promise.all([
+      listCourseAttendanceRecords({ courseId, isLecturer, userId }),
+      listCourseAttendanceSessions(courseId, isLecturer),
+    ]);
 
     if (attendanceResult.error) {
       setErrorMessage(
@@ -212,7 +152,7 @@ export function CourseAttendance({
       );
       setRecords([]);
     } else {
-      setRecords(attendanceResult.data || []);
+      setRecords(attendanceResult.data);
     }
 
     if (sessionResult.error) {
@@ -221,7 +161,7 @@ export function CourseAttendance({
       );
       setSessions([]);
     } else {
-      setSessions(sessionResult.data || []);
+      setSessions(sessionResult.data);
     }
 
     if (showLoading) setIsLoading(false);
@@ -270,88 +210,31 @@ export function CourseAttendance({
     return () => window.clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    if (!isLecturer) return;
-
-    if (sessionsForSelectedDate.length === 0) {
-      setSelectedSessionId(null);
-      return;
-    }
-
-    if (
-      selectedSessionId &&
-      sessionsForSelectedDate.some((session) => session.id === selectedSessionId)
-    ) {
-      return;
-    }
-
-    const now = Date.now();
-    const activeSession = sessionsForSelectedDate.find(
-      (session) => getSessionTimingState(session, now) === "open",
-    );
-    const upcomingSession = sessionsForSelectedDate.find(
-      (session) => getSessionTimingState(session, now) === "upcoming",
-    );
-
-    setSelectedSessionId(
-      (activeSession || upcomingSession || sessionsForSelectedDate[0]).id,
-    );
-  }, [isLecturer, selectedSessionId, sessionsForSelectedDate]);
-
-  useEffect(() => {
-    if (!isLecturer) return;
-
-    const recordsForDate = new Map(
-      records
-        .filter((record) =>
-          selectedSession
-            ? record.session_id === selectedSession.id
-            : record.class_date === selectedDate && record.session_id == null,
-        )
-        .map((record) => [record.student_id, getRecordStatus(record)])
-    );
-
-    setDraft(
-      Object.fromEntries(
-        sortedStudents.map((student) => [
-          student.id,
-          recordsForDate.get(student.id) || null,
-        ])
-      )
-    );
-    setDirtyStudentIds(new Set());
-    setErrorMessage("");
-  }, [isLecturer, records, selectedDate, selectedSession, sortedStudents]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, selectedDate]);
-
-  const selectedSummary = useMemo(() => {
-    const values = sortedStudents.map((student) => draft[student.id] ?? null);
-
-    return {
-      present: values.filter((value) => value === "present").length,
-      late: values.filter((value) => value === "late").length,
-      absent: values.filter((value) => value === "absent").length,
-      excused: values.filter((value) => value === "excused").length,
-      unmarked: values.filter((value) => value == null).length,
-    };
-  }, [draft, sortedStudents]);
-
-  const selectedRecordsByStudent = useMemo(
-    () =>
-      new Map(
-        records
-          .filter((record) =>
-            selectedSession
-              ? record.session_id === selectedSession.id
-              : record.class_date === selectedDate && record.session_id == null,
-          )
-          .map((record) => [record.student_id, record])
-      ),
-    [records, selectedDate, selectedSession]
-  );
+  const {
+    currentPage,
+    dirtyStudentIds,
+    draft,
+    filteredStudents,
+    pageSize,
+    paginatedStudents,
+    searchQuery,
+    selectedRecordsByStudent,
+    selectedSummary,
+    setCurrentPage,
+    setSearchQuery,
+    setStatuses,
+    setStatusFilter,
+    statusFilter,
+    totalPages,
+    updateStatus,
+  } = useAttendanceRosterState({
+    isLecturer,
+    onClearMessages: clearAttendanceMessages,
+    records,
+    selectedDate,
+    selectedSession,
+    sortedStudents,
+  });
 
   const sessionSummaries = useMemo(() => {
     const grouped = new Map<
@@ -418,64 +301,6 @@ export function CourseAttendance({
           : null,
     };
   }, [records]);
-
-  const filteredStudents = useMemo(() => {
-    const normalizedQuery = searchQuery.trim().toLowerCase();
-
-    return sortedStudents.filter((student) => {
-      const status = draft[student.id] ?? null;
-      const matchesSearch =
-        normalizedQuery.length === 0 ||
-        (student.full_name || "").toLowerCase().includes(normalizedQuery);
-      const matchesStatus =
-        statusFilter === "all" ||
-        (statusFilter === "unmarked"
-          ? status == null
-          : status === statusFilter);
-
-      return matchesSearch && matchesStatus;
-    });
-  }, [draft, searchQuery, sortedStudents, statusFilter]);
-
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredStudents.length / PAGE_SIZE)
-  );
-  const paginatedStudents = filteredStudents.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE
-  );
-
-  const updateStatus = (
-    studentId: string,
-    value: AttendanceStatus
-  ) => {
-    setDraft((current) => ({ ...current, [studentId]: value }));
-    setDirtyStudentIds((current) => new Set(current).add(studentId));
-    setErrorMessage("");
-    setSuccessMessage("");
-  };
-
-  const setStatuses = (
-    predicate: (studentId: string) => boolean,
-    status: AttendanceStatus
-  ) => {
-    const affectedIds = sortedStudents
-      .filter((student) => predicate(student.id))
-      .map((student) => student.id);
-
-    setDraft((current) => ({
-      ...current,
-      ...Object.fromEntries(affectedIds.map((id) => [id, status])),
-    }));
-    setDirtyStudentIds((current) => {
-      const next = new Set(current);
-      affectedIds.forEach((id) => next.add(id));
-      return next;
-    });
-    setErrorMessage("");
-    setSuccessMessage("");
-  };
 
   const startCheckInSession = async () => {
     if (!userId || !canOpenCheckIn) return;
@@ -935,51 +760,6 @@ export function CourseAttendance({
     setIsCheckingIn(false);
   };
 
-  const fetchAttendanceRecordsForExport = async () => {
-    const allRecords: AttendanceRecord[] = [];
-
-    for (let from = 0; ; from += EXPORT_PAGE_SIZE) {
-      const { data, error } = await supabase
-        .from("attendance")
-        .select(ATTENDANCE_SELECT)
-        .eq("course_id", courseId)
-        .order("class_date", { ascending: true })
-        .range(from, from + EXPORT_PAGE_SIZE - 1);
-
-      if (error) throw new Error(error.message);
-
-      const page = (data || []) as AttendanceRecord[];
-      allRecords.push(...page);
-
-      if (page.length < EXPORT_PAGE_SIZE) break;
-    }
-
-    return allRecords;
-  };
-
-  const fetchAttendanceSessionsForExport = async () => {
-    const allSessions: AttendanceSession[] = [];
-
-    for (let from = 0; ; from += EXPORT_PAGE_SIZE) {
-      const { data, error } = await supabase
-        .from("attendance_sessions")
-        .select(ATTENDANCE_SESSION_SELECT)
-        .eq("course_id", courseId)
-        .order("class_date", { ascending: true })
-        .order("slot_no", { ascending: true })
-        .range(from, from + EXPORT_PAGE_SIZE - 1);
-
-      if (error) throw new Error(error.message);
-
-      const page = (data || []) as AttendanceSession[];
-      allSessions.push(...page);
-
-      if (page.length < EXPORT_PAGE_SIZE) break;
-    }
-
-    return allSessions;
-  };
-
   const handleExportAttendance = async () => {
     if (!isLecturer || sortedStudents.length === 0) return;
 
@@ -1043,8 +823,8 @@ export function CourseAttendance({
 
     try {
       const [allRecords, allSessions] = await Promise.all([
-        fetchAttendanceRecordsForExport(),
-        fetchAttendanceSessionsForExport(),
+        fetchAllCourseAttendanceRecords(courseId),
+        fetchAllCourseAttendanceSessions(courseId),
       ]);
 
       await exportAttendanceWorkbook({
@@ -1189,7 +969,7 @@ export function CourseAttendance({
           unmarkedCount={selectedSummary.unmarked}
           currentPage={currentPage}
           totalPages={totalPages}
-          pageSize={PAGE_SIZE}
+          pageSize={pageSize}
           dirtyCount={dirtyStudentIds.size}
           isSaving={isSaving}
           onSearchQueryChange={setSearchQuery}
