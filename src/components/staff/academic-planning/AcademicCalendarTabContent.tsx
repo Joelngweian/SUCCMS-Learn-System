@@ -21,7 +21,7 @@ import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui/select";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "../../ui/table";
-import { useStaffAcademicPlanningContext } from "./AcademicPlanningContext";
+import { useStaffAcademicPlanningContext } from "./useStaffAcademicPlanningContext";
 
 type StudentAssignmentStatusFilter = "unassigned" | "assigned" | "all";
 type AssignmentStatusFilter = "need" | "assigned" | "all";

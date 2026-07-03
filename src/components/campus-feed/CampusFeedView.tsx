@@ -1,4 +1,4 @@
-import {
+﻿import {
   useEffect,
   useRef,
   useState,
@@ -41,13 +41,26 @@ import {
 } from "../ui/dropdown-menu";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
-import { ForumEmojiPicker } from "../forum/ForumEmojiPicker";
+import { CampusFeedLightboxDialog } from "./CampusFeedLightboxDialog";
+import { CampusMentionSuggestions } from "./CampusMentionSuggestions";
+import { CampusPostComposer } from "./CampusPostComposer";
 import { CampusPostMedia } from "./CampusPostMedia";
+import { LazyForumEmojiPicker } from "./LazyForumEmojiPicker";
 import {
   formatCampusPostTime,
   getCampusMemberInitials,
   getCampusRoleBadgeClass,
 } from "./campusFeedPresentation";
+import {
+  getActiveCampusMention,
+  renderCampusMentionText,
+  searchCampusMentionCourses,
+  toUserMentionSuggestion,
+  type ActiveCampusMention,
+  type CampusMentionSuggestion,
+  type CampusMentionTarget,
+  type CampusMentionUserRow,
+} from "./campusMentions";
 import type {
   CampusPost,
   CampusPostAttachment,
@@ -61,211 +74,9 @@ import {
   useCampusFeed,
 } from "./useCampusFeed";
 
-const CAMPUS_MENTION_PATTERN = /@([A-Za-z0-9_-]{2,64})/g;
-
-type CampusMentionTarget = "composer" | "editPost";
-
-type ActiveCampusMention = {
-  target: CampusMentionTarget;
-  query: string;
-  start: number;
-  end: number;
-};
-
-type CampusMentionSuggestion = {
-  id: string;
-  type: "course" | "user";
-  token: string;
-  title: string;
-  subtitle: string;
-  avatarUrl?: string | null;
-  badge?: string | null;
-};
-
-type CampusMentionUserRow = {
-  id: string;
-  full_name: string | null;
-  username: string | null;
-  avatar_url: string | null;
-  role: string | null;
-};
-
-type DirectCourseMentionRow = {
-  id: string;
-  owner_id: string | null;
-  courses:
-    | {
-        course_code: string | null;
-        code: string | null;
-        name: string | null;
-        chinese_name: string | null;
-      }
-    | Array<{
-        course_code: string | null;
-        code: string | null;
-        name: string | null;
-        chinese_name: string | null;
-      }>
-    | null;
-  course_instructors?: Array<{ user_id: string | null }> | null;
-};
-
-const renderCampusMentionText = (content: string) => {
-  const parts = [];
-  let lastIndex = 0;
-
-  content.replace(CAMPUS_MENTION_PATTERN, (match, token, offset) => {
-    if (offset > lastIndex) {
-      parts.push(content.slice(lastIndex, offset));
-    }
-    parts.push(
-      <span
-        key={`${token}-${offset}`}
-        className="font-semibold text-primary"
-      >
-        {match}
-      </span>,
-    );
-    lastIndex = offset + match.length;
-    return match;
-  });
-
-  if (lastIndex < content.length) {
-    parts.push(content.slice(lastIndex));
-  }
-
-  return parts.length > 0 ? parts : content;
-};
-
-const getActiveCampusMention = (
-  target: CampusMentionTarget,
-  value: string,
-  cursorPosition: number | null,
-): ActiveCampusMention | null => {
-  if (cursorPosition === null) return null;
-
-  const beforeCursor = value.slice(0, cursorPosition);
-  const match = /(^|\s)@([A-Za-z0-9_-]{0,64})$/.exec(beforeCursor);
-  if (!match) return null;
-
-  return {
-    target,
-    query: match[2],
-    start: match.index + match[1].length,
-    end: cursorPosition,
-  };
-};
-
-const getUserMentionToken = (userRow: CampusMentionUserRow) => {
-  const username = userRow.username?.trim();
-  if (username) return username.replace(/^@+/, "");
-
-  const nameToken = userRow.full_name?.replace(/\s+/g, "");
-  return nameToken || userRow.id.slice(0, 8);
-};
-
-const toUserMentionSuggestion = (
-  userRow: CampusMentionUserRow,
-): CampusMentionSuggestion => ({
-  id: userRow.id,
-  type: "user",
-  token: getUserMentionToken(userRow),
-  title: userRow.full_name || userRow.username || "Campus member",
-  subtitle: userRow.username ? `@${userRow.username}` : userRow.role || "User",
-  avatarUrl: userRow.avatar_url,
-  badge: userRow.role,
-});
-
-const firstRelation = <T,>(value: T | T[] | null | undefined) =>
-  Array.isArray(value) ? value[0] : value;
-
-const toCourseMentionSuggestion = (course: {
-  id: string;
-  course_code: string;
-  name: string | null;
-  chinese_name: string | null;
-}): CampusMentionSuggestion => ({
-  id: course.id,
-  type: "course",
-  token: course.course_code,
-  title: course.course_code,
-  subtitle: course.chinese_name
-    ? `${course.name || "Course"} · ${course.chinese_name}`
-    : course.name || "Course",
-  badge: "Course",
-});
-
-const searchCampusMentionCourses = async (
-  query: string,
-): Promise<CampusMentionSuggestion[]> => {
-  const { data, error } = await supabase.rpc("search_campus_mention_courses", {
-    p_search: query || null,
-    p_limit: 5,
-  });
-
-  if (!error) {
-    return (data || []).map(course =>
-      toCourseMentionSuggestion({
-        id: course.id,
-        course_code: course.course_code,
-        name: course.name,
-        chinese_name: course.chinese_name,
-      }),
-    );
-  }
-
-  console.warn("Campus mention course RPC unavailable; using fallback query:", error);
-  const fallbackResult = await supabase
-    .from("course_offerings")
-    .select(
-      "id, owner_id, courses!inner(course_code, code, name, chinese_name), course_instructors(user_id)",
-    )
-    .eq("status", "active")
-    .limit(120);
-
-  if (fallbackResult.error) throw fallbackResult.error;
-
-  const normalizedQuery = query.trim().toLowerCase();
-  const seenCourseCodes = new Set<string>();
-
-  return ((fallbackResult.data || []) as unknown as DirectCourseMentionRow[])
-    .flatMap(row => {
-      const course = firstRelation(row.courses);
-      const courseCode =
-        course?.course_code?.trim() || course?.code?.trim() || "";
-      const hasTeacher =
-        Boolean(row.owner_id) || Boolean(row.course_instructors?.length);
-      if (!course || !courseCode || !hasTeacher) return [];
-
-      const normalizedCourseCode = courseCode.toUpperCase();
-      if (seenCourseCodes.has(normalizedCourseCode)) return [];
-
-      const searchText = [
-        courseCode,
-        course.name || "",
-        course.chinese_name || "",
-      ]
-        .join(" ")
-        .toLowerCase();
-      if (normalizedQuery && !searchText.includes(normalizedQuery)) return [];
-
-      seenCourseCodes.add(normalizedCourseCode);
-      return [
-        toCourseMentionSuggestion({
-          id: row.id,
-          course_code: courseCode,
-          name: course.name,
-          chinese_name: course.chinese_name,
-        }),
-      ];
-    })
-    .slice(0, 5);
-};
-
 export function CampusFeed() {
   const navigate = useNavigate();
   const { profile, user } = useAuth();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const editFileInputRef = useRef<HTMLInputElement>(null);
   const commentFileInputRef = useRef<HTMLInputElement>(null);
   const editCommentFileInputRef = useRef<HTMLInputElement>(null);
@@ -451,68 +262,6 @@ export function CampusFeed() {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
     });
-  };
-
-  const renderMentionSuggestions = (target: CampusMentionTarget) => {
-    if (!activeMention || activeMention.target !== target) return null;
-
-    return (
-      <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg">
-        <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">
-          Mention someone or a taught course
-        </div>
-        {isMentionLoading ? (
-          <div className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Searching mentions...
-          </div>
-        ) : mentionSuggestions.length > 0 ? (
-          <div className="max-h-72 overflow-y-auto py-1">
-            {mentionSuggestions.map(suggestion => (
-              <button
-                key={`${suggestion.type}-${suggestion.id}`}
-                type="button"
-                onMouseDown={event => {
-                  event.preventDefault();
-                  insertMentionSuggestion(suggestion);
-                }}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/70"
-              >
-                {suggestion.type === "user" ? (
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage src={suggestion.avatarUrl || ""} />
-                    <AvatarFallback>
-                      {getCampusMemberInitials(suggestion.title)}
-                    </AvatarFallback>
-                  </Avatar>
-                ) : (
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                    <Users className="h-4 w-4" />
-                  </span>
-                )}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">
-                    @{suggestion.title}
-                  </span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {suggestion.subtitle}
-                  </span>
-                </span>
-                {suggestion.badge && (
-                  <Badge variant="outline" className="shrink-0 text-[10px]">
-                    {suggestion.badge}
-                  </Badge>
-                )}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="px-3 py-3 text-sm text-muted-foreground">
-            No users or taught courses found for @{activeMention.query || "..."}.
-          </div>
-        )}
-      </div>
-    );
   };
 
   const openPostDialog = (postId: string) => {
@@ -776,133 +525,27 @@ export function CampusFeed() {
         </Button>
       </div>
 
-      <Card className="overflow-visible shadow-sm">
-        <CardContent className="p-4">
-          <div className="flex gap-3">
-            <Avatar className="h-10 w-10 shrink-0">
-              <AvatarImage src={profile?.avatar_url} />
-              <AvatarFallback>
-                {getCampusMemberInitials(profile?.full_name || "Campus Member")}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1 space-y-3">
-              <div className="relative">
-                <Textarea
-                  ref={composerTextareaRef}
-                  value={feed.draftContent}
-                  onChange={event => {
-                    feed.setDraftContent(event.target.value);
-                    updateActiveMention(
-                      "composer",
-                      event.target.value,
-                      event.currentTarget.selectionStart,
-                    );
-                  }}
-                  onClick={event =>
-                    updateActiveMention(
-                      "composer",
-                      event.currentTarget.value,
-                      event.currentTarget.selectionStart,
-                    )
-                  }
-                  onKeyUp={event =>
-                    updateActiveMention(
-                      "composer",
-                      event.currentTarget.value,
-                      event.currentTarget.selectionStart,
-                    )
-                  }
-                  placeholder={`What's on your mind, ${
-                    profile?.full_name?.split(" ")[0] || "Scholar"
-                  }?`}
-                  maxLength={5000}
-                  className="min-h-24 resize-none border-0 bg-muted/60 px-4 py-3 shadow-none focus-visible:ring-1"
-                />
-                {renderMentionSuggestions("composer")}
-              </div>
-
-              {feed.selectedMedia.length > 0 && (
-                <div className="grid grid-cols-2 gap-2">
-                  {feed.selectedMedia.map(media => (
-                    <div
-                      key={media.id}
-                      className="group relative overflow-hidden rounded-lg border bg-muted"
-                    >
-                      <img
-                        src={media.previewUrl}
-                        alt={media.file.name}
-                        className="h-36 w-full object-cover"
-                      />
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="icon"
-                        className="absolute right-2 top-2 h-7 w-7 rounded-full opacity-90"
-                        onClick={() => feed.removeSelectedMedia(media.id)}
-                        aria-label={`Remove ${media.file.name}`}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {feed.composerError && (
-                <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  {feed.composerError}
-                </p>
-              )}
-
-              <div className="flex items-center justify-between gap-3 border-t pt-3">
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={feed.isCreating || feed.selectedMedia.length >= 4}
-                  >
-                    <ImagePlus className="h-4 w-4 text-emerald-600" />
-                    Photo
-                  </Button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
-                    multiple
-                    className="hidden"
-                    onChange={feed.selectMedia}
-                  />
-                  <span className="hidden text-xs text-muted-foreground sm:inline">
-                    Campus-wide · students, lecturers and admins
-                  </span>
-                </div>
-                <Button
-                  type="button"
-                  className="bg-blue-600 text-white hover:bg-blue-500 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-500 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-60 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
-                  onClick={() => {
-                    setActiveMention(null);
-                    void feed.createPost();
-                  }}
-                  disabled={
-                    feed.isCreating
-                    || (!feed.draftContent.trim()
-                      && feed.selectedMedia.length === 0)
-                  }
-                >
-                  {feed.isCreating ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                  Post
-                </Button>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <CampusPostComposer
+        activeMention={activeMention}
+        composerError={feed.composerError}
+        draftContent={feed.draftContent}
+        isCreating={feed.isCreating}
+        isMentionLoading={isMentionLoading}
+        mentionSuggestions={mentionSuggestions}
+        onCreatePost={() => {
+          setActiveMention(null);
+          void feed.createPost();
+        }}
+        onDraftChange={feed.setDraftContent}
+        onMentionChange={updateActiveMention}
+        onMentionSelect={insertMentionSuggestion}
+        onRemoveSelectedMedia={feed.removeSelectedMedia}
+        onSelectMedia={feed.selectMedia}
+        profileAvatarUrl={profile?.avatar_url}
+        profileName={profile?.full_name}
+        selectedMedia={feed.selectedMedia}
+        textareaRef={composerTextareaRef}
+      />
 
       {feed.newPostsAvailable && (
         <button
@@ -910,7 +553,7 @@ export function CampusFeed() {
           onClick={() => void feed.refreshPosts()}
           className="w-full rounded-full border bg-primary/5 px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
         >
-          New campus posts are available — show latest
+          New campus posts are available 鈥?show latest
         </button>
       )}
 
@@ -988,8 +631,8 @@ export function CampusFeed() {
                     </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {formatCampusPostTime(post.createdAt)}
-                      {post.updatedAt !== post.createdAt ? " · Edited" : ""}
-                      {" · Campus"}
+                      {post.updatedAt !== post.createdAt ? " 路 Edited" : ""}
+                      {" 路 Campus"}
                     </p>
                   </div>
 
@@ -1059,7 +702,13 @@ export function CampusFeed() {
                           autoFocus
                           aria-label="Edit post content"
                         />
-                        {renderMentionSuggestions("editPost")}
+                        <CampusMentionSuggestions
+                          activeMention={activeMention}
+                          isLoading={isMentionLoading}
+                          onSelect={insertMentionSuggestion}
+                          suggestions={mentionSuggestions}
+                          target="editPost"
+                        />
                       </div>
                       {(editAttachments.length > 0
                         || editSelectedMedia.length > 0) && (
@@ -1356,9 +1005,9 @@ export function CampusFeed() {
                       <p className="text-xs text-muted-foreground">
                         {formatCampusPostTime(activePost.createdAt)}
                         {activePost.updatedAt !== activePost.createdAt
-                          ? " · Edited"
+                          ? " 路 Edited"
                           : ""}
-                        {" · Campus"}
+                        {" 路 Campus"}
                       </p>
                     </div>
                   </div>
@@ -1526,7 +1175,7 @@ export function CampusFeed() {
                                     )}
                                     <div className="flex items-center justify-between gap-2">
                                       <div className="flex items-center gap-1">
-                                        <ForumEmojiPicker
+                                        <LazyForumEmojiPicker
                                           onSelect={emoji =>
                                             setEditCommentDraft(current =>
                                               current.length + emoji.length <= 2000
@@ -1677,7 +1326,7 @@ export function CampusFeed() {
                             <span className="ml-3 mt-1 block text-[10px] text-muted-foreground">
                               {formatCampusPostTime(comment.createdAt)}
                               {comment.updatedAt !== comment.createdAt
-                                ? " · Edited"
+                                ? " 路 Edited"
                                 : ""}
                             </span>
                           </div>
@@ -1749,7 +1398,7 @@ export function CampusFeed() {
                       className="min-w-0 flex-1 rounded-full border-0 bg-transparent shadow-none focus-visible:ring-0"
                       autoFocus
                     />
-                    <ForumEmojiPicker
+                    <LazyForumEmojiPicker
                       onSelect={emoji =>
                         setCommentDrafts(current => {
                           const draft = current[activePost.id] || "";
@@ -1809,28 +1458,12 @@ export function CampusFeed() {
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={Boolean(lightboxAttachment)}
+      <CampusFeedLightboxDialog
+        attachment={lightboxAttachment}
         onOpenChange={open => {
           if (!open) setLightboxAttachment(null);
         }}
-      >
-        <DialogContent className="border-0 bg-black/95 p-2 sm:max-w-6xl">
-          <DialogTitle className="sr-only">
-            {lightboxAttachment?.name || "Campus post image"}
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            Full-size preview of an image attached to a campus post.
-          </DialogDescription>
-          {lightboxAttachment?.url && (
-            <img
-              src={lightboxAttachment.url}
-              alt={lightboxAttachment.name}
-              className="max-h-[88vh] w-full object-contain"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      />
     </section>
   );
 }

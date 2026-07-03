@@ -1,19 +1,11 @@
-import { lazy, Suspense, type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, type ChangeEvent, useCallback, useEffect, useState } from "react";
 import {
   BookOpen,
   CalendarDays,
-  CheckCircle2,
   ClipboardList,
-  FileSpreadsheet,
   GraduationCap,
-  Info,
   Loader2,
-  Plus,
   RefreshCw,
-  Search,
-  Trash2,
-  UploadCloud,
-  UserRoundCheck,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSearchParams } from "react-router-dom";
@@ -40,23 +32,10 @@ import {
   type StudentStudyPlanAssignment,
   type StudyPlanVersion,
 } from "@/data/academicPlanningRepository";
-import {
-  parseStudyPlanFiles,
-  type ParsedStudyPlanImport,
-} from "@/data/studyPlanImportParser";
-import {
-  parseLecturerAssignmentFile,
-  type ParsedLecturerAssignmentRow,
-} from "@/data/lecturerAssignmentImportParser";
-import {
-  parseStudentStudyPlanAssignmentFile,
-  type ParsedStudentStudyPlanAssignmentRow,
-} from "@/data/studentStudyPlanAssignmentImportParser";
-import { getProgrammeKeyFromProgramme } from "@/data/studyPlanUtils";
-import {
-  parseAcademicCalendarPdf,
-  type ParsedAcademicCalendar,
-} from "@/data/academicCalendarParser";
+import type { ParsedStudyPlanImport } from "@/data/studyPlanImportParser";
+import type { ParsedLecturerAssignmentRow } from "@/data/lecturerAssignmentImportParser";
+import type { ParsedStudentStudyPlanAssignmentRow } from "@/data/studentStudyPlanAssignmentImportParser";
+import type { ParsedAcademicCalendar } from "@/data/academicCalendarParser";
 import {
   getAcademicTermOptions,
   getCourseCatalogTemplates,
@@ -66,33 +45,51 @@ import {
   type CourseTemplateSummary,
   type CurrentEnrollmentTerm,
 } from "@/data/courseRepository";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../ui/accordion";
 import { Alert, AlertDescription } from "../ui/alert";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { Checkbox } from "../ui/checkbox";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { Input } from "../ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../ui/dialog";
-import { Label } from "../ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select";
+import { Card, CardContent } from "../ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { StaffAcademicPlanningProvider } from "./academic-planning/AcademicPlanningContext";
+import { AppErrorBoundary } from "../common/AppErrorBoundary";
+import { StaffAcademicPlanningProvider } from "./academic-planning/AcademicPlanningProvider";
+import type {
+  AssignmentImportPreview,
+  AssignmentImportPreviewRow,
+  ImportTemplateHelpType,
+  StaffAcademicPlanningContextValue,
+  StudentAssignmentImportPreview,
+  StudentAssignmentImportPreviewRow,
+} from "./academic-planning/AcademicPlanningContext";
 import { ImportTemplateHelpDialog } from "./academic-planning/ImportTemplateHelpDialog";
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "../ui/table";
+import {
+  ALL_FILTER_VALUE,
+  ASSIGNMENT_COURSES_PAGE_SIZE,
+  STUDENT_ASSIGNMENT_PAGE_SIZE,
+  academicCalendarStatusClassName,
+  activeSegmentClassName,
+  assignmentStatusLabel,
+  compareTermCodes,
+  courseCodeAliases,
+  courseTemplateLabel,
+  formatDateLabel,
+  lecturerLabel,
+  nextAcademicCalendarYearLabel,
+  normalizeStudentIdentifierForAssignment,
+  normalizeTermCode,
+  resolveAcademicTermStatus,
+  studentAssignmentStatusLabel,
+  termLabelFromCode,
+  versionLabel,
+  type AssignmentStatusFilter,
+  type StudentAssignmentStatusFilter,
+} from "./academic-planning/academicPlanningUtils";
+import {
+  useAcademicCalendarView,
+  useAcademicPlanningLookups,
+  useClassAssignmentView,
+  useStudentStudyPlanAssignmentView,
+  useStudyPlanVersionView,
+  type AssignmentListItem,
+} from "./academic-planning/useAcademicPlanningViews";
 
 const StudyPlansTabContent = lazy(() =>
   import("./academic-planning/StudyPlansTabContent").then(module => ({ default: module.StudyPlansTabContent })),
@@ -116,236 +113,12 @@ const emptyCourseForm = {
   termCode: "2026B",
 };
 
-const ALL_FILTER_VALUE = "all";
-const ASSIGNMENT_COURSES_PAGE_SIZE = 8;
-const STUDENT_ASSIGNMENT_PAGE_SIZE = 10;
-const activeSegmentClassName = "bg-blue-600 text-white shadow-sm hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600";
 const academicPlanningTabs = ["study-plans", "academic-calendar", "student-study-plans", "assignments"] as const;
 type AcademicPlanningTab = (typeof academicPlanningTabs)[number];
 const parseAcademicPlanningTab = (value?: string | null): AcademicPlanningTab =>
   academicPlanningTabs.includes(value as AcademicPlanningTab)
     ? (value as AcademicPlanningTab)
     : "study-plans";
-type StudentAssignmentStatusFilter = "unassigned" | "assigned" | "all";
-
-type AssignmentStatusFilter = "need" | "assigned" | "all";
-type ImportTemplateHelpType = "study-plan" | "student-assignment" | "lecturer-assignment";
-type AcademicCalendarStatus = "planned" | "active" | "closed";
-
-type AssignmentListItem = {
-  assignedLecturerIds: string[];
-  assignments: CourseAssignmentSummary[];
-  assignable: boolean;
-  categories: string[];
-  courseCode: string;
-  courseId: string | null;
-  courseName: string;
-  creditHours: number | null;
-  issue: string | null;
-  key: string;
-  programmeGroup: string;
-  programmeLabel: string;
-  programmes: string[];
-  plannedRows: PlannedAssignmentCourse[];
-};
-
-type AssignmentImportPreviewRow = ParsedLecturerAssignmentRow & {
-  course?: CourseTemplateSummary;
-  lecturer?: LecturerOption;
-  message: string;
-  status: "ready" | "invalid" | "already-assigned";
-};
-
-type AssignmentImportPreview = {
-  fileName: string;
-  rows: AssignmentImportPreviewRow[];
-  warnings: string[];
-};
-
-type StudentAssignmentImportPreviewRow = ParsedStudentStudyPlanAssignmentRow & {
-  message: string;
-  status: "ready" | "invalid" | "already-assigned";
-  student?: AssignableStudent;
-  studyPlanVersion?: StudyPlanVersion;
-};
-
-type StudentAssignmentImportPreview = {
-  fileName: string;
-  rows: StudentAssignmentImportPreviewRow[];
-  warnings: string[];
-};
-
-const normalizeAssignmentCourseCode = (value?: string | null) =>
-  String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/\s*\/\s*/g, "/");
-
-const courseCodeAliases = (value?: string | null) => {
-  const normalized = normalizeAssignmentCourseCode(value);
-  if (!normalized) return [];
-  return Array.from(new Set([normalized, ...normalized.split("/").map(code => code.trim()).filter(Boolean)]));
-};
-
-type AssignmentTermOption = {
-  academicTerm: AcademicTermOption | null;
-  code: string;
-  label: string;
-};
-
-const normalizeTermCode = (value?: string | null) => {
-  const normalized = String(value || "").trim().toUpperCase();
-  const match = normalized.match(/^(\d{4})([ABC])$/);
-  return match ? `${match[1]}${match[2]}` : null;
-};
-
-const termSortValue = (termCode?: string | null) => {
-  const normalized = normalizeTermCode(termCode);
-  if (!normalized) return Number.MAX_SAFE_INTEGER;
-  const year = Number(normalized.slice(0, 4));
-  const semester = normalized.slice(4);
-  const semesterIndex = semester === "A" ? 0 : semester === "B" ? 1 : 2;
-  return year * 3 + semesterIndex;
-};
-
-const compareTermCodes = (left?: string | null, right?: string | null) =>
-  termSortValue(left) - termSortValue(right) || String(left || "").localeCompare(String(right || ""));
-
-const termLabelFromCode = (termCode: string) => {
-  const normalized = normalizeTermCode(termCode) || termCode;
-  const year = normalized.slice(0, 4);
-  const semester = normalized.slice(4);
-  return `${normalized} - Semester ${semester} ${year}`;
-};
-
-const studyPlanVersionTermCode = (version: StudyPlanVersion) =>
-  normalizeTermCode(version.effective_from_term_code) ||
-  normalizeTermCode(version.intake_year && version.intake_semester ? `${version.intake_year}${version.intake_semester}` : null);
-
-const assignmentStatusLabel: Record<AssignmentStatusFilter, string> = {
-  need: "Need Assignment",
-  assigned: "Assigned",
-  all: "All",
-};
-
-const versionIntakeLabel = (version: StudyPlanVersion) =>
-  `${version.intake_year || "Any"}${version.intake_semester || ""}${version.track_code ? ` ${version.track_code}` : ""}`;
-
-const versionLabel = (version: StudyPlanVersion) =>
-  `${version.programme_key} ${versionIntakeLabel(version)} - ${version.version_code}`;
-
-const studentAssignmentStatusLabel: Record<StudentAssignmentStatusFilter, string> = {
-  unassigned: "Need Assignment",
-  assigned: "Assigned",
-  all: "All",
-};
-
-const normalizeStudentIdentifierForAssignment = (value?: string | null) =>
-  String(value || "").trim().toLowerCase();
-
-const studentIdentifierKeys = (student: AssignableStudent) => {
-  const email = normalizeStudentIdentifierForAssignment(student.email);
-  const localPart = email.includes("@") ? email.split("@")[0] : email;
-  return Array.from(new Set([student.id.toLowerCase(), email, localPart].filter(Boolean)));
-};
-
-const courseTemplateLabel = (course?: CourseTemplateSummary) => {
-  if (!course) return "Unknown course";
-  return `${course.course_code || course.code} - ${course.name}`;
-};
-
-const termLabel = (term?: AcademicTermOption) => {
-  if (!term) return "Unknown semester";
-  return `${term.code} - ${term.name}`;
-};
-
-const isCalendarBackedAcademicTerm = (term?: AcademicTermOption | null) => Boolean(
-  term?.code
-  && (term.starts_at || term.teaching_starts_at)
-  && (term.ends_at || term.teaching_ends_at),
-);
-
-const formatDateLabel = (value?: string | null) => {
-  if (!value) return "-";
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-};
-
-const parseAcademicTermDate = (value?: string | null) => {
-  if (!value) return null;
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return null;
-  date.setHours(0, 0, 0, 0);
-  return date;
-};
-
-const todayDateOnly = () => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return today;
-};
-
-const academicTermStartDate = (term: AcademicTermOption) =>
-  parseAcademicTermDate(term.teaching_starts_at || term.starts_at);
-
-const academicTermEndDate = (term: AcademicTermOption) =>
-  parseAcademicTermDate(term.teaching_ends_at || term.ends_at);
-
-const resolveAcademicTermStatus = (term: AcademicTermOption): AcademicCalendarStatus => {
-  const today = todayDateOnly();
-  const startsAt = academicTermStartDate(term);
-  const endsAt = academicTermEndDate(term);
-
-  if (endsAt && endsAt < today) return "closed";
-  if (startsAt && startsAt <= today && (!endsAt || endsAt >= today)) return "active";
-  if (startsAt && startsAt > today) return "planned";
-  return term.status === "active" || term.status === "closed" || term.status === "planned"
-    ? term.status
-    : "planned";
-};
-
-const nextAcademicCalendarYearLabel = (term?: AcademicTermOption | null) => {
-  const normalized = normalizeTermCode(term?.code);
-  if (!normalized) return "next";
-  const year = Number(normalized.slice(0, 4));
-  const semester = normalized.slice(4);
-  return String(semester === "C" ? year + 1 : year);
-};
-const academicCalendarStatusClassName: Record<AcademicCalendarStatus, string> = {
-  active: "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300",
-  closed: "bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-300",
-  planned: "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300",
-};
-
-const buildAssignmentTermOptions = (
-  academicTerms: AcademicTermOption[],
-  currentTermCode?: string | null,
-): AssignmentTermOption[] => {
-  const currentSortValue = normalizeTermCode(currentTermCode)
-    ? termSortValue(currentTermCode)
-    : null;
-
-  return academicTerms
-    .filter(isCalendarBackedAcademicTerm)
-    .map(term => ({ code: normalizeTermCode(term.code), term }))
-    .filter((entry): entry is { code: string; term: AcademicTermOption } => Boolean(entry.code))
-    .filter(({ code }) => currentSortValue === null || termSortValue(code) >= currentSortValue)
-    .sort((left, right) => compareTermCodes(left.code, right.code))
-    .map(({ code, term }) => ({
-      academicTerm: term,
-      code,
-      label: termLabel(term),
-    }));
-};
-
-const lecturerLabel = (lecturer?: LecturerOption) =>
-  lecturer?.full_name || "Unknown lecturer";
-
 function AcademicPlanningTabFallback() {
   return (
     <div className="flex min-h-[220px] items-center justify-center rounded-lg border">
@@ -428,454 +201,109 @@ export function StaffAcademicPlanning() {
     nextParams.set("tab", nextTab);
     setSearchParams(nextParams, { replace: true });
   };
-  const selectedVersion = useMemo(
-    () => versions.find(version => version.id === selectedVersionId) || null,
-    [selectedVersionId, versions],
-  );
+  const {
+    courseByCode,
+    courseById,
+    lecturerByEmail,
+    lecturerById,
+    lecturerByName,
+    studentAssignmentByStudentId,
+    studentByIdentifier,
+    termById,
+    versionByCode,
+    versionById,
+  } = useAcademicPlanningLookups({
+    courseTemplates,
+    lecturers,
+    studentAssignments,
+    students,
+    terms,
+    versions,
+  });
 
-  const selectedStudentAssignmentVersion = useMemo(
-    () => versions.find(version => version.id === selectedStudentAssignmentVersionId) || null,
-    [selectedStudentAssignmentVersionId, versions],
-  );
+  const {
+    filteredVersionCourses,
+    filteredVersions,
+    importPreviewCoursesByTerm,
+    importTermSummary,
+    selectedVersion,
+    versionCourseGroups,
+    versionCourseTermOptions,
+    versionIntakeOptions,
+    versionLevelOptions,
+    versionProgrammeOptions,
+  } = useStudyPlanVersionView({
+    selectedVersionId,
+    studyPlanImportPreview,
+    versionCourseTermFilter,
+    versionCourses,
+    versionIntakeFilter,
+    versionLevelFilter,
+    versionProgrammeFilter,
+    versions,
+  });
 
-  const studentAssignmentByStudentId = useMemo(() => {
-    const map = new Map<string, StudentStudyPlanAssignment>();
-    for (const assignment of studentAssignments) {
-      if (assignment.status === "active") map.set(assignment.student_id, assignment);
-    }
-    return map;
-  }, [studentAssignments]);
-
-  const versionById = useMemo(
-    () => new Map(versions.map(version => [version.id, version])),
-    [versions],
-  );
-
-  const versionByCode = useMemo(
-    () => new Map(versions.map(version => [version.version_code.trim().toLowerCase(), version])),
-    [versions],
-  );
-
-  const studentByIdentifier = useMemo(() => {
-    const map = new Map<string, AssignableStudent>();
-    for (const student of students) {
-      for (const key of studentIdentifierKeys(student)) {
-        if (!map.has(key)) map.set(key, student);
-      }
-    }
-    return map;
-  }, [students]);
-
-  const versionProgrammeOptions = useMemo(
-    () => Array.from(new Set(versions.map(version => version.programme_key))).sort(),
-    [versions],
-  );
-
-  const versionIntakeOptions = useMemo(
-    () => Array.from(new Set(versions.map(versionIntakeLabel))).sort(),
-    [versions],
-  );
-
-  const versionLevelOptions = useMemo(
-    () => Array.from(new Set(versions.map(version => version.level))).sort(),
-    [versions],
-  );
-
-  const filteredVersions = useMemo(
-    () =>
-      versions.filter(version => {
-        const programmeMatches =
-          versionProgrammeFilter === ALL_FILTER_VALUE ||
-          version.programme_key === versionProgrammeFilter;
-        const intakeMatches =
-          versionIntakeFilter === ALL_FILTER_VALUE ||
-          versionIntakeLabel(version) === versionIntakeFilter;
-        const levelMatches =
-          versionLevelFilter === ALL_FILTER_VALUE || version.level === versionLevelFilter;
-        return programmeMatches && intakeMatches && levelMatches;
-      }),
-    [versionIntakeFilter, versionLevelFilter, versionProgrammeFilter, versions],
-  );
-
-  const studentProgrammeOptions = useMemo(
-    () => Array.from(new Set(students.map(student => student.programme || "No programme"))).sort(),
-    [students],
-  );
-
-  const studentAssignmentProgrammeKey = useMemo(
-    () => studentAssignmentProgrammeFilter === ALL_FILTER_VALUE
-      ? null
-      : getProgrammeKeyFromProgramme(studentAssignmentProgrammeFilter),
-    [studentAssignmentProgrammeFilter],
-  );
-
-  const studentAssignmentVersionOptions = useMemo(() => {
-    if (studentAssignmentProgrammeFilter === ALL_FILTER_VALUE) return versions;
-    if (studentAssignmentProgrammeKey) {
-      return versions.filter(version => version.programme_key === studentAssignmentProgrammeKey);
-    }
-
-    const normalizedProgramme = studentAssignmentProgrammeFilter.trim().toLowerCase();
-    return versions.filter(version => version.programme_name.trim().toLowerCase() === normalizedProgramme);
-  }, [studentAssignmentProgrammeFilter, studentAssignmentProgrammeKey, versions]);
-
-  const studentAssignmentRows = useMemo(() => {
-    const search = studentAssignmentSearchTerm.trim().toLowerCase();
-    return students
-      .map(student => {
-        const assignment = studentAssignmentByStudentId.get(student.id) || null;
-        const assignedVersion = assignment ? versionById.get(assignment.study_plan_version_id) || null : null;
-        return { assignment, assignedVersion, student };
-      })
-      .filter(row => {
-        const assigned = Boolean(row.assignment);
-        const statusMatches =
-          studentAssignmentStatusFilter === "all" ||
-          (studentAssignmentStatusFilter === "assigned" && assigned) ||
-          (studentAssignmentStatusFilter === "unassigned" && !assigned);
-        const programmeMatches =
-          studentAssignmentProgrammeFilter === ALL_FILTER_VALUE ||
-          (row.student.programme || "No programme") === studentAssignmentProgrammeFilter;
-        const searchMatches =
-          !search ||
-          row.student.full_name.toLowerCase().includes(search) ||
-          String(row.student.email || "").toLowerCase().includes(search) ||
-          String(row.student.programme || "").toLowerCase().includes(search) ||
-          String(row.assignedVersion?.version_code || "").toLowerCase().includes(search);
-        return statusMatches && programmeMatches && searchMatches;
-      });
-  }, [studentAssignmentByStudentId, studentAssignmentProgrammeFilter, studentAssignmentSearchTerm, studentAssignmentStatusFilter, students, versionById]);
-
-  const studentAssignmentPageCount = Math.max(
-    1,
-    Math.ceil(studentAssignmentRows.length / STUDENT_ASSIGNMENT_PAGE_SIZE),
-  );
-  const studentAssignmentPageStartIndex = (studentAssignmentPage - 1) * STUDENT_ASSIGNMENT_PAGE_SIZE;
-  const paginatedStudentAssignmentRows = studentAssignmentRows.slice(
+  const {
+    paginatedStudentAssignmentRows,
+    selectedStudentAssignmentVersion,
+    studentAssignmentPageCount,
     studentAssignmentPageStartIndex,
-    studentAssignmentPageStartIndex + STUDENT_ASSIGNMENT_PAGE_SIZE,
-  );
+    studentAssignmentRows,
+    studentAssignmentSummary,
+    studentAssignmentVersionOptions,
+    studentProgrammeOptions,
+    visibleStudentIds,
+    visibleStudentSelectionState,
+  } = useStudentStudyPlanAssignmentView({
+    selectedStudentAssignmentVersionId,
+    selectedStudentIds,
+    studentAssignmentByStudentId,
+    studentAssignmentPage,
+    studentAssignmentProgrammeFilter,
+    studentAssignmentSearchTerm,
+    studentAssignmentStatusFilter,
+    students,
+    versionById,
+    versions,
+  });
 
-  const visibleStudentIds = useMemo(
-    () => paginatedStudentAssignmentRows.map(row => row.student.id),
-    [paginatedStudentAssignmentRows],
-  );
+  const {
+    assignmentTermOptions,
+    calendarTerms,
+    isAcademicCalendarExpired,
+    latestCalendarTerm,
+    selectedAssignmentTerm,
+    selectedAssignmentTermOption,
+    visibleCalendarTerms,
+  } = useAcademicCalendarView({
+    assignmentTermCode: assignmentForm.termCode,
+    currentEnrollmentTermCode: currentEnrollmentTerm?.code,
+    showClosedAcademicTerms,
+    terms,
+  });
 
-  const visibleStudentSelectionState = useMemo(() => {
-    if (visibleStudentIds.length === 0) return false;
-    const selectedVisibleCount = visibleStudentIds.filter(id => selectedStudentIds.includes(id)).length;
-    if (selectedVisibleCount === 0) return false;
-    return selectedVisibleCount === visibleStudentIds.length ? true : "indeterminate";
-  }, [selectedStudentIds, visibleStudentIds]);
-
-  const studentAssignmentSummary = useMemo(() => {
-    const assigned = students.filter(student => studentAssignmentByStudentId.has(student.id)).length;
-    return {
-      assigned,
-      need: Math.max(0, students.length - assigned),
-      total: students.length,
-    };
-  }, [studentAssignmentByStudentId, students]);
-
-  const importTermSummary = useMemo(() => {
-    if (!studyPlanImportPreview) return [];
-    const termCounts = new Map<string, number>();
-    for (const course of studyPlanImportPreview.courses) {
-      termCounts.set(course.termCode, (termCounts.get(course.termCode) || 0) + 1);
-    }
-    return Array.from(termCounts.entries())
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([termCode, count]) => ({ termCode, count }));
-  }, [studyPlanImportPreview]);
-
-  const importPreviewCoursesByTerm = useMemo(() => {
-    if (!studyPlanImportPreview) return [];
-    const grouped = new Map<string, ParsedStudyPlanImport["courses"]>();
-
-    for (const course of studyPlanImportPreview.courses) {
-      const termCourses = grouped.get(course.termCode) || [];
-      termCourses.push(course);
-      grouped.set(course.termCode, termCourses);
-    }
-
-    return Array.from(grouped.entries())
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([termCode, courses]) => ({
-        termCode,
-        courses: courses.slice().sort((left, right) => left.position - right.position),
-      }));
-  }, [studyPlanImportPreview]);
-
-  const versionCourseTermOptions = useMemo(
-    () => Array.from(new Set(versionCourses.map(course => course.term_code).filter(Boolean))).sort(),
-    [versionCourses],
-  );
-
-  const filteredVersionCourses = useMemo(
-    () =>
-      versionCourseTermFilter === ALL_FILTER_VALUE
-        ? versionCourses
-        : versionCourses.filter(course => course.term_code === versionCourseTermFilter),
-    [versionCourseTermFilter, versionCourses],
-  );
-
-  const versionCourseGroups = useMemo(() => {
-    const grouped = new Map<string, DbStudyPlanCourse[]>();
-
-    for (const course of filteredVersionCourses) {
-      const termCode = course.term_code || "Unassigned";
-      const courses = grouped.get(termCode) || [];
-      courses.push(course);
-      grouped.set(termCode, courses);
-    }
-
-    return Array.from(grouped.entries())
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([termCode, courses]) => {
-        const sortedCourses = courses.slice().sort((left, right) => {
-          const positionDiff = (left.position || 0) - (right.position || 0);
-          return positionDiff || left.course_name.localeCompare(right.course_name);
-        });
-        const totalCredits = sortedCourses.reduce(
-          (sum, course) => sum + (Number(course.credit_hours) || 0),
-          0,
-        );
-
-        return { courses: sortedCourses, termCode, totalCredits };
-      });
-  }, [filteredVersionCourses]);
-
-
-
-
-
-  const courseById = useMemo(
-    () => new Map(courseTemplates.map(course => [course.id, course])),
-    [courseTemplates],
-  );
-  const termById = useMemo(
-    () => new Map(terms.map(term => [term.id, term])),
-    [terms],
-  );
-  const lecturerById = useMemo(
-    () => new Map(lecturers.map(lecturer => [lecturer.id, lecturer])),
-    [lecturers],
-  );
-
-  const lecturerByEmail = useMemo(() => {
-    const map = new Map<string, LecturerOption>();
-    for (const lecturer of lecturers) {
-      const email = String(lecturer.email || "").trim().toLowerCase();
-      if (email) map.set(email, lecturer);
-    }
-    return map;
-  }, [lecturers]);
-  const lecturerByName = useMemo(() => {
-    const map = new Map<string, LecturerOption>();
-    for (const lecturer of lecturers) {
-      const name = lecturer.full_name.trim().toLowerCase();
-      if (name) map.set(name, lecturer);
-    }
-    return map;
-  }, [lecturers]);
-
-  const courseByCode = useMemo(() => {
-    const map = new Map<string, CourseTemplateSummary>();
-    for (const course of courseTemplates) {
-      for (const code of [...courseCodeAliases(course.course_code), ...courseCodeAliases(course.code)]) {
-        if (!map.has(code)) map.set(code, course);
-      }
-    }
-    return map;
-  }, [courseTemplates]);
-
-  const calendarTerms = useMemo(
-    () => terms.filter(isCalendarBackedAcademicTerm),
-    [terms],
-  );
-
-  const visibleCalendarTerms = useMemo(
-    () => calendarTerms.filter(term => showClosedAcademicTerms || resolveAcademicTermStatus(term) !== "closed"),
-    [calendarTerms, showClosedAcademicTerms],
-  );
-
-  const latestCalendarTerm = useMemo(
-    () => calendarTerms.slice().sort((left, right) => compareTermCodes(left.code, right.code)).at(-1) || null,
-    [calendarTerms],
-  );
-
-  const isAcademicCalendarExpired = Boolean(
-    latestCalendarTerm && resolveAcademicTermStatus(latestCalendarTerm) === "closed",
-  );
-
-  const assignmentTermOptions = useMemo(
-    () => buildAssignmentTermOptions(calendarTerms, currentEnrollmentTerm?.code),
-    [calendarTerms, currentEnrollmentTerm?.code],
-  );
-
-  const selectedAssignmentTermOption = useMemo(
-    () => assignmentTermOptions.find(term => term.code === assignmentForm.termCode) || null,
-    [assignmentForm.termCode, assignmentTermOptions],
-  );
-
-  const selectedAssignmentTerm = selectedAssignmentTermOption?.academicTerm || null;
-
-  const assignmentItems = useMemo<AssignmentListItem[]>(() => {
-    const assignmentsByCourseId = new Map<string, CourseAssignmentSummary[]>();
-    for (const assignment of assignments) {
-      if (!assignment.course_id) continue;
-      const rows = assignmentsByCourseId.get(assignment.course_id) || [];
-      rows.push(assignment);
-      assignmentsByCourseId.set(assignment.course_id, rows);
-    }
-
-    const grouped = new Map<string, AssignmentListItem & { categorySet: Set<string>; programmeSet: Set<string> }>();
-
-    for (const plannedCourse of plannedAssignmentCourses) {
-      const matchingCourse = courseCodeAliases(plannedCourse.course_code)
-        .map(code => courseByCode.get(code))
-        .find(Boolean);
-      const key = matchingCourse?.id ? `course:${matchingCourse.id}` : `plan:${plannedCourse.id}`;
-      const courseCode = normalizeAssignmentCourseCode(plannedCourse.course_code || matchingCourse?.course_code || matchingCourse?.code) || "No code";
-      const existing = grouped.get(key);
-
-      if (existing) {
-        existing.plannedRows.push(plannedCourse);
-        existing.programmeSet.add(plannedCourse.programme_key);
-        if (plannedCourse.category) existing.categorySet.add(plannedCourse.category);
-        continue;
-      }
-
-      const courseAssignments = matchingCourse?.id
-        ? assignmentsByCourseId.get(matchingCourse.id) || []
-        : [];
-      const programmeSet = new Set<string>([plannedCourse.programme_key]);
-      const categorySet = new Set<string>();
-      if (plannedCourse.category) categorySet.add(plannedCourse.category);
-      const issue = !plannedCourse.course_code
-        ? "No course code in study plan"
-        : plannedCourse.is_placeholder
-          ? "Placeholder course"
-          : !matchingCourse
-            ? "Course catalog match missing"
-            : null;
-
-      grouped.set(key, {
-        assignedLecturerIds: courseAssignments.map(assignment => assignment.owner_id).filter(Boolean) as string[],
-        assignments: courseAssignments,
-        assignable: Boolean(matchingCourse?.id && !plannedCourse.is_placeholder),
-        categories: [],
-        categorySet,
-        courseCode,
-        courseId: matchingCourse?.id || null,
-        courseName: matchingCourse?.name || plannedCourse.course_name,
-        creditHours: matchingCourse?.credit_hours ?? matchingCourse?.credits ?? plannedCourse.credit_hours,
-        issue,
-        key,
-        plannedRows: [plannedCourse],
-        programmeGroup: plannedCourse.programme_key,
-        programmeLabel: plannedCourse.programme_key,
-        programmes: [],
-        programmeSet,
-      });
-    }
-
-    return Array.from(grouped.values())
-      .map(item => {
-        const programmes = Array.from(item.programmeSet).sort();
-        return {
-          ...item,
-          categories: Array.from(item.categorySet).sort(),
-          programmeGroup: programmes.length > 1 ? "Shared Courses" : programmes[0] || "Unmapped",
-          programmeLabel: programmes.join(" / ") || "Unmapped",
-          programmes,
-        };
-      })
-      .sort((left, right) =>
-        left.programmeGroup.localeCompare(right.programmeGroup) ||
-        left.courseCode.localeCompare(right.courseCode) ||
-        left.courseName.localeCompare(right.courseName),
-      );
-  }, [assignments, courseByCode, plannedAssignmentCourses]);
-
-  const assignmentItemByCourseId = useMemo(() => {
-    const map = new Map<string, AssignmentListItem>();
-    for (const item of assignmentItems) {
-      if (item.courseId && !map.has(item.courseId)) map.set(item.courseId, item);
-    }
-    return map;
-  }, [assignmentItems]);
-
-  const assignmentProgrammeOptions = useMemo(
-    () => Array.from(new Set(assignmentItems.map(item => item.programmeGroup))).sort(),
-    [assignmentItems],
-  );
-
-  const filteredAssignmentItems = useMemo(() => {
-    const search = assignmentSearchTerm.trim().toLowerCase();
-    return assignmentItems.filter(item => {
-      const assigned = item.assignments.length > 0;
-      const statusMatches =
-        assignmentStatusFilter === "all" ||
-        (assignmentStatusFilter === "assigned" && assigned) ||
-        (assignmentStatusFilter === "need" && item.assignable && !assigned);
-      const programmeMatches =
-        assignmentProgrammeFilter === ALL_FILTER_VALUE || item.programmeGroup === assignmentProgrammeFilter;
-      const searchMatches =
-        !search ||
-        item.courseCode.toLowerCase().includes(search) ||
-        item.courseName.toLowerCase().includes(search) ||
-        item.programmeLabel.toLowerCase().includes(search);
-      return statusMatches && programmeMatches && searchMatches;
-    });
-  }, [assignmentItems, assignmentProgrammeFilter, assignmentSearchTerm, assignmentStatusFilter]);
-
-  const assignmentPageCount = Math.max(
-    1,
-    Math.ceil(filteredAssignmentItems.length / ASSIGNMENT_COURSES_PAGE_SIZE),
-  );
-  const assignmentPageStartIndex = (assignmentPage - 1) * ASSIGNMENT_COURSES_PAGE_SIZE;
-  const paginatedAssignmentItems = filteredAssignmentItems.slice(
+  const {
+    assignmentItemByCourseId,
+    assignmentItems,
+    assignmentPageCount,
     assignmentPageStartIndex,
-    assignmentPageStartIndex + ASSIGNMENT_COURSES_PAGE_SIZE,
-  );
-
-  const groupedAssignmentItems = useMemo(() => {
-    const groups = new Map<string, AssignmentListItem[]>();
-    for (const item of paginatedAssignmentItems) {
-      const rows = groups.get(item.programmeGroup) || [];
-      rows.push(item);
-      groups.set(item.programmeGroup, rows);
-    }
-    return Array.from(groups.entries()).map(([group, items]) => ({ group, items }));
-  }, [paginatedAssignmentItems]);
-
-  const assignmentSummary = useMemo(() => {
-    const assignable = assignmentItems.filter(item => item.assignable);
-    const assigned = assignable.filter(item => item.assignments.length > 0);
-    return {
-      assigned: assigned.length,
-      need: assignable.length - assigned.length,
-      planned: assignmentItems.length,
-    };
-  }, [assignmentItems]);
-
-  const selectedAssignmentItems = useMemo(
-    () => assignmentItems.filter(item => selectedAssignmentKeys.includes(item.key) && item.assignable),
-    [assignmentItems, selectedAssignmentKeys],
-  );
-
-  const visibleAssignableKeys = useMemo(
-    () => paginatedAssignmentItems.filter(item => item.assignable).map(item => item.key),
-    [paginatedAssignmentItems],
-  );
-
-  const visibleSelectionState = useMemo(() => {
-    if (visibleAssignableKeys.length === 0) return false;
-    const selectedVisibleCount = visibleAssignableKeys.filter(key => selectedAssignmentKeys.includes(key)).length;
-    if (selectedVisibleCount === 0) return false;
-    return selectedVisibleCount === visibleAssignableKeys.length ? true : "indeterminate";
-  }, [selectedAssignmentKeys, visibleAssignableKeys]);
+    assignmentProgrammeOptions,
+    assignmentSummary,
+    filteredAssignmentItems,
+    groupedAssignmentItems,
+    selectedAssignmentItems,
+    visibleAssignableKeys,
+    visibleSelectionState,
+  } = useClassAssignmentView({
+    assignmentPage,
+    assignmentProgrammeFilter,
+    assignmentSearchTerm,
+    assignmentStatusFilter,
+    assignments,
+    courseByCode,
+    plannedAssignmentCourses,
+    selectedAssignmentKeys,
+  });
   const loadAll = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
@@ -1123,6 +551,7 @@ export function StaffAcademicPlanning() {
 
     setIsParsingStudyPlan(true);
     try {
+      const { parseStudyPlanFiles } = await import("@/data/studyPlanImportParser");
       const preview = await parseStudyPlanFiles(selectedFiles);
       setStudyPlanImportPreview(preview);
       setIsStudyPlanPreviewDialogOpen(false);
@@ -1167,6 +596,7 @@ export function StaffAcademicPlanning() {
 
     setIsParsingAcademicCalendar(true);
     try {
+      const { parseAcademicCalendarPdf } = await import("@/data/academicCalendarParser");
       const preview = await parseAcademicCalendarPdf(file);
       setAcademicCalendarPreview(preview);
       notify.success(`Academic calendar preview is ready for ${preview.terms.length} semester${preview.terms.length === 1 ? "" : "s"}.`);
@@ -1365,6 +795,7 @@ export function StaffAcademicPlanning() {
 
     setIsParsingStudentAssignmentImport(true);
     try {
+      const { parseStudentStudyPlanAssignmentFile } = await import("@/data/studentStudyPlanAssignmentImportParser");
       const parsed = await parseStudentStudyPlanAssignmentFile(file);
       const preview = buildStudentAssignmentImportPreview(parsed.rows, parsed.warnings, parsed.fileName);
       setStudentAssignmentImportPreview(preview);
@@ -1542,6 +973,7 @@ export function StaffAcademicPlanning() {
 
     setIsParsingAssignmentImport(true);
     try {
+      const { parseLecturerAssignmentFile } = await import("@/data/lecturerAssignmentImportParser");
       const parsed = await parseLecturerAssignmentFile(file);
       const preview = buildAssignmentImportPreview(parsed.rows, parsed.warnings, parsed.fileName);
       setAssignmentImportPreview(preview);
@@ -1719,7 +1151,7 @@ export function StaffAcademicPlanning() {
     lecturerLabel,
     setTemplateHelpType,
     templateHelpType,
-  };
+  } satisfies StaffAcademicPlanningContextValue;
 
   return (
     <StaffAcademicPlanningProvider value={academicPlanningContextValue}>
@@ -1798,33 +1230,57 @@ export function StaffAcademicPlanning() {
 
           <TabsContent value="study-plans" className="space-y-4">
             {activePlanningTab === "study-plans" && (
-              <Suspense fallback={<AcademicPlanningTabFallback />}>
-                <StudyPlansTabContent />
-              </Suspense>
+              <AppErrorBoundary
+                resetKey={activePlanningTab}
+                title="Study Plans could not be displayed."
+                description="The study plan import and course structure tab hit a render error. Try again or refresh the data."
+              >
+                <Suspense fallback={<AcademicPlanningTabFallback />}>
+                  <StudyPlansTabContent />
+                </Suspense>
+              </AppErrorBoundary>
             )}
           </TabsContent>
 
           <TabsContent value="academic-calendar" className="space-y-4">
             {activePlanningTab === "academic-calendar" && (
-              <Suspense fallback={<AcademicPlanningTabFallback />}>
-                <AcademicCalendarTabContent />
-              </Suspense>
+              <AppErrorBoundary
+                resetKey={activePlanningTab}
+                title="Academic Calendar could not be displayed."
+                description="The calendar tab hit a render error. Try again or refresh the data."
+              >
+                <Suspense fallback={<AcademicPlanningTabFallback />}>
+                  <AcademicCalendarTabContent />
+                </Suspense>
+              </AppErrorBoundary>
             )}
           </TabsContent>
 
           <TabsContent value="student-study-plans" className="space-y-4">
             {activePlanningTab === "student-study-plans" && (
-              <Suspense fallback={<AcademicPlanningTabFallback />}>
-                <StudentStudyPlansTabContent />
-              </Suspense>
+              <AppErrorBoundary
+                resetKey={activePlanningTab}
+                title="Student Study Plans could not be displayed."
+                description="The student assignment tab hit a render error. Try again or refresh the data."
+              >
+                <Suspense fallback={<AcademicPlanningTabFallback />}>
+                  <StudentStudyPlansTabContent />
+                </Suspense>
+              </AppErrorBoundary>
             )}
           </TabsContent>
 
           <TabsContent value="assignments" className="space-y-4">
             {activePlanningTab === "assignments" && (
-              <Suspense fallback={<AcademicPlanningTabFallback />}>
-                <ClassAssignmentTabContent />
-              </Suspense>
+              <AppErrorBoundary
+                resetKey={activePlanningTab}
+                title="Class Assignment could not be displayed."
+                description="The lecturer assignment tab hit a render error. Try again or refresh the data."
+              >
+                <Suspense fallback={<AcademicPlanningTabFallback />}>
+                  <ClassAssignmentTabContent />
+                </Suspense>
+              </AppErrorBoundary>
             )}
           </TabsContent>
         </Tabs>
