@@ -17,7 +17,8 @@ import { Badge } from "./components/ui/badge";
 import {
   LayoutDashboard, BookOpen, MessageSquare, FileText, Trophy,
   Settings, HelpCircle, LogOut, Menu, X, Search, Moon, Sun,
-  Shield, GraduationCap, UserCog, ClipboardList, BarChart3, UsersRound
+  Shield, GraduationCap, UserCog, ClipboardList, BarChart3, UsersRound,
+  PanelLeftClose, PanelLeftOpen
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -122,6 +123,7 @@ export default function App() {
   
   // Local UI state
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { onlineCount } = useOnlinePresence();
   
   // Notification State
@@ -318,43 +320,56 @@ export default function App() {
         : userRole === 'staff'
           ? 'AARO Staff'
           : 'Admin';
+  const collapseTextClass = sidebarCollapsed ? 'lg:hidden' : '';
+  const collapsedCenterClass = sidebarCollapsed ? 'lg:justify-center lg:px-2' : '';
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="flex">
+      <div className="flex min-h-screen">
         {/* Mobile Sidebar Overlay */}
         {sidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
         {/* Sidebar */}
-        <aside className={`fixed top-0 left-0 z-50 h-full w-72 bg-sidebar border-r border-sidebar-border transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:z-auto ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <aside className={`fixed top-0 left-0 z-50 h-full w-72 bg-sidebar border-r border-sidebar-border transform transition-[width,transform] duration-300 ease-in-out lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:translate-x-0 lg:overflow-visible ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-72'} ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="flex flex-col h-full">
             {/* Header */}
-            <div className="p-6 border-b border-sidebar-border">
-              <div className="flex items-center justify-between">
-                <div onClick={() => { navigate('/'); setSidebarOpen(false); }} className="flex items-center gap-3 cursor-pointer">
-                  <div className="w-28 sm:w-32 h-10 rounded-md flex-shrink-0 flex items-center justify-center p-1 bg-white border border-gray-200 shadow-md">
+            <div className={`relative p-6 border-b border-sidebar-border ${sidebarCollapsed ? 'lg:p-3' : ''}`}>
+              <div className={`flex items-center justify-between ${sidebarCollapsed ? 'lg:flex-col lg:gap-2' : ''}`}>
+                <div onClick={() => { navigate('/'); setSidebarOpen(false); }} className={`flex items-center gap-3 cursor-pointer ${sidebarCollapsed ? 'lg:justify-center' : ''}`}>
+                  <div className={`w-28 sm:w-32 h-10 rounded-md flex-shrink-0 flex items-center justify-center p-1 bg-white border border-gray-200 shadow-md ${sidebarCollapsed ? 'lg:w-10' : ''}`}>
                     <img src="/suclogo.png" alt="SUC logo" className="h-full w-auto object-contain" />
                   </div>
-                  <div>
-                    <h2 className="text-sidebar-foreground">SUCCMS Learn</h2>
-                    <p className="text-xs text-sidebar-foreground/60">College LMS</p>
+                  <div className={`${collapseTextClass} min-w-0`}>
+                    <h2 className="whitespace-nowrap text-sidebar-foreground">SUCCMS Learn</h2>
+                    <p className="whitespace-nowrap text-xs text-sidebar-foreground/60">College LMS</p>
                   </div>
                 </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSidebarCollapsed(current => !current)}
+                  className="hidden lg:absolute lg:-right-3 lg:top-1/2 lg:z-10 lg:inline-flex lg:h-7 lg:w-7 lg:-translate-y-1/2 lg:rounded-full lg:border lg:border-sidebar-border lg:bg-background lg:p-0 lg:shadow-sm lg:hover:bg-accent"
+                  aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                >
+                  {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+                </Button>
                 <Button variant="ghost" size="sm" onClick={() => setSidebarOpen(false)} className="lg:hidden"><X className="h-4 w-4" /></Button>
               </div>
             </div>
 
             {/* User Profile in Sidebar */}
             <button
-              className="p-4 border-b border-sidebar-border w-full text-left bg-transparent hover:bg-sidebar-accent/30"
+              className={`p-4 border-b border-sidebar-border w-full text-left bg-transparent hover:bg-sidebar-accent/30 ${sidebarCollapsed ? 'lg:px-3' : ''}`}
               onClick={() => { navigate(`/profile/${user.id}`); setSidebarOpen(false); }}
+              title={userData?.name || 'User'}
             >
-              <div className="flex items-center gap-3">
+              <div className={`flex items-center gap-3 ${sidebarCollapsed ? 'lg:justify-center' : ''}`}>
                 <Avatar className="h-10 w-10">
                     <AvatarImage src={userData?.avatar || ''} />
                     <AvatarFallback>{userData?.name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2) || 'U'}</AvatarFallback>
                 </Avatar>
-                <div className="flex-1">
+                <div className={`flex-1 ${collapseTextClass}`}>
                   <p className="text-sm text-sidebar-foreground font-medium truncate">{userData?.name || 'User'}</p>
                   <div className="flex items-center gap-2">
                     <RoleIcon className="h-3 w-3 text-sidebar-foreground/60" />
@@ -372,10 +387,14 @@ export default function App() {
                     <button
                       key={item.id}
                       onClick={() => { navigate(`/${item.id}`); setSidebarOpen(false); }}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${isActive(item.id) ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground hover:bg-sidebar-accent/50'}`}
+                      className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${collapsedCenterClass} ${isActive(item.id) ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground hover:bg-sidebar-accent/50'}`}
+                      title={item.label}
                     >
-                      <item.icon className="h-5 w-5" />
-                      <div className="flex-1">
+                      <item.icon className="h-5 w-5 shrink-0" />
+                      {sidebarCollapsed && item.badge && (
+                        <span className="absolute right-2 top-2 hidden h-2 w-2 rounded-full bg-red-500 lg:block" />
+                      )}
+                      <div className={`flex-1 ${collapseTextClass}`}>
                         <div className="flex items-center justify-between">
                           <span className="text-sm">{item.label}</span>
                           {item.badge && <Badge className="text-xs h-4 px-1.5 bg-red-500 text-white hover:bg-red-600">{item.badge}</Badge>}
@@ -389,21 +408,21 @@ export default function App() {
 
             {/* Footer */}
             <div className="p-4 border-t border-sidebar-border space-y-2">
-              <div className="flex items-center justify-between p-2 bg-green-50 rounded-lg border border-green-200">
+              <div className={`flex items-center justify-between p-2 bg-green-50 rounded-lg border border-green-200 ${sidebarCollapsed ? 'lg:justify-center' : ''}`}>
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                  <span className="text-xs text-green-700">Campus Activity</span>
+                  <span className={`text-xs text-green-700 ${collapseTextClass}`}>Campus Activity</span>
                 </div>
-                <Badge className="bg-green-100 text-green-800 text-xs">{onlineCount} online</Badge>
+                <Badge className={`bg-green-100 text-green-800 text-xs ${collapseTextClass}`}>{onlineCount} online</Badge>
               </div>
-              <Button variant="ghost" className={`w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent ${location.pathname === '/settings' ? 'bg-sidebar-accent font-medium' : ''}`} onClick={() => { navigate('/settings'); setSidebarOpen(false); }}>
-                <Settings className="h-4 w-4 mr-3" /> Settings
+              <Button variant="ghost" className={`w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent ${collapsedCenterClass} ${location.pathname === '/settings' ? 'bg-sidebar-accent font-medium' : ''}`} onClick={() => { navigate('/settings'); setSidebarOpen(false); }} title="Settings">
+                <Settings className={`h-4 w-4 ${sidebarCollapsed ? 'mr-3 lg:mr-0' : 'mr-3'}`} /> <span className={collapseTextClass}>Settings</span>
               </Button>
-              <Button variant="ghost" className={`w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent ${location.pathname === '/help' ? 'bg-sidebar-accent font-medium' : ''}`} onClick={() => { navigate('/help'); setSidebarOpen(false); }}>
-                <HelpCircle className="h-4 w-4 mr-3" /> Help & Support
+              <Button variant="ghost" className={`w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent ${collapsedCenterClass} ${location.pathname === '/help' ? 'bg-sidebar-accent font-medium' : ''}`} onClick={() => { navigate('/help'); setSidebarOpen(false); }} title="Help & Support">
+                <HelpCircle className={`h-4 w-4 ${sidebarCollapsed ? 'mr-3 lg:mr-0' : 'mr-3'}`} /> <span className={collapseTextClass}>Help & Support</span>
               </Button>
-              <Button variant="ghost" className="w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent" onClick={handleLogout}>
-                <LogOut className="h-4 w-4 mr-3" /> Sign Out
+              <Button variant="ghost" className={`w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent ${collapsedCenterClass}`} onClick={handleLogout} title="Sign Out">
+                <LogOut className={`h-4 w-4 ${sidebarCollapsed ? 'mr-3 lg:mr-0' : 'mr-3'}`} /> <span className={collapseTextClass}>Sign Out</span>
               </Button>
             </div>
           </div>

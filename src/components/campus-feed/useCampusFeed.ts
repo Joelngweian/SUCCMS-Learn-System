@@ -174,9 +174,7 @@ export function useCampusFeed() {
     await fetchPosts(nextCursorRef.current, true);
   }, [fetchPosts, hasMore, isLoadingMore]);
 
-  const selectMedia = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
-    event.target.value = "";
+  const addSelectedMedia = (files: File[]) => {
     if (files.length === 0) return;
 
     setComposerError("");
@@ -210,6 +208,16 @@ export function useCampusFeed() {
     }
 
     setSelectedMedia(current => [...current, ...accepted]);
+  };
+
+  const selectMedia = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    addSelectedMedia(files);
+  };
+
+  const selectDroppedMedia = (files: File[]) => {
+    addSelectedMedia(files);
   };
 
   const removeSelectedMedia = (mediaId: string) => {
@@ -498,6 +506,7 @@ export function useCampusFeed() {
     posts,
     refreshPosts,
     removeSelectedMedia,
+    selectDroppedMedia,
     selectMedia,
     selectedMedia,
     setDraftContent,

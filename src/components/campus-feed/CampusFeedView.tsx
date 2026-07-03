@@ -516,6 +516,7 @@ export function CampusFeed() {
         onDraftChange={feed.setDraftContent}
         onMentionChange={updateActiveMention}
         onMentionSelect={insertMentionSuggestion}
+        onDropMedia={feed.selectDroppedMedia}
         onRemoveSelectedMedia={feed.removeSelectedMedia}
         onSelectMedia={feed.selectMedia}
         profileAvatarUrl={profile?.avatar_url}

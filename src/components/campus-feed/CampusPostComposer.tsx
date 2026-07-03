@@ -1,4 +1,10 @@
-import { useRef, type ChangeEvent, type RefObject } from "react";
+import {
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type RefObject,
+} from "react";
 import { ImagePlus, Loader2, Send, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Button } from "../ui/button";
@@ -24,6 +30,7 @@ export function CampusPostComposer({
   onDraftChange,
   onMentionChange,
   onMentionSelect,
+  onDropMedia,
   onRemoveSelectedMedia,
   onSelectMedia,
   profileAvatarUrl,
@@ -45,6 +52,7 @@ export function CampusPostComposer({
     cursorPosition: number | null,
   ) => void;
   onMentionSelect: (suggestion: CampusMentionSuggestion) => void;
+  onDropMedia: (files: File[]) => void;
   onRemoveSelectedMedia: (mediaId: string) => void;
   onSelectMedia: (event: ChangeEvent<HTMLInputElement>) => void;
   profileAvatarUrl?: string | null;
@@ -54,9 +62,37 @@ export function CampusPostComposer({
 }) {
   const firstName = profileName?.split(" ")[0] || "Scholar";
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDraggingMedia, setIsDraggingMedia] = useState(false);
+
+  const hasDraggedFiles = (event: DragEvent<HTMLDivElement>) =>
+    Array.from(event.dataTransfer.types).includes("Files");
+
+  const handleMediaDrag = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    if (!isCreating) setIsDraggingMedia(true);
+  };
+
+  const handleMediaDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    setIsDraggingMedia(false);
+    if (isCreating) return;
+    onDropMedia(Array.from(event.dataTransfer.files));
+  };
 
   return (
-    <Card className="overflow-visible shadow-sm">
+    <Card
+      className={`overflow-visible shadow-sm transition-colors ${
+        isDraggingMedia
+          ? "border-blue-400 bg-blue-50/60 dark:border-blue-500 dark:bg-blue-950/20"
+          : ""
+      }`}
+      onDragEnter={handleMediaDrag}
+      onDragOver={handleMediaDrag}
+      onDragLeave={() => setIsDraggingMedia(false)}
+      onDrop={handleMediaDrop}
+    >
       <CardContent className="p-4">
         <div className="flex gap-3">
           <Avatar className="h-10 w-10 shrink-0">
@@ -159,7 +195,9 @@ export function CampusPostComposer({
                   onChange={onSelectMedia}
                 />
                 <span className="hidden text-xs text-muted-foreground sm:inline">
-                  Campus-wide 路 students, lecturers and admins
+                  {isDraggingMedia
+                    ? "Drop photos here"
+                    : "Campus-wide · students, lecturers and admins"}
                 </span>
               </div>
               <Button
