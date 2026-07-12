@@ -49,6 +49,7 @@ import {
   subscribeToPrivateBroadcast,
 } from "@/lib/realtime";
 import type { AssessmentDraft } from "@/lib/assessmentTypes";
+import { usesAiMarkingGuideFile } from "@/lib/assessmentTypes";
 import type { Json } from "@/lib/database.types";
 
 const COURSE_CONTENT_BUCKET = "course_content";
@@ -59,6 +60,7 @@ const emptyAssignmentDraft: AssessmentDraft = {
   title: "",
   description: "",
   rubric: "",
+  marking_guide: "",
   points: "",
   due_date: "",
 };
@@ -97,6 +99,9 @@ export function useCourseAssignments({
   const [newAssign, setNewAssign] = useState(emptyAssignmentDraft);
   const [newAssignFiles, setNewAssignFiles] = useState<CourseResourceFile[]>([]);
   const [newRubricFiles, setNewRubricFiles] = useState<CourseResourceFile[]>([]);
+  const [newMarkingGuideFiles, setNewMarkingGuideFiles] = useState<
+    CourseResourceFile[]
+  >([]);
   const assignmentDraftPathsRef = useRef(new Set<string>());
 
   const fetchAssignments = useCallback(async () => {
@@ -274,18 +279,26 @@ export function useCourseAssignments({
       || !userId
     ) return;
 
-    const { error } = await supabase.from("assignments").insert({
-      course_id: courseId,
-      assessment_type: newAssign.assessment_type,
-      title: newAssign.title.trim(),
-      description: newAssign.description,
-      rubric:
-        newRubricFiles.length > 0 ? JSON.stringify(newRubricFiles) : null,
-      max_score: newAssign.points ? parseInt(newAssign.points, 10) : null,
-      due_date: new Date(newAssign.due_date).toISOString(),
-      attachments: newAssignFiles,
-      created_by: userId,
-    });
+    const usesMarkingGuide = usesAiMarkingGuideFile(newAssign.assessment_type);
+    const rubricFiles = usesMarkingGuide ? [] : newRubricFiles;
+    const markingGuideFiles = usesMarkingGuide ? newMarkingGuideFiles : [];
+
+    const { data: createdAssignment, error } = await supabase
+      .from("assignments")
+      .insert({
+        course_id: courseId,
+        assessment_type: newAssign.assessment_type,
+        title: newAssign.title.trim(),
+        description: newAssign.description,
+        rubric:
+          rubricFiles.length > 0 ? JSON.stringify(rubricFiles) : null,
+        max_score: newAssign.points ? parseInt(newAssign.points, 10) : null,
+        due_date: new Date(newAssign.due_date).toISOString(),
+        attachments: newAssignFiles,
+        created_by: userId,
+      })
+      .select("id")
+      .single();
 
     if (error) {
       console.error("Error creating assignment:", error);
@@ -293,11 +306,46 @@ export function useCourseAssignments({
       return;
     }
 
+    const markingGuide = markingGuideFiles.length > 0
+      ? JSON.stringify(markingGuideFiles)
+      : newAssign.marking_guide.trim();
+    if (markingGuide && createdAssignment?.id) {
+      const { error: guideError } = await supabase
+        .from("assignment_marking_guides")
+        .upsert({
+          assignment_id: createdAssignment.id,
+          marking_guide: markingGuide,
+          updated_by: userId,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (guideError) {
+        console.error("Error saving marking guide:", guideError);
+        notify.error(guideError, "Assessment created, but marking guide was not saved.");
+      }
+    }
+
+    const keptFiles = [
+      ...newAssignFiles,
+      ...rubricFiles,
+      ...markingGuideFiles,
+    ];
+    const keptPaths = new Set(
+      keptFiles.map(file => getCourseContentStoragePath(file) || file.path),
+    );
+    const abandonedPaths = [...assignmentDraftPathsRef.current].filter(
+      path => !keptPaths.has(path),
+    );
+    if (abandonedPaths.length > 0) {
+      void removeCourseContentPaths(abandonedPaths);
+    }
+
     assignmentDraftPathsRef.current.clear();
     setShowNewAssignmentDialog(false);
     setNewAssign(emptyAssignmentDraft);
     setNewAssignFiles([]);
     setNewRubricFiles([]);
+    setNewMarkingGuideFiles([]);
     await fetchAssignments();
   };
 
@@ -312,6 +360,7 @@ export function useCourseAssignments({
     setNewAssign(emptyAssignmentDraft);
     setNewAssignFiles([]);
     setNewRubricFiles([]);
+    setNewMarkingGuideFiles([]);
 
     if (abandonedPaths.length > 0) {
       void removeCourseContentPaths(abandonedPaths).then(error => {
@@ -475,10 +524,6 @@ export function useCourseAssignments({
     );
     if (!submission) {
       notify.warning("This student has not submitted the assignment yet.");
-      return;
-    }
-    if (!selectedAssignment.rubric) {
-      notify.warning("Add a grading rubric before using AI grading.");
       return;
     }
 
@@ -793,6 +838,7 @@ export function useCourseAssignments({
     mySubmissions,
     newAssign,
     newAssignFiles,
+    newMarkingGuideFiles,
     newRubricFiles,
     resetRubricGradeAdjustments,
     rubricGrades,
@@ -804,6 +850,7 @@ export function useCourseAssignments({
     setGradingStudentId,
     setNewAssign,
     setNewAssignFiles,
+    setNewMarkingGuideFiles,
     setNewRubricFiles,
     setRubricGradeAdjustment,
     setSelectedAssignment,

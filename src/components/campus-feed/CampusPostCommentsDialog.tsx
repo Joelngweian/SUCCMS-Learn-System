@@ -313,7 +313,7 @@ export function CampusPostCommentsDialog({
                                         onClick={() =>
                                           setEditCommentAttachments([])
                                         }
-                                        aria-label="Remove comment image"
+                                        aria-label="Remove comment media"
                                       >
                                         <X className="h-4 w-4" />
                                       </Button>
@@ -333,7 +333,7 @@ export function CampusPostCommentsDialog({
                                         size="icon"
                                         className="absolute right-2 top-2 h-7 w-7 rounded-full"
                                         onClick={onReleaseEditCommentMedia}
-                                        aria-label="Remove new comment image"
+                                        aria-label="Remove new comment media"
                                       >
                                         <X className="h-4 w-4" />
                                       </Button>
@@ -365,15 +365,15 @@ export function CampusPostCommentsDialog({
                                         onClick={() =>
                                           editCommentFileInputRef.current?.click()
                                         }
-                                        title="Attach an image"
-                                        aria-label="Attach an image"
+                                        title="Attach a photo"
+                                        aria-label="Attach a photo"
                                       >
                                         <ImagePlus className="h-4 w-4 text-emerald-600" />
                                       </Button>
                                       <input
                                         ref={editCommentFileInputRef}
                                         type="file"
-                                        accept="image/jpeg,image/png,image/webp,image/gif"
+                                        accept="image/jpeg,image/png,image/webp"
                                         className="hidden"
                                         onChange={event =>
                                           onSelectCommentMedia(event, true)
@@ -530,7 +530,7 @@ export function CampusPostCommentsDialog({
                       size="icon"
                       className="absolute right-2 top-2 h-7 w-7 rounded-full"
                       onClick={onReleaseCommentMedia}
-                      aria-label="Remove comment image"
+                      aria-label="Remove comment media"
                     >
                       <X className="h-4 w-4" />
                     </Button>
@@ -589,15 +589,15 @@ export function CampusPostCommentsDialog({
                     disabled={
                       (commentMedia ? 1 : 0) >= MAX_CAMPUS_COMMENT_MEDIA_FILES
                     }
-                    title="Attach an image"
-                    aria-label="Attach an image"
+                    title="Attach a photo"
+                    aria-label="Attach a photo"
                   >
                     <ImagePlus className="h-4 w-4 text-emerald-600" />
                   </Button>
                   <input
                     ref={commentFileInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    accept="image/jpeg,image/png,image/webp"
                     className="hidden"
                     onChange={event => onSelectCommentMedia(event, false)}
                   />

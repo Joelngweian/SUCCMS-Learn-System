@@ -46,9 +46,9 @@ export function AcademicPlanningTabsShell({
     <Tabs
       value={activePlanningTab}
       onValueChange={onTabChange}
-      className="space-y-4"
+      className="min-w-0 space-y-4"
     >
-      <TabsList className="grid h-auto w-full grid-cols-2 p-1 sm:grid-cols-4">
+      <TabsList className="grid h-auto w-full min-w-0 grid-cols-2 p-1 sm:grid-cols-4">
         <TabsTrigger value="study-plans" className="text-xs sm:text-sm">
           Study Plans
         </TabsTrigger>
@@ -59,11 +59,11 @@ export function AcademicPlanningTabsShell({
           Student Study Plans
         </TabsTrigger>
         <TabsTrigger value="assignments" className="text-xs sm:text-sm">
-          Class Assignment
+          Course Assign
         </TabsTrigger>
       </TabsList>
 
-      <TabsContent value="study-plans" className="space-y-4">
+      <TabsContent value="study-plans" className="min-w-0 space-y-4">
         {activePlanningTab === "study-plans" && (
           <AppErrorBoundary
             resetKey={activePlanningTab}
@@ -77,7 +77,7 @@ export function AcademicPlanningTabsShell({
         )}
       </TabsContent>
 
-      <TabsContent value="academic-calendar" className="space-y-4">
+      <TabsContent value="academic-calendar" className="min-w-0 space-y-4">
         {activePlanningTab === "academic-calendar" && (
           <AppErrorBoundary
             resetKey={activePlanningTab}
@@ -91,7 +91,7 @@ export function AcademicPlanningTabsShell({
         )}
       </TabsContent>
 
-      <TabsContent value="student-study-plans" className="space-y-4">
+      <TabsContent value="student-study-plans" className="min-w-0 space-y-4">
         {activePlanningTab === "student-study-plans" && (
           <AppErrorBoundary
             resetKey={activePlanningTab}
@@ -105,11 +105,11 @@ export function AcademicPlanningTabsShell({
         )}
       </TabsContent>
 
-      <TabsContent value="assignments" className="space-y-4">
+      <TabsContent value="assignments" className="min-w-0 space-y-4">
         {activePlanningTab === "assignments" && (
           <AppErrorBoundary
             resetKey={activePlanningTab}
-            title="Class Assignment could not be displayed."
+            title="Course Assign could not be displayed."
             description="The lecturer assignment tab hit a render error. Try again or refresh the data."
           >
             <Suspense fallback={<AcademicPlanningTabFallback />}>

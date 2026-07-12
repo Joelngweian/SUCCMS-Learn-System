@@ -104,13 +104,51 @@ const cleanNumber = (value: unknown, minimum: number, maximum: number) => {
   return Math.min(maximum, Math.max(minimum, parsed));
 };
 
-const getResponseText = (payload: any) =>
-  payload?.candidates?.[0]?.content?.parts
-    ?.map((part: any) => part?.text || "")
+type SupabaseServiceClient = ReturnType<typeof createClient>;
+
+type GeminiPayload = {
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
+    finishReason?: string;
+  }>;
+  error?: { message?: string };
+};
+
+type ParsedGradingCriterion = {
+  maxScore?: unknown;
+  name?: unknown;
+  reason?: unknown;
+  score?: unknown;
+};
+
+type ParsedGradingAnnotation = {
+  comment?: unknown;
+  excerpt?: unknown;
+  fileName?: unknown;
+  page?: unknown;
+  status?: unknown;
+};
+
+type ParsedGradingResponse = {
+  annotations?: ParsedGradingAnnotation[];
+  confidence?: unknown;
+  criteria?: ParsedGradingCriterion[];
+  feedback?: unknown;
+  suggestedScore?: unknown;
+  warnings?: unknown[];
+};
+
+type StoredFileInput = Record<string, unknown>;
+
+const getResponseText = (payload: unknown) =>
+  (payload as GeminiPayload)
+    ?.candidates?.[0]?.content?.parts
+    ?.map((part) => part?.text || "")
     .join("")
     .trim() || "";
 
-const parseGeminiJson = (payload: any) => {
+const parseGeminiJson = (payload: unknown): ParsedGradingResponse => {
+  const geminiPayload = payload as GeminiPayload;
   const responseText = getResponseText(payload);
   if (!responseText) {
     throw new Error("EMPTY_GRADING_RESPONSE");
@@ -129,9 +167,9 @@ const parseGeminiJson = (payload: any) => {
       : normalizedText;
 
   try {
-    return JSON.parse(jsonText);
+    return JSON.parse(jsonText) as ParsedGradingResponse;
   } catch {
-    const finishReason = payload?.candidates?.[0]?.finishReason || "";
+    const finishReason = geminiPayload?.candidates?.[0]?.finishReason || "";
     console.error("Invalid Gemini grading JSON", {
       finishReason,
       responseLength: responseText.length,
@@ -378,7 +416,7 @@ const normalizeFiles = (value: unknown): StoredFile[] => {
   if (!Array.isArray(value)) return [];
 
   return value
-    .map((file: any) => ({
+    .map((file: StoredFileInput) => ({
       bucket: cleanText(file?.bucket, "", 120) || undefined,
       name: cleanText(file?.name, "Attached file", 240),
       path: cleanText(file?.path || file?.url, "", 1800),
@@ -389,26 +427,26 @@ const normalizeFiles = (value: unknown): StoredFile[] => {
     .slice(0, MAX_FILES);
 };
 
-const parseRubric = (value: unknown) => {
-  const rubric = cleanText(value, "", 50000);
-  if (!rubric) return { text: "", files: [] as StoredFile[] };
+const parseGuideResource = (value: unknown) => {
+  const guide = cleanText(value, "", 50000);
+  if (!guide) return { text: "", files: [] as StoredFile[] };
 
   try {
-    const parsed = JSON.parse(rubric);
+    const parsed = JSON.parse(guide);
     if (Array.isArray(parsed)) {
       return { text: "", files: normalizeFiles(parsed) };
     }
   } catch {
-    // A plain-text rubric is valid.
+    // A plain-text guide is valid.
   }
 
-  return { text: rubric, files: [] as StoredFile[] };
+  return { text: guide, files: [] as StoredFile[] };
 };
 
 const resolveFileUrl = async (
   file: StoredFile,
   supabaseUrl: string,
-  serviceClient: any,
+  serviceClient: SupabaseServiceClient,
 ) => {
   if (/^https?:\/\//i.test(file.path)) {
     const parsed = new URL(file.path);
@@ -440,7 +478,7 @@ const loadFileParts = async (
   files: StoredFile[],
   label: string,
   supabaseUrl: string,
-  serviceClient: any,
+  serviceClient: SupabaseServiceClient,
 ) => {
   const parts: Array<Record<string, unknown>> = [];
   let totalBytes = 0;
@@ -628,7 +666,7 @@ const gradeJob = async ({
 }: {
   job: AiGradingJob;
   supabaseUrl: string;
-  serviceClient: any;
+  serviceClient: SupabaseServiceClient;
   geminiApiKey: string;
   model: string;
 }) => {
@@ -682,9 +720,26 @@ const gradeJob = async ({
     throw new Error("The student has not submitted this assignment.");
   }
 
-  const rubric = parseRubric(assignment.rubric);
-  if (!rubric.text && rubric.files.length === 0) {
-    throw new Error("Add a grading rubric before using AI grading.");
+  const rubric = parseGuideResource(assignment.rubric);
+  const { data: markingGuideRow, error: markingGuideError } =
+    await serviceClient
+      .from("assignment_marking_guides")
+      .select("marking_guide")
+      .eq("assignment_id", job.assignment_id)
+      .maybeSingle();
+
+  if (markingGuideError) {
+    throw new Error("Failed to load the AI marking guide.");
+  }
+
+  const markingGuide = parseGuideResource(markingGuideRow?.marking_guide);
+  if (
+    !rubric.text &&
+    rubric.files.length === 0 &&
+    !markingGuide.text &&
+    markingGuide.files.length === 0
+  ) {
+    throw new Error("Add a grading rubric or AI marking guide before using AI grading.");
   }
 
   const submissionFiles = normalizeFiles(submission.files);
@@ -698,13 +753,15 @@ const gradeJob = async ({
     {
       text: [
         "You are an assessment assistant for a college lecturer.",
-        "Evaluate the student's submitted work strictly against the lecturer-provided rubric and assessment instructions.",
+        "Evaluate the student's submitted work strictly against the lecturer-provided rubric, marking guide, answer key, and assessment instructions.",
         "Return a suggested grade only. The lecturer will review and decide the final grade.",
         "Do not reward content that is not present in the submission.",
         "If a file is unreadable, incomplete, suspicious, or the rubric is ambiguous, explain that in warnings and lower confidence.",
         "The suggestedScore and all criterion scores must be within their stated maximum values.",
-        "Return one criteria entry for every distinct rubric section, preserving the rubric's names, order, and mark allocation.",
-        "Do not merge rubric sections. The criterion maxScore values must add up to the assessment maximum score.",
+        "Use the assessment type to choose the grading approach: MCQ must follow the answer key, structured answers must cover required points, calculations must check method and final answer, and design work must check the stated requirements.",
+        "If a rubric is provided, return one criteria entry for every distinct rubric section, preserving the rubric's names, order, and mark allocation.",
+        "If only a marking guide or answer key is provided, create criteria from the guide's major sections or answer parts.",
+        "Do not merge rubric or guide sections. The criterion maxScore values must add up to the assessment maximum score.",
         "The suggestedScore must exactly equal the sum of all criterion scores.",
         "Write constructive, specific feedback that cites strengths and improvements visible in the work.",
         "Write the main feedback as one concise paragraph below 120 words.",
@@ -724,9 +781,16 @@ const gradeJob = async ({
         `Assessment title: ${cleanText(assignment.title, "Assessment", 300)}`,
         `Assessment instructions: ${cleanText(assignment.description, "No additional instructions.", 12000)}`,
         `Maximum score: ${maxScore}`,
+        markingGuide.text
+          ? `AI marking guide / answer key: ${markingGuide.text}`
+          : markingGuide.files.length > 0
+            ? "AI marking guide / answer key is supplied as attached file(s)."
+            : "No additional AI marking guide was provided.",
         rubric.text
           ? `Rubric text: ${rubric.text}`
-          : "Rubric is supplied as attached file(s).",
+          : rubric.files.length > 0
+            ? "Rubric is supplied as attached file(s)."
+            : "No rubric was provided for this assessment type.",
         submissionText
           ? `Student submission text: ${submissionText}`
           : "Student work is supplied as attached file(s).",
@@ -744,6 +808,14 @@ const gradeJob = async ({
   );
   promptParts.push(
     ...(await loadFileParts(
+      markingGuide.files,
+      "AI marking guide file",
+      supabaseUrl,
+      serviceClient,
+    )),
+  );
+  promptParts.push(
+    ...(await loadFileParts(
       submissionFiles,
       "Student submission file",
       supabaseUrl,
@@ -751,7 +823,7 @@ const gradeJob = async ({
     )),
   );
 
-  let parsed: any = null;
+  let parsed: ParsedGradingResponse | null = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const attemptParts =
       attempt === 0
@@ -802,7 +874,7 @@ const gradeJob = async ({
   }
 
   const criteria = Array.isArray(parsed?.criteria)
-    ? parsed.criteria.slice(0, 20).map((criterion: any) => {
+    ? parsed.criteria.slice(0, 20).map((criterion) => {
         const criterionMax = cleanNumber(criterion?.maxScore, 0, maxScore);
         return {
           name: cleanText(criterion?.name, "Criterion", 160),
@@ -827,11 +899,10 @@ const gradeJob = async ({
   const annotations = Array.isArray(parsed?.annotations)
     ? parsed.annotations
         .slice(0, 24)
-        .map((annotation: any) => {
-          const status = ["correct", "incorrect", "uncertain"].includes(
-              annotation?.status,
-            )
-            ? annotation.status
+        .map((annotation) => {
+          const rawStatus = String(annotation?.status);
+          const status = ["correct", "incorrect", "uncertain"].includes(rawStatus)
+            ? rawStatus
             : "uncertain";
           const page = Number(annotation?.page);
           return {
@@ -842,7 +913,7 @@ const gradeJob = async ({
             comment: cleanText(annotation?.comment, "", 500),
           };
         })
-        .filter((annotation: any) => annotation.excerpt)
+        .filter((annotation) => annotation.excerpt)
     : [];
 
   return {

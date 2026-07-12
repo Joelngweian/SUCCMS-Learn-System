@@ -14,6 +14,12 @@ export type CampusPostAttachment = {
   url?: string;
 };
 
+export const CAMPUS_EXTERNAL_ATTACHMENT_PREFIX = "external:";
+
+export const isStoredCampusAttachment = (
+  attachment: Pick<CampusPostAttachment, "path">,
+) => !attachment.path.startsWith(CAMPUS_EXTERNAL_ATTACHMENT_PREFIX);
+
 export type CampusPost = {
   id: string;
   authorId: string;

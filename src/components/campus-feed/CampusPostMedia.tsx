@@ -1,4 +1,5 @@
 import type { CampusPost, CampusPostAttachment } from "./campusFeedTypes";
+import { isCampusVideoType } from "./campusFeedLimits";
 
 interface CampusPostMediaProps {
   onOpen: (attachment: CampusPostAttachment) => void;
@@ -14,6 +15,22 @@ export function CampusPostMedia({
   if (post.attachments.length === 1) {
     const attachment = post.attachments[0];
     if (!attachment.url) return null;
+
+    if (isCampusVideoType(attachment.type)) {
+      return (
+        <div className="flex max-h-[520px] justify-center overflow-hidden border-y bg-black">
+          <video
+            src={attachment.url}
+            controls
+            playsInline
+            preload="metadata"
+            className="block max-h-[520px] max-w-full object-contain"
+          >
+            <track kind="captions" />
+          </video>
+        </div>
+      );
+    }
 
     return (
       <div className="flex max-h-[520px] justify-center overflow-hidden border-y bg-muted/30">
@@ -40,17 +57,37 @@ export function CampusPostMedia({
 
   return (
     <div className={`grid gap-1 overflow-hidden bg-muted ${gridClass}`}>
-      {post.attachments.map((attachment, index) =>
-        attachment.url ? (
+      {post.attachments.map((attachment, index) => {
+        if (!attachment.url) return null;
+
+        const className =
+          post.attachments.length === 3 && index === 0 ? "row-span-2" : "";
+
+        if (isCampusVideoType(attachment.type)) {
+          return (
+            <div
+              key={attachment.path}
+              className={`overflow-hidden bg-black ${className}`}
+            >
+              <video
+                src={attachment.url}
+                controls
+                playsInline
+                preload="metadata"
+                className="h-full w-full object-cover"
+              >
+                <track kind="captions" />
+              </video>
+            </div>
+          );
+        }
+
+        return (
           <button
             type="button"
             key={attachment.path}
             onClick={() => onOpen(attachment)}
-            className={`cursor-zoom-in overflow-hidden ${
-              post.attachments.length === 3 && index === 0
-                ? "row-span-2"
-                : ""
-            }`}
+            className={`cursor-zoom-in overflow-hidden ${className}`}
             aria-label={`View ${attachment.name}`}
           >
             <img
@@ -59,8 +96,8 @@ export function CampusPostMedia({
               className="h-full w-full object-cover transition-transform duration-200 hover:scale-[1.01]"
             />
           </button>
-        ) : null,
-      )}
+        );
+      })}
     </div>
   );
 }

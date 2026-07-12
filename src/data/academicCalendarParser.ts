@@ -1,10 +1,20 @@
-import * as pdfjsLib from "pdfjs-dist";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-
 type PdfTextItem = {
   str?: string;
+};
+
+type PdfJsModule = typeof import("pdfjs-dist");
+
+let pdfJsLoadPromise: Promise<PdfJsModule> | null = null;
+
+const loadPdfJs = () => {
+  pdfJsLoadPromise ??= Promise.all([
+    import("pdfjs-dist"),
+    import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
+  ]).then(([pdfjsLib, workerModule]) => {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
+    return pdfjsLib;
+  });
+  return pdfJsLoadPromise;
 };
 
 export type ParsedAcademicCalendarTerm = {
@@ -172,6 +182,7 @@ const parseDateRange = (
 
 const extractPdfText = async (file: File) => {
   const data = await file.arrayBuffer();
+  const pdfjsLib = await loadPdfJs();
   const task = pdfjsLib.getDocument({ data });
 
   try {

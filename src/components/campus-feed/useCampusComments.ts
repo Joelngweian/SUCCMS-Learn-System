@@ -4,6 +4,7 @@ import { confirmAction } from "@/lib/confirm";
 import { notify } from "@/lib/notify";
 import { supabase } from "@/lib/supabase";
 import {
+  isStoredCampusAttachment,
   normalizeCampusPostAttachments,
   type CampusPost,
   type CampusPostAttachment,
@@ -118,7 +119,9 @@ export const useCampusComments = ({
     media: SelectedCampusMedia | null,
   ) => {
     const trimmedContent = content.trim();
-    if (!userId || !profile || (!trimmedContent && !media)) return false;
+    if (!userId || !profile || (!trimmedContent && !media)) {
+      return false;
+    }
 
     let uploadedPath = "";
     try {
@@ -187,7 +190,7 @@ export const useCampusComments = ({
       > MAX_CAMPUS_COMMENT_MEDIA_FILES
     ) {
       notify.warning(
-        `A comment can include up to ${MAX_CAMPUS_COMMENT_MEDIA_FILES} image.`,
+        `A comment can include up to ${MAX_CAMPUS_COMMENT_MEDIA_FILES} photo.`,
       );
       return false;
     }
@@ -201,11 +204,14 @@ export const useCampusComments = ({
     setUpdatingCommentIds(current => new Set(current).add(comment.id));
     let uploadedPath = "";
     try {
-      const attachments = retainedAttachments.map(attachment => ({
+      const attachments: CampusPostAttachment[] = retainedAttachments.map(attachment => ({
         name: attachment.name,
         path: attachment.path,
         size: attachment.size,
         type: attachment.type,
+        ...(isStoredCampusAttachment(attachment)
+          ? {}
+          : { url: attachment.url }),
       }));
       if (newMedia) {
         const attachment = await uploadCampusCommentMedia(
@@ -246,12 +252,13 @@ export const useCampusComments = ({
       );
       const removedPaths = comment.attachments
         .filter(attachment => !retainedPaths.has(attachment.path))
+        .filter(isStoredCampusAttachment)
         .map(attachment => attachment.path);
       if (removedPaths.length > 0) {
         const { error: storageError } = await removeCampusPostFiles(removedPaths);
         if (storageError) {
           notify.warning(
-            "Comment updated, but the removed image needs administrator cleanup.",
+            "Comment updated, but the removed media file needs administrator cleanup.",
           );
         }
       }
@@ -292,12 +299,14 @@ export const useCampusComments = ({
         .eq("id", comment.id);
       if (error) throw error;
 
-      const paths = comment.attachments.map(attachment => attachment.path);
+      const paths = comment.attachments
+        .filter(isStoredCampusAttachment)
+        .map(attachment => attachment.path);
       if (paths.length > 0) {
         const { error: storageError } = await removeCampusPostFiles(paths);
         if (storageError) {
           notify.warning(
-            "Comment deleted, but its image needs administrator cleanup.",
+            "Comment deleted, but its media file needs administrator cleanup.",
           );
         }
       }

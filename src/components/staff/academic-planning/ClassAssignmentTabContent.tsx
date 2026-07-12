@@ -14,7 +14,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "..
 import { Alert, AlertDescription } from "../../ui/alert";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "../../ui/card";
 import { Checkbox } from "../../ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../ui/dialog";
 import { Input } from "../../ui/input";
@@ -173,11 +173,8 @@ export function ClassAssignmentTabContent() {
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <UserRoundCheck className="h-5 w-5 text-primary" />
-                      Class Assignment
+                      Course Assign
                     </CardTitle>
-                    <CardDescription>
-                      Assign lecturers to courses planned for the selected semester. The default view only shows courses that still need a lecturer.
-                    </CardDescription>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-center text-sm">
                     <div className="rounded-lg border px-3 py-2">
@@ -198,6 +195,20 @@ export function ClassAssignmentTabContent() {
               <CardContent className="space-y-4">
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <div className="space-y-1">
+                    <Label>Programme</Label>
+                    <Select value={assignmentProgrammeFilter} onValueChange={setAssignmentProgrammeFilter}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="All programmes" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL_FILTER_VALUE}>All programmes</SelectItem>
+                        {assignmentProgrammeOptions.map(programme => (
+                          <SelectItem key={programme} value={programme}>{programme}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
                     <Label>Semester</Label>
                     <Select value={assignmentForm.termCode} onValueChange={value => setAssignmentForm({ termCode: value })}>
                       <SelectTrigger>
@@ -216,20 +227,6 @@ export function ClassAssignmentTabContent() {
                         Academic term setup is needed before lecturer assignments can be saved.
                       </p>
                     ) : null}
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Programme</Label>
-                    <Select value={assignmentProgrammeFilter} onValueChange={setAssignmentProgrammeFilter}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="All programmes" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={ALL_FILTER_VALUE}>All programmes</SelectItem>
-                        {assignmentProgrammeOptions.map(programme => (
-                          <SelectItem key={programme} value={programme}>{programme}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </div>
                   <div className="min-w-0 space-y-1">
                     <Label>Status</Label>
@@ -291,7 +288,7 @@ export function ClassAssignmentTabContent() {
                       disabled={isAssigning || selectedAssignmentItems.length === 0 || !bulkLecturerId || !selectedAssignmentTerm?.id}
                     >
                       {isAssigning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserRoundCheck className="mr-2 h-4 w-4" />}
-                      Assign selected
+                      Assign
                     </Button>
 
                     <div>
@@ -335,9 +332,6 @@ export function ClassAssignmentTabContent() {
             <Card>
               <CardHeader>
                 <CardTitle>{assignmentStatusFilter === "assigned" ? "Assigned Courses" : assignmentStatusFilter === "all" ? "Course Assignment List" : "Courses Needing Lecturer Assignment"}</CardTitle>
-                <CardDescription>
-                  Courses are grouped by programme and come from the active study plans for {assignmentForm.termCode || "the selected semester"}.
-                </CardDescription>
               </CardHeader>
               <CardContent>
                 {isLoadingAssignments ? (
@@ -420,7 +414,7 @@ export function ClassAssignmentTabContent() {
                                         </SelectContent>
                                       </Select>
                                     </div>
-                                    <div className="flex flex-col gap-2 sm:flex-row lg:flex-col">
+                                    <div className="flex flex-col gap-2 sm:flex-row lg:flex-col lg:self-end">
                                       <Button
                                         type="button"
                                         variant="default"

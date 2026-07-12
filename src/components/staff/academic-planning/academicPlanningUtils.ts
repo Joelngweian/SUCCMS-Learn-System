@@ -17,13 +17,13 @@ export type AssignmentTermOption = {
 };
 
 export const assignmentStatusLabel: Record<AssignmentStatusFilter, string> = {
-  need: "Need Assignment",
+  need: "Need Assign",
   assigned: "Assigned",
   all: "All",
 };
 
 export const studentAssignmentStatusLabel: Record<StudentAssignmentStatusFilter, string> = {
-  unassigned: "Need Assignment",
+  unassigned: "Need Assign",
   assigned: "Assigned",
   all: "All",
 };
@@ -50,6 +50,15 @@ export const normalizeTermCode = (value?: string | null) => {
   const normalized = String(value || "").trim().toUpperCase();
   const match = normalized.match(/^(\d{4})([ABC])$/);
   return match ? `${match[1]}${match[2]}` : null;
+};
+
+export const creditLimitForTermCode = (termCode?: string | null) => {
+  const normalized = normalizeTermCode(termCode);
+  if (!normalized) return null;
+  const semester = normalized.slice(-1);
+  if (semester === "A") return 9;
+  if (semester === "B" || semester === "C") return 21;
+  return null;
 };
 
 export const termSortValue = (termCode?: string | null) => {
@@ -79,7 +88,7 @@ export const versionIntakeLabel = (version: StudyPlanVersion) =>
   `${version.intake_year || "Any"}${version.intake_semester || ""}${version.track_code ? ` ${version.track_code}` : ""}`;
 
 export const versionLabel = (version: StudyPlanVersion) =>
-  `${version.programme_key} ${versionIntakeLabel(version)} - ${version.version_code}`;
+  `${version.programme_key} ${versionIntakeLabel(version)}`;
 
 export const normalizeStudentIdentifierForAssignment = (value?: string | null) =>
   String(value || "").trim().toLowerCase();

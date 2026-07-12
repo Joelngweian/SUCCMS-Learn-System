@@ -18,6 +18,7 @@ import {
   buildAssignmentTermOptions,
   compareTermCodes,
   courseCodeAliases,
+  creditLimitForTermCode,
   isCalendarBackedAcademicTerm,
   normalizeAssignmentCourseCode,
   resolveAcademicTermStatus,
@@ -26,6 +27,77 @@ import {
   type AssignmentStatusFilter,
   type StudentAssignmentStatusFilter,
 } from "./academicPlanningUtils";
+
+const isLikelyChoiceCategory = (category?: string | null) => {
+  const normalized = String(category || "").trim().toLowerCase();
+  return normalized === "compulsory elective" || /^mpu\s*u\d+/.test(normalized);
+};
+
+const getEffectiveCreditSummary = (courses: DbStudyPlanCourse[]) => {
+  const duplicateKeyGroups = new Map<string, DbStudyPlanCourse[]>();
+  const choiceGroups: DbStudyPlanCourse[][] = [];
+
+  for (const course of courses) {
+    const key = course.plan_course_key?.trim();
+    if (!key) continue;
+    duplicateKeyGroups.set(key, [...(duplicateKeyGroups.get(key) || []), course]);
+  }
+
+  for (const group of duplicateKeyGroups.values()) {
+    if (group.length > 1) choiceGroups.push(group);
+  }
+  const duplicateChoiceIds = new Set(choiceGroups.flatMap(group => group.map(course => course.id)));
+
+  let run: DbStudyPlanCourse[] = [];
+  const flushRun = () => {
+    if (run.length > 1) choiceGroups.push(run);
+    run = [];
+  };
+
+  for (const course of courses) {
+    if (duplicateChoiceIds.has(course.id)) {
+      flushRun();
+      continue;
+    }
+
+    const last = run[run.length - 1];
+    const matchesRun = last
+      && isLikelyChoiceCategory(course.category)
+      && String(course.category || "").trim().toLowerCase() === String(last.category || "").trim().toLowerCase()
+      && (Number(course.credit_hours) || 0) === (Number(last.credit_hours) || 0)
+      && (Number(course.position) || 0) === (Number(last.position) || 0) + 1;
+
+    if (!isLikelyChoiceCategory(course.category)) {
+      flushRun();
+      continue;
+    }
+
+    if (matchesRun) {
+      run.push(course);
+      continue;
+    }
+
+    flushRun();
+    run = [course];
+  }
+  flushRun();
+
+  const choiceCourseIds = new Set(choiceGroups.flatMap(group => group.map(course => course.id)));
+  const countedCourseIds = new Set<string>();
+  const choiceCredits = choiceGroups.reduce((sum, group) => {
+    for (const course of group) countedCourseIds.add(course.id);
+    return sum + Math.max(...group.map(course => Number(course.credit_hours) || 0));
+  }, 0);
+  const regularCredits = courses.reduce(
+    (sum, course) => countedCourseIds.has(course.id) ? sum : sum + (Number(course.credit_hours) || 0),
+    0,
+  );
+
+  return {
+    choiceCourseIds: Array.from(choiceCourseIds),
+    totalCredits: choiceCredits + regularCredits,
+  };
+};
 
 export type AssignmentListItem = {
   assignedLecturerIds: string[];
@@ -258,12 +330,15 @@ export function useStudyPlanVersionView({
           const positionDiff = (left.position || 0) - (right.position || 0);
           return positionDiff || left.course_name.localeCompare(right.course_name);
         });
-        const totalCredits = sortedCourses.reduce(
-          (sum, course) => sum + (Number(course.credit_hours) || 0),
-          0,
-        );
+        const { choiceCourseIds, totalCredits } = getEffectiveCreditSummary(sortedCourses);
 
-        return { courses: sortedCourses, termCode, totalCredits };
+        return {
+          choiceCourseIds,
+          courses: sortedCourses,
+          creditLimit: creditLimitForTermCode(termCode),
+          termCode,
+          totalCredits,
+        };
       });
   }, [filteredVersionCourses]);
 
@@ -309,9 +384,14 @@ export function useStudentStudyPlanAssignmentView({
     [selectedStudentAssignmentVersionId, versions],
   );
 
-  const studentProgrammeOptions = useMemo(
-    () => Array.from(new Set(students.map(student => student.programme || "No programme"))).sort(),
+  const studentsWithProgramme = useMemo(
+    () => students.filter(student => String(student.programme || "").trim().length > 0),
     [students],
+  );
+
+  const studentProgrammeOptions = useMemo(
+    () => Array.from(new Set(studentsWithProgramme.map(student => String(student.programme).trim()))).sort(),
+    [studentsWithProgramme],
   );
 
   const studentAssignmentProgrammeKey = useMemo(
@@ -333,7 +413,7 @@ export function useStudentStudyPlanAssignmentView({
 
   const studentAssignmentRows = useMemo(() => {
     const search = studentAssignmentSearchTerm.trim().toLowerCase();
-    return students
+    return studentsWithProgramme
       .map(student => {
         const assignment = studentAssignmentByStudentId.get(student.id) || null;
         const assignedVersion = assignment ? versionById.get(assignment.study_plan_version_id) || null : null;
@@ -345,18 +425,19 @@ export function useStudentStudyPlanAssignmentView({
           studentAssignmentStatusFilter === "all" ||
           (studentAssignmentStatusFilter === "assigned" && assigned) ||
           (studentAssignmentStatusFilter === "unassigned" && !assigned);
+        const studentProgramme = String(row.student.programme || "").trim();
         const programmeMatches =
           studentAssignmentProgrammeFilter === ALL_FILTER_VALUE ||
-          (row.student.programme || "No programme") === studentAssignmentProgrammeFilter;
+          studentProgramme === studentAssignmentProgrammeFilter;
         const searchMatches =
           !search ||
           row.student.full_name.toLowerCase().includes(search) ||
           String(row.student.email || "").toLowerCase().includes(search) ||
-          String(row.student.programme || "").toLowerCase().includes(search) ||
+          studentProgramme.toLowerCase().includes(search) ||
           String(row.assignedVersion?.version_code || "").toLowerCase().includes(search);
         return statusMatches && programmeMatches && searchMatches;
       });
-  }, [studentAssignmentByStudentId, studentAssignmentProgrammeFilter, studentAssignmentSearchTerm, studentAssignmentStatusFilter, students, versionById]);
+  }, [studentAssignmentByStudentId, studentAssignmentProgrammeFilter, studentAssignmentSearchTerm, studentAssignmentStatusFilter, studentsWithProgramme, versionById]);
 
   const studentAssignmentPageCount = Math.max(
     1,
@@ -381,13 +462,17 @@ export function useStudentStudyPlanAssignmentView({
   }, [selectedStudentIds, visibleStudentIds]);
 
   const studentAssignmentSummary = useMemo(() => {
-    const assigned = students.filter(student => studentAssignmentByStudentId.has(student.id)).length;
+    const programmeStudents = studentsWithProgramme.filter(student =>
+      studentAssignmentProgrammeFilter === ALL_FILTER_VALUE ||
+      String(student.programme || "").trim() === studentAssignmentProgrammeFilter,
+    );
+    const assigned = programmeStudents.filter(student => studentAssignmentByStudentId.has(student.id)).length;
     return {
       assigned,
-      need: Math.max(0, students.length - assigned),
-      total: students.length,
+      need: Math.max(0, programmeStudents.length - assigned),
+      total: programmeStudents.length,
     };
-  }, [studentAssignmentByStudentId, students]);
+  }, [studentAssignmentByStudentId, studentAssignmentProgrammeFilter, studentsWithProgramme]);
 
   return {
     paginatedStudentAssignmentRows,
@@ -562,7 +647,7 @@ export function useClassAssignmentView({
   }, [assignmentItems]);
 
   const assignmentProgrammeOptions = useMemo(
-    () => Array.from(new Set(assignmentItems.map(item => item.programmeGroup))).sort(),
+    () => Array.from(new Set(assignmentItems.flatMap(item => item.programmes.length > 0 ? item.programmes : [item.programmeGroup]))).sort(),
     [assignmentItems],
   );
 
@@ -575,7 +660,9 @@ export function useClassAssignmentView({
         (assignmentStatusFilter === "assigned" && assigned) ||
         (assignmentStatusFilter === "need" && item.assignable && !assigned);
       const programmeMatches =
-        assignmentProgrammeFilter === ALL_FILTER_VALUE || item.programmeGroup === assignmentProgrammeFilter;
+        assignmentProgrammeFilter === ALL_FILTER_VALUE ||
+        item.programmeGroup === assignmentProgrammeFilter ||
+        item.programmes.includes(assignmentProgrammeFilter);
       const searchMatches =
         !search ||
         item.courseCode.toLowerCase().includes(search) ||
@@ -606,14 +693,19 @@ export function useClassAssignmentView({
   }, [paginatedAssignmentItems]);
 
   const assignmentSummary = useMemo(() => {
-    const assignable = assignmentItems.filter(item => item.assignable);
+    const programmeItems = assignmentItems.filter(item =>
+      assignmentProgrammeFilter === ALL_FILTER_VALUE ||
+      item.programmeGroup === assignmentProgrammeFilter ||
+      item.programmes.includes(assignmentProgrammeFilter),
+    );
+    const assignable = programmeItems.filter(item => item.assignable);
     const assigned = assignable.filter(item => item.assignments.length > 0);
     return {
       assigned: assigned.length,
       need: assignable.length - assigned.length,
-      planned: assignmentItems.length,
+      planned: programmeItems.length,
     };
-  }, [assignmentItems]);
+  }, [assignmentItems, assignmentProgrammeFilter]);
 
   const selectedAssignmentItems = useMemo(
     () => assignmentItems.filter(item => selectedAssignmentKeys.includes(item.key) && item.assignable),

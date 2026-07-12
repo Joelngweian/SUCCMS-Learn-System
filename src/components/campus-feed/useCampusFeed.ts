@@ -11,6 +11,7 @@ import { getNotifyMessage, notify } from "@/lib/notify";
 import { subscribeToPrivateBroadcast } from "@/lib/realtime";
 import { supabase } from "@/lib/supabase";
 import {
+  isStoredCampusAttachment,
   normalizeCampusPostAttachments,
   type CampusPost,
   type CampusPostAttachment,
@@ -24,8 +25,8 @@ import {
   type CampusPostPageRow,
 } from "./campusFeedData";
 import {
-  MAX_CAMPUS_POST_MEDIA_BYTES,
   MAX_CAMPUS_POST_MEDIA_FILES,
+  getCampusPostMediaError,
 } from "./campusFeedLimits";
 import {
   removeCampusPostFiles,
@@ -182,19 +183,16 @@ export function useCampusFeed() {
       MAX_CAMPUS_POST_MEDIA_FILES - selectedMedia.length;
     if (remainingSlots <= 0) {
       setComposerError(
-        `You can attach up to ${MAX_CAMPUS_POST_MEDIA_FILES} images.`,
+        `You can attach up to ${MAX_CAMPUS_POST_MEDIA_FILES} media files.`,
       );
       return;
     }
 
     const accepted: SelectedCampusMedia[] = [];
     for (const file of files.slice(0, remainingSlots)) {
-      if (!file.type.startsWith("image/")) {
-        setComposerError("Campus posts currently support image attachments only.");
-        continue;
-      }
-      if (file.size > MAX_CAMPUS_POST_MEDIA_BYTES) {
-        setComposerError(`${file.name} is larger than 10 MB.`);
+      const mediaError = getCampusPostMediaError(file);
+      if (mediaError) {
+        setComposerError(mediaError);
         continue;
       }
 
@@ -331,16 +329,19 @@ export function useCampusFeed() {
 
     setPosts(current => current.filter(item => item.id !== post.id));
     const paths = [
-      ...post.attachments.map(attachment => attachment.path),
+      ...post.attachments
+        .filter(isStoredCampusAttachment)
+        .map(attachment => attachment.path),
       ...(commentRows || []).flatMap(row =>
         normalizeCampusPostAttachments(row.attachments)
+          .filter(isStoredCampusAttachment)
           .map(attachment => attachment.path)
       ),
     ];
     if (paths.length > 0) {
       const { error: storageError } = await removeCampusPostFiles(paths);
       if (storageError) {
-        notify.warning("Post deleted, but some image files need administrator cleanup.");
+        notify.warning("Post deleted, but some media files need administrator cleanup.");
       }
     }
   };
@@ -359,12 +360,12 @@ export function useCampusFeed() {
       > MAX_CAMPUS_POST_MEDIA_FILES
     ) {
       notify.warning(
-        `You can attach up to ${MAX_CAMPUS_POST_MEDIA_FILES} images.`,
+        `You can attach up to ${MAX_CAMPUS_POST_MEDIA_FILES} media files.`,
       );
       return false;
     }
     if (!trimmedContent && retainedAttachments.length + newMedia.length === 0) {
-      notify.warning("A post needs text or at least one image.");
+      notify.warning("A post needs text or at least one media file.");
       return false;
     }
 
@@ -377,6 +378,9 @@ export function useCampusFeed() {
           path: attachment.path,
           size: attachment.size,
           type: attachment.type,
+          ...(isStoredCampusAttachment(attachment)
+            ? {}
+            : { url: attachment.url }),
         }),
       );
 
@@ -419,12 +423,13 @@ export function useCampusFeed() {
       );
       const removedPaths = post.attachments
         .filter(attachment => !retainedPaths.has(attachment.path))
+        .filter(isStoredCampusAttachment)
         .map(attachment => attachment.path);
       if (removedPaths.length > 0) {
         const { error: storageError } = await removeCampusPostFiles(removedPaths);
         if (storageError) {
           notify.warning(
-            "Post updated, but some removed images need administrator cleanup.",
+            "Post updated, but some removed media files need administrator cleanup.",
           );
         }
       }

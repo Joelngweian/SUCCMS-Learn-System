@@ -76,10 +76,50 @@ const cleanNumber = (value: unknown, minimum = 0, maximum = 10000) => {
   return Math.min(maximum, Math.max(minimum, parsed));
 };
 
-const normalizeCourseContext = (body: any) => {
-  const courses = Array.isArray(body?.courses) ? body.courses.slice(0, 20) : [];
+type GeminiPayload = {
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
+    groundingMetadata?: { groundingChunks?: GroundingChunk[] };
+  }>;
+  error?: { message?: string };
+};
 
-  return courses.map((course: any) => ({
+type GroundingChunk = {
+  web?: {
+    title?: unknown;
+    uri?: unknown;
+  };
+};
+
+type ResourceSource = {
+  sourceIndex?: number;
+  title: string;
+  url: string;
+};
+
+type CourseContextInput = {
+  courses?: Array<Record<string, unknown>>;
+};
+
+type RecommendationItem = {
+  difficulty?: unknown;
+  duration?: unknown;
+  impact?: unknown;
+  platform?: unknown;
+  qualityScore?: unknown;
+  reason?: unknown;
+  relevance?: unknown;
+  sourceIndex?: unknown;
+  tags?: unknown[];
+  title?: unknown;
+  type?: unknown;
+};
+
+const normalizeCourseContext = (body: unknown) => {
+  const request = body as CourseContextInput;
+  const courses = Array.isArray(request?.courses) ? request.courses.slice(0, 20) : [];
+
+  return courses.map((course) => ({
     code: cleanText(course?.code, "N/A", 40),
     name: cleanText(course?.name, "Course", 160),
     semester: cleanText(course?.semester, "Current", 80),
@@ -237,9 +277,10 @@ const verifyGroundedSource = async (source: { title: string; url: string }) => {
   }
 };
 
-const getResponseText = (payload: any) =>
-  payload?.candidates?.[0]?.content?.parts
-    ?.map((part: any) => part?.text || "")
+const getResponseText = (payload: unknown) =>
+  (payload as GeminiPayload)
+    ?.candidates?.[0]?.content?.parts
+    ?.map((part) => part?.text || "")
     .join("")
     .trim() || "";
 
@@ -259,7 +300,7 @@ const callGemini = async (
     },
   );
 
-  const payload = await response.json();
+  const payload = (await response.json()) as GeminiPayload;
   if (!response.ok) {
     throw new Error(
       payload?.error?.message || "Gemini could not generate recommendations.",
@@ -348,11 +389,11 @@ Deno.serve(async (req) => {
       : [];
     const seenSourceUrls = new Set<string>();
     const sourceCandidates = rawSources
-      .map((chunk: any) => ({
+      .map((chunk: GroundingChunk) => ({
         title: cleanText(chunk?.web?.title, "Web resource", 180),
         url: cleanText(chunk?.web?.uri, "", 1200),
       }))
-      .filter((source: any) => {
+      .filter((source): source is ResourceSource => {
         if (!isSafeResourceUrl(source.url) || seenSourceUrls.has(source.url)) {
           return false;
         }
@@ -372,7 +413,7 @@ Deno.serve(async (req) => {
         (source, index, list) =>
           list.findIndex((candidate) => candidate.url === source.url) === index,
       )
-      .map((source: any, sourceIndex: number) => ({
+      .map((source, sourceIndex) => ({
         sourceIndex,
         ...source,
       }));
@@ -409,7 +450,9 @@ Deno.serve(async (req) => {
       throw new Error("Gemini returned an empty recommendation response.");
     }
 
-    const parsed = JSON.parse(responseText);
+    const parsed = JSON.parse(responseText) as {
+      recommendations?: RecommendationItem[];
+    };
     const rawRecommendations = Array.isArray(parsed?.recommendations)
       ? parsed.recommendations
       : [];
@@ -419,7 +462,7 @@ Deno.serve(async (req) => {
     for (const item of rawRecommendations.slice(0, 5)) {
       const sourceIndex = Number(item?.sourceIndex);
       const source = sources.find(
-        (candidate: any) => candidate.sourceIndex === sourceIndex,
+        (candidate) => candidate.sourceIndex === sourceIndex,
       );
       if (!source || usedSourceIndexes.has(sourceIndex)) continue;
       usedSourceIndexes.add(sourceIndex);

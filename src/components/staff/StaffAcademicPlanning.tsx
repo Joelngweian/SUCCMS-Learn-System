@@ -954,7 +954,7 @@ export function StaffAcademicPlanning() {
 
   return (
     <StaffAcademicPlanningProvider value={academicPlanningContextValue}>
-      <div className="space-y-6">
+      <div className="min-w-0 space-y-6 overflow-x-hidden">
       <AcademicPlanningPageHeader
         isLoading={isLoading}
         onRefresh={() => void loadAll()}

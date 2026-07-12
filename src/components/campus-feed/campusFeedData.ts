@@ -1,8 +1,10 @@
 import type { Database } from "@/lib/database.types";
 import { withSignedStorageUrls } from "@/lib/storageUrls";
 import {
+  isStoredCampusAttachment,
   normalizeCampusPostAttachments,
   type CampusPost,
+  type CampusPostAttachment,
   type CampusPostComment,
 } from "./campusFeedTypes";
 
@@ -19,11 +21,32 @@ export type CampusPostCursor = {
 export type CampusCommentRow =
   Database["public"]["Tables"]["campus_post_comments"]["Row"];
 
+const signCampusAttachments = async (
+  attachments: CampusPostAttachment[],
+): Promise<CampusPostAttachment[]> => {
+  const storedAttachments = attachments.filter(isStoredCampusAttachment);
+  if (storedAttachments.length === 0) return attachments;
+
+  const signedAttachments = await withSignedStorageUrls(
+    "campus-posts",
+    storedAttachments,
+  );
+  const signedUrlByPath = new Map(
+    signedAttachments.map(attachment => [attachment.path, attachment.url]),
+  );
+
+  return attachments.map(attachment => ({
+    ...attachment,
+    url: isStoredCampusAttachment(attachment)
+      ? signedUrlByPath.get(attachment.path) || attachment.url
+      : attachment.url,
+  }));
+};
+
 export const signCampusPostMedia = async (
   posts: CampusPost[],
 ): Promise<CampusPost[]> => {
-  const signedAttachments = await withSignedStorageUrls(
-    "campus-posts",
+  const signedAttachments = await signCampusAttachments(
     posts.flatMap(post => post.attachments),
   );
   const signedUrlByPath = new Map(
@@ -42,8 +65,7 @@ export const signCampusPostMedia = async (
 export const signCampusCommentMedia = async (
   comments: CampusPostComment[],
 ): Promise<CampusPostComment[]> => {
-  const signedAttachments = await withSignedStorageUrls(
-    "campus-posts",
+  const signedAttachments = await signCampusAttachments(
     comments.flatMap(comment => comment.attachments),
   );
   const signedUrlByPath = new Map(

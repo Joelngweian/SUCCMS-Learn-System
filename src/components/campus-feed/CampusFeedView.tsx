@@ -46,8 +46,9 @@ import type {
   SelectedCampusMedia,
 } from "./campusFeedTypes";
 import {
-  MAX_CAMPUS_POST_MEDIA_BYTES,
   MAX_CAMPUS_POST_MEDIA_FILES,
+  getCampusCommentMediaError,
+  getCampusPostMediaError,
 } from "./campusFeedLimits";
 import { useCampusFeed } from "./useCampusFeed";
 
@@ -241,6 +242,25 @@ export function CampusFeed() {
     });
   };
 
+  const insertComposerEmoji = (emoji: string) => {
+    const textarea = composerTextareaRef.current;
+    const start = textarea?.selectionStart ?? feed.draftContent.length;
+    const end = textarea?.selectionEnd ?? start;
+    const nextValue =
+      feed.draftContent.slice(0, start)
+      + emoji
+      + feed.draftContent.slice(end);
+    if (nextValue.length > 5000) return;
+
+    feed.setDraftContent(nextValue);
+    setActiveMention(null);
+    requestAnimationFrame(() => {
+      const nextCursor = start + emoji.length;
+      textarea?.focus();
+      textarea?.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
+
   const openPostDialog = (postId: string) => {
     setActivePostId(postId);
     void feed.loadComments(postId);
@@ -299,12 +319,9 @@ export function CampusFeed() {
     const setError = editing
       ? setEditCommentMediaError
       : setCommentMediaError;
-    if (!file.type.startsWith("image/")) {
-      setError("Comments currently support image attachments only.");
-      return;
-    }
-    if (file.size > MAX_CAMPUS_POST_MEDIA_BYTES) {
-      setError(`${file.name} is larger than 10 MB.`);
+    const mediaError = getCampusCommentMediaError(file);
+    if (mediaError) {
+      setError(mediaError);
       return;
     }
 
@@ -400,7 +417,7 @@ export function CampusFeed() {
       - editSelectedMedia.length;
     if (remainingSlots <= 0) {
       setEditError(
-        `You can attach up to ${MAX_CAMPUS_POST_MEDIA_FILES} images.`,
+        `You can attach up to ${MAX_CAMPUS_POST_MEDIA_FILES} media files.`,
       );
       return;
     }
@@ -408,12 +425,9 @@ export function CampusFeed() {
     const accepted: SelectedCampusMedia[] = [];
     let nextError = "";
     for (const file of files.slice(0, remainingSlots)) {
-      if (!file.type.startsWith("image/")) {
-        nextError = "Campus posts currently support image attachments only.";
-        continue;
-      }
-      if (file.size > MAX_CAMPUS_POST_MEDIA_BYTES) {
-        nextError = `${file.name} is larger than 10 MB.`;
+      const mediaError = getCampusPostMediaError(file);
+      if (mediaError) {
+        nextError = mediaError;
         continue;
       }
 
@@ -442,7 +456,11 @@ export function CampusFeed() {
     ) return;
 
     setSubmittingCommentIds(current => new Set(current).add(postId));
-    const created = await feed.addComment(postId, content, commentMedia);
+    const created = await feed.addComment(
+      postId,
+      content,
+      commentMedia,
+    );
     if (created) {
       setCommentDrafts(current => ({ ...current, [postId]: "" }));
       releaseCommentMedia();
@@ -517,6 +535,7 @@ export function CampusFeed() {
         onMentionChange={updateActiveMention}
         onMentionSelect={insertMentionSuggestion}
         onDropMedia={feed.selectDroppedMedia}
+        onEmojiSelect={insertComposerEmoji}
         onRemoveSelectedMedia={feed.removeSelectedMedia}
         onSelectMedia={feed.selectMedia}
         profileAvatarUrl={profile?.avatar_url}

@@ -1,8 +1,12 @@
-import type { ChangeEvent } from "react";
+import { useState, type ChangeEvent } from "react";
 import {
   BookOpenCheck,
+  Calculator,
+  ClipboardList,
   FolderKanban,
+  PenTool,
   Paperclip,
+  Rows3,
   UserRound,
   UsersRound,
   X,
@@ -24,6 +28,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   ASSESSMENT_TYPE_OPTIONS,
   getAssessmentTitlePlaceholder,
+  usesAiMarkingGuideFile,
   type AssessmentDraft,
   type AssessmentType,
 } from "@/lib/assessmentTypes";
@@ -115,17 +120,54 @@ const ASSESSMENT_TYPE_ICONS: Record<AssessmentType, LucideIcon> = {
   individual_assignment: UserRound,
   group_project: UsersRound,
   mini_project: FolderKanban,
+  mcq: ClipboardList,
+  structured: Rows3,
+  calculation: Calculator,
+  design: PenTool,
 };
+
+type AssessmentTypeGroupId = "coursework" | "answer_guided";
+
+const ASSESSMENT_TYPE_GROUPS: Array<{
+  id: AssessmentTypeGroupId;
+  title: string;
+  description: string;
+  types: AssessmentType[];
+}> = [
+  {
+    id: "coursework",
+    title: "Coursework",
+    description: "Tutorials, assignments and projects that use a rubric.",
+    types: [
+      "tutorial",
+      "individual_assignment",
+      "group_project",
+      "mini_project",
+    ],
+  },
+  {
+    id: "answer_guided",
+    title: "Answer-based / AI Guided",
+    description: "MCQ, structured, calculation or design work with a marking guide.",
+    types: ["mcq", "structured", "calculation", "design"],
+  },
+];
+
+const ASSESSMENT_TYPE_OPTION_BY_VALUE = new Map(
+  ASSESSMENT_TYPE_OPTIONS.map(option => [option.value, option]),
+);
 
 type CreateAssessmentDialogProps = {
   open: boolean;
   assignment: AssessmentDraft;
   rubricFiles: CourseResourceFile[];
+  markingGuideFiles: CourseResourceFile[];
   materialFiles: CourseResourceFile[];
   isUploading: boolean;
   onOpenChange: (open: boolean) => void;
   onAssignmentChange: (assignment: AssessmentDraft) => void;
   onRubricUpload: (event: ChangeEvent<HTMLInputElement>) => void;
+  onMarkingGuideUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   onMaterialUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   onCreate: () => void;
 };
@@ -134,23 +176,43 @@ export function CreateAssessmentDialog({
   open,
   assignment,
   rubricFiles,
+  markingGuideFiles,
   materialFiles,
   isUploading,
   onOpenChange,
   onAssignmentChange,
   onRubricUpload,
+  onMarkingGuideUpload,
   onMaterialUpload,
   onCreate,
 }: CreateAssessmentDialogProps) {
+  const [selectedGroupId, setSelectedGroupId] =
+    useState<AssessmentTypeGroupId | null>(null);
+  const shouldUseMarkingGuide = usesAiMarkingGuideFile(
+    assignment.assessment_type,
+  );
+  const assignmentGroup = ASSESSMENT_TYPE_GROUPS.find(group =>
+    group.types.includes(assignment.assessment_type as AssessmentType),
+  );
+  const activeGroupId = assignmentGroup?.id || selectedGroupId;
+  const activeGroup = ASSESSMENT_TYPE_GROUPS.find(
+    group => group.id === activeGroupId,
+  );
+  const hasAssessmentType = Boolean(assignment.assessment_type);
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) setSelectedGroupId(null);
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className="max-h-[92vh] overflow-y-auto sm:max-w-2xl"
         hideCloseButton
       >
         <DialogHeader className="flex flex-row justify-between items-center">
           <DialogTitle>Create Assessment</DialogTitle>
-          <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" size="icon" onClick={() => handleOpenChange(false)}>
             <X className="h-4 w-4" />
           </Button>
         </DialogHeader>
@@ -163,10 +225,51 @@ export function CreateAssessmentDialog({
               </p>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
-              {ASSESSMENT_TYPE_OPTIONS.map(option => {
-                const Icon = ASSESSMENT_TYPE_ICONS[option.value];
-                const isSelected =
-                  assignment.assessment_type === option.value;
+              {ASSESSMENT_TYPE_GROUPS.map(group => {
+                const isSelected = activeGroupId === group.id;
+
+                return (
+                  <button
+                    key={group.id}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => {
+                      setSelectedGroupId(group.id);
+                      if (
+                        assignment.assessment_type &&
+                        !group.types.includes(assignment.assessment_type)
+                      ) {
+                        onAssignmentChange({
+                          ...assignment,
+                          assessment_type: "",
+                        });
+                      }
+                    }}
+                    className={`rounded-lg border p-3 text-left transition-colors ${
+                      isSelected
+                        ? "border-primary bg-primary/5 ring-1 ring-primary"
+                        : "border-border hover:border-primary/50 hover:bg-muted/40"
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold">
+                      {group.title}
+                    </span>
+                    <span className="mt-1 block text-xs leading-4 text-muted-foreground">
+                      {group.description}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {activeGroup ? (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {activeGroup.types.map(type => {
+                  const option = ASSESSMENT_TYPE_OPTION_BY_VALUE.get(type);
+                  if (!option) return null;
+                  const Icon = ASSESSMENT_TYPE_ICONS[option.value];
+                  const isSelected =
+                    assignment.assessment_type === option.value;
 
                 return (
                   <button
@@ -194,19 +297,22 @@ export function CreateAssessmentDialog({
                     >
                       <Icon className="h-4 w-4" />
                     </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-semibold">
-                        {option.label}
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold">
+                          {option.label}
+                        </span>
+                        <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
+                          {option.description}
+                        </span>
                       </span>
-                      <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
-                        {option.description}
-                      </span>
-                    </span>
                   </button>
                 );
-              })}
-            </div>
+                })}
+              </div>
+            ) : null}
           </div>
+          {hasAssessmentType ? (
+            <>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>Title</Label>
@@ -244,44 +350,92 @@ export function CreateAssessmentDialog({
               placeholder="Describe the task..."
             />
           </div>
-          <div className="space-y-2">
-            <Label>Rubric / Grading Criteria (Optional)</Label>
-            <div className="border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg p-6 flex flex-col items-center justify-center gap-4 bg-zinc-50/50 dark:bg-zinc-900/50 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900">
-              {rubricFiles.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No rubric attached yet.</p>
-              ) : (
-                <div className="flex flex-wrap gap-2 justify-center w-full">
-                  {rubricFiles.map((file, index) => (
-                    <Badge
-                      key={`${file.path}-${index}`}
-                      variant="outline"
-                      className="gap-1 bg-blue-50 text-blue-700 border-blue-200"
-                    >
-                      <Paperclip className="h-3 w-3" />
-                      {file.name}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => document.getElementById("rubric-upload")?.click()}
-                disabled={isUploading}
-                className="bg-white dark:bg-zinc-950"
-              >
-                <Paperclip className="h-4 w-4 mr-2" /> Add Rubric
-              </Button>
-              <Input
-                id="rubric-upload"
-                type="file"
-                className="hidden"
-                onChange={onRubricUpload}
-                disabled={isUploading}
-                multiple
-              />
+          {shouldUseMarkingGuide ? (
+            <div className="space-y-2">
+              <Label>AI Marking Guide / Answer Key File</Label>
+              <div className="border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg p-5 flex flex-col items-center justify-center gap-3 bg-zinc-50/50 dark:bg-zinc-900/50 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                {markingGuideFiles.length === 0 ? (
+                  <p className="text-center text-sm text-muted-foreground">
+                    Upload the lecturer-only answer key or marking guide file.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2 justify-center w-full">
+                    {markingGuideFiles.map((file, index) => (
+                      <Badge
+                        key={`${file.path}-${index}`}
+                        variant="outline"
+                        className="gap-1 bg-blue-50 text-blue-700 border-blue-200"
+                      >
+                        <Paperclip className="h-3 w-3" />
+                        {file.name}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    document.getElementById("marking-guide-upload")?.click()
+                  }
+                  disabled={isUploading}
+                  className="bg-white dark:bg-zinc-950"
+                >
+                  <Paperclip className="h-4 w-4 mr-2" /> Add Marking Guide
+                </Button>
+                <Input
+                  id="marking-guide-upload"
+                  type="file"
+                  className="hidden"
+                  onChange={onMarkingGuideUpload}
+                  disabled={isUploading}
+                  multiple
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Students cannot see this file. It is used only by lecturers and AI grading.
+              </p>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-2">
+              <Label>Rubric / Grading Criteria (Optional)</Label>
+              <div className="border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg p-5 flex flex-col items-center justify-center gap-3 bg-zinc-50/50 dark:bg-zinc-900/50 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                {rubricFiles.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No rubric attached yet.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2 justify-center w-full">
+                    {rubricFiles.map((file, index) => (
+                      <Badge
+                        key={`${file.path}-${index}`}
+                        variant="outline"
+                        className="gap-1 bg-blue-50 text-blue-700 border-blue-200"
+                      >
+                        <Paperclip className="h-3 w-3" />
+                        {file.name}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => document.getElementById("rubric-upload")?.click()}
+                  disabled={isUploading}
+                  className="bg-white dark:bg-zinc-950"
+                >
+                  <Paperclip className="h-4 w-4 mr-2" /> Add Rubric
+                </Button>
+                <Input
+                  id="rubric-upload"
+                  type="file"
+                  className="hidden"
+                  onChange={onRubricUpload}
+                  disabled={isUploading}
+                  multiple
+                />
+              </div>
+            </div>
+          )}
           <div className="space-y-2">
             <Label>Total Marks (Optional)</Label>
             <Input
@@ -334,6 +488,8 @@ export function CreateAssessmentDialog({
               />
             </div>
           </div>
+            </>
+          ) : null}
         </div>
         <DialogFooter>
           <Button

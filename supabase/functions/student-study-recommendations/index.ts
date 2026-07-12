@@ -90,10 +90,46 @@ const cleanNumber = (value: unknown, minimum = 0, maximum = 10000) => {
   return Math.min(maximum, Math.max(minimum, parsed));
 };
 
-const normalizeCourseContext = (body: any) => {
-  const courses = Array.isArray(body?.courses) ? body.courses.slice(0, 12) : [];
+type GeminiPayload = {
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
+    groundingMetadata?: { groundingChunks?: GroundingChunk[] };
+  }>;
+  error?: { message?: string };
+};
 
-  return courses.map((course: any) => ({
+type GroundingChunk = {
+  web?: {
+    title?: unknown;
+    uri?: unknown;
+  };
+};
+
+type ResourceSource = {
+  sourceIndex?: number;
+  title: string;
+  url: string;
+};
+
+type CourseContextInput = {
+  courses?: Array<Record<string, unknown> & {
+    nextAssignment?: Record<string, unknown> | null;
+  }>;
+};
+
+type RecommendationItem = {
+  platform?: unknown;
+  reason?: unknown;
+  sourceIndex?: unknown;
+  title?: unknown;
+  type?: unknown;
+};
+
+const normalizeCourseContext = (body: unknown) => {
+  const request = body as CourseContextInput;
+  const courses = Array.isArray(request?.courses) ? request.courses.slice(0, 12) : [];
+
+  return courses.map((course) => ({
     code: cleanText(course?.code, "N/A", 40),
     name: cleanText(course?.name, "Course", 160),
     progress: cleanNumber(course?.progress, 0, 100),
@@ -244,9 +280,10 @@ const verifyResource = async (source: { title: string; url: string }) => {
   }
 };
 
-const getResponseText = (payload: any) =>
-  payload?.candidates?.[0]?.content?.parts
-    ?.map((part: any) => part?.text || "")
+const getResponseText = (payload: unknown) =>
+  (payload as GeminiPayload)
+    ?.candidates?.[0]?.content?.parts
+    ?.map((part) => part?.text || "")
     .join("")
     .trim() || "";
 
@@ -273,7 +310,7 @@ const callGemini = async (
           body: JSON.stringify(requestBody),
         },
       );
-      const payload = await response.json();
+      const payload = (await response.json()) as GeminiPayload;
 
       if (response.ok) {
         return { payload, model };
@@ -385,11 +422,11 @@ Deno.serve(async (req) => {
       ? groundingMetadata.groundingChunks
       : [];
     const discoveredSources = rawSources
-      .map((chunk: any) => ({
+      .map((chunk: GroundingChunk) => ({
         title: cleanText(chunk?.web?.title, "Learning resource", 180),
         url: cleanText(chunk?.web?.uri, "", 1200),
       }))
-      .filter((source: any) => isSafeResourceUrl(source.url));
+      .filter((source): source is ResourceSource => isSafeResourceUrl(source.url));
     const uniqueCandidates = [...trustedResources, ...discoveredSources].filter(
       (source, index, sources) =>
         sources.findIndex((candidate) => candidate.url === source.url) === index,
@@ -401,7 +438,7 @@ Deno.serve(async (req) => {
         (source, index, list) =>
           list.findIndex((candidate) => candidate?.url === source?.url) === index,
       )
-      .map((source: any, sourceIndex: number) => ({
+      .map((source, sourceIndex) => ({
         sourceIndex,
         title: source.title,
         url: source.url,
@@ -446,7 +483,9 @@ Deno.serve(async (req) => {
       throw new Error("Gemini returned an empty study recommendation response.");
     }
 
-    const parsed = JSON.parse(responseText);
+    const parsed = JSON.parse(responseText) as {
+      recommendations?: RecommendationItem[];
+    };
     const rawRecommendations = Array.isArray(parsed?.recommendations)
       ? parsed.recommendations
       : [];
@@ -456,7 +495,7 @@ Deno.serve(async (req) => {
     for (const item of rawRecommendations.slice(0, 3)) {
       const sourceIndex = Number(item?.sourceIndex);
       const source = sources.find(
-        (candidate: any) => candidate.sourceIndex === sourceIndex,
+        (candidate) => candidate.sourceIndex === sourceIndex,
       );
       if (!source || usedSourceIndexes.has(sourceIndex)) continue;
       usedSourceIndexes.add(sourceIndex);

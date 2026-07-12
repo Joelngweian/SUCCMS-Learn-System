@@ -35,7 +35,7 @@ export const useStudyPlanCourseHandlers = ({
   const [isSavingCourse, setIsSavingCourse] = useState(false);
 
   const handleAddCourse = async () => {
-    if (!selectedVersionId || !courseForm.courseName.trim()) return;
+    if (!selectedVersionId || !courseForm.courseName.trim()) return false;
     const nextPosition =
       versionCourses
         .filter(course => course.term_code === courseForm.termCode)
@@ -60,8 +60,10 @@ export const useStudyPlanCourseHandlers = ({
       notify.success("Study plan course added.");
       setCourseForm(current => ({ ...emptyCourseForm, termCode: current.termCode }));
       await loadVersionCourses(selectedVersionId);
+      return true;
     } catch (error) {
       notify.error(error, "Failed to add study plan course.");
+      return false;
     } finally {
       setIsSavingCourse(false);
     }

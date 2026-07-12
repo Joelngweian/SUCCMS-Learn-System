@@ -54,6 +54,7 @@ export function CourseAssignmentsSection({
         open={assignments.showNewAssignmentDialog}
         assignment={assignments.newAssign}
         rubricFiles={assignments.newRubricFiles}
+        markingGuideFiles={assignments.newMarkingGuideFiles}
         materialFiles={assignments.newAssignFiles}
         isUploading={assignments.isAssignmentUploading}
         onOpenChange={assignments.setShowNewAssignmentDialog}
@@ -62,6 +63,12 @@ export function CourseAssignmentsSection({
           void assignments.uploadAssignmentResourceFiles(
             event,
             assignments.setNewRubricFiles,
+          )
+        }
+        onMarkingGuideUpload={(event) =>
+          void assignments.uploadAssignmentResourceFiles(
+            event,
+            assignments.setNewMarkingGuideFiles,
           )
         }
         onMaterialUpload={(event) =>

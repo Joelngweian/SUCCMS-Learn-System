@@ -65,15 +65,41 @@ const cleanNumber = (value: unknown, minimum = 0, maximum = 100) => {
   return Math.min(maximum, Math.max(minimum, parsed));
 };
 
-const normalizeContext = (body: any) => {
-  const courses = Array.isArray(body?.courses) ? body.courses.slice(0, 12) : [];
+type GeminiPayload = {
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
+  }>;
+};
+
+type StudyInsightInput = {
+  courses?: Array<{
+    assignments?: Array<Record<string, unknown>>;
+    attendance?: Array<Record<string, unknown>>;
+    code?: unknown;
+    grades?: Array<Record<string, unknown>>;
+    name?: unknown;
+  }>;
+};
+
+type GeminiInsight = {
+  actionPlan?: unknown[];
+  confidence?: unknown;
+  courseCode?: unknown;
+  description?: unknown;
+  title?: unknown;
+  type?: unknown;
+};
+
+const normalizeContext = (body: unknown) => {
+  const request = body as StudyInsightInput;
+  const courses = Array.isArray(request?.courses) ? request.courses.slice(0, 12) : [];
 
   return courses
-    .map((course: any) => ({
+    .map((course) => ({
       code: cleanText(course?.code, "N/A", 30),
       name: cleanText(course?.name, "Course", 160),
       grades: Array.isArray(course?.grades)
-        ? course.grades.slice(0, 8).map((grade: any) => ({
+        ? course.grades.slice(0, 8).map((grade) => ({
             percentage: cleanNumber(grade?.percentage),
             gradedAt: cleanText(grade?.gradedAt, "", 60),
             assignmentTitle: cleanText(
@@ -86,13 +112,13 @@ const normalizeContext = (body: any) => {
           }))
         : [],
       attendance: Array.isArray(course?.attendance)
-        ? course.attendance.slice(0, 12).map((record: any) => ({
+        ? course.attendance.slice(0, 12).map((record) => ({
             status: cleanText(record?.status, "unknown", 20),
             classDate: cleanText(record?.classDate, "", 30),
           }))
         : [],
       assignments: Array.isArray(course?.assignments)
-        ? course.assignments.slice(0, 12).map((assignment: any) => ({
+        ? course.assignments.slice(0, 12).map((assignment) => ({
             title: cleanText(assignment?.title, "Assignment", 180),
             dueDate: cleanText(assignment?.dueDate, "", 60),
             submitted: Boolean(assignment?.submitted),
@@ -100,12 +126,13 @@ const normalizeContext = (body: any) => {
           }))
         : [],
     }))
-    .filter((course: any) => course.grades.length > 0);
+    .filter((course) => course.grades.length > 0);
 };
 
-const getResponseText = (payload: any) =>
-  payload?.candidates?.[0]?.content?.parts
-    ?.map((part: any) => part?.text || "")
+const getResponseText = (payload: unknown) =>
+  (payload as GeminiPayload)
+    ?.candidates?.[0]?.content?.parts
+    ?.map((part) => part?.text || "")
     .join("")
     .trim() || "";
 
@@ -215,9 +242,9 @@ Deno.serve(async (req) => {
       throw new Error("Gemini returned an empty study insight response.");
     }
 
-    const parsed = JSON.parse(responseText);
+    const parsed = JSON.parse(responseText) as { insights?: GeminiInsight[] };
     const insights = Array.isArray(parsed?.insights)
-      ? parsed.insights.slice(0, 4).map((insight: any, index: number) => ({
+      ? parsed.insights.slice(0, 4).map((insight, index) => ({
           id: `gemini-${insight.type}-${index}`,
           type: insight.type === "strength" ? "strength" : "weakness",
           title: cleanText(insight.title, "Study insight", 90),
@@ -251,4 +278,3 @@ Deno.serve(async (req) => {
     );
   }
 });
-

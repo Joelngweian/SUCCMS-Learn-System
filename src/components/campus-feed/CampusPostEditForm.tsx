@@ -9,6 +9,7 @@ import { Textarea } from "../ui/textarea";
 import { CampusMentionSuggestions } from "./CampusMentionSuggestions";
 import {
   MAX_CAMPUS_POST_MEDIA_FILES,
+  isCampusVideoType,
 } from "./campusFeedLimits";
 import type {
   CampusPostAttachment,
@@ -108,11 +109,24 @@ export function CampusPostEditForm({
               key={attachment.path}
               className="group relative overflow-hidden rounded-lg border bg-muted"
             >
-              <img
-                src={attachment.url}
-                alt={attachment.name}
-                className="h-28 w-full object-cover"
-              />
+              {isCampusVideoType(attachment.type) ? (
+                <video
+                  src={attachment.url}
+                  controls
+                  muted
+                  playsInline
+                  preload="metadata"
+                  className="h-28 w-full bg-black object-cover"
+                >
+                  <track kind="captions" />
+                </video>
+              ) : (
+                <img
+                  src={attachment.url}
+                  alt={attachment.name}
+                  className="h-28 w-full object-cover"
+                />
+              )}
               <Button
                 type="button"
                 variant="secondary"
@@ -131,11 +145,24 @@ export function CampusPostEditForm({
               key={media.id}
               className="group relative overflow-hidden rounded-lg border border-primary/30 bg-muted"
             >
-              <img
-                src={media.previewUrl}
-                alt={media.file.name}
-                className="h-28 w-full object-cover"
-              />
+              {isCampusVideoType(media.file.type) ? (
+                <video
+                  src={media.previewUrl}
+                  controls
+                  muted
+                  playsInline
+                  preload="metadata"
+                  className="h-28 w-full bg-black object-cover"
+                >
+                  <track kind="captions" />
+                </video>
+              ) : (
+                <img
+                  src={media.previewUrl}
+                  alt={media.file.name}
+                  className="h-28 w-full object-cover"
+                />
+              )}
               <Badge className="absolute bottom-1.5 left-1.5 text-[10px]">
                 New
               </Badge>
@@ -171,12 +198,12 @@ export function CampusPostEditForm({
             disabled={isUpdating || attachedCount >= MAX_CAMPUS_POST_MEDIA_FILES}
           >
             <ImagePlus className="h-4 w-4 text-emerald-600" />
-            Add photos
+            Add media
           </Button>
           <input
             ref={editFileInputRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif"
+            accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime"
             multiple
             className="hidden"
             onChange={onSelectEditMedia}

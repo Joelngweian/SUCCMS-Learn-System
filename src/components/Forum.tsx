@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext.tsx";
 import { notify } from "@/lib/notify";
@@ -22,10 +22,6 @@ import {
   Loader2, Coffee, Layers, ArrowLeft,
   X
 } from "lucide-react";
-import {
-  CreateDiscussionDialog,
-  EditDiscussionDialog,
-} from "./forum/ForumThreadDialogs";
 import { ForumEmojiPicker } from "./forum/ForumEmojiPicker";
 import { ForumReactionBar } from "./forum/ForumReactionBar";
 import { ForumThreadCard } from "./forum/ForumThreadCard";
@@ -63,6 +59,18 @@ import {
 import { useForumFeed } from "./forum/useForumFeed";
 import { useForumThreadDetails } from "./forum/useForumThreadDetails";
 import "./Forum.css";
+
+const CreateDiscussionDialog = lazy(() =>
+  import("./forum/ForumThreadDialogs").then(module => ({
+    default: module.CreateDiscussionDialog,
+  })),
+);
+
+const EditDiscussionDialog = lazy(() =>
+  import("./forum/ForumThreadDialogs").then(module => ({
+    default: module.EditDiscussionDialog,
+  })),
+);
 
 export function Forum() {
   const { user, profile } = useAuth();
@@ -965,85 +973,93 @@ export function Forum() {
         </main>
       </div>
 
-      <CreateDiscussionDialog
-        open={isCreateOpen}
-        courses={courses}
-        draft={newThread}
-        images={threadImages}
-        imagePreviews={threadImagePreviews}
-        fileInputRef={threadFileInputRef}
-        isSaving={isCreatingThread}
-        error={createThreadError}
-        onOpenChange={open => {
-          setIsCreateOpen(open);
-          if (!open) setCreateThreadError("");
-        }}
-        onDraftChange={setNewThread}
-        onRemoveImage={index => {
-          setThreadImages(current => current.filter((_, itemIndex) => itemIndex !== index));
-          setThreadImagePreviews(current => current.filter((_, itemIndex) => itemIndex !== index));
-        }}
-        onAddImages={files => {
-          if (files.length + threadImages.length > 5) {
-            notify.warning("A discussion can include up to 5 images.");
-            return;
-          }
-          setThreadImages(current => [...current, ...files]);
-          setThreadImagePreviews(current => [
-            ...current,
-            ...files.map(file => URL.createObjectURL(file)),
-          ]);
-        }}
-        onSubmit={handleCreateThread}
-      />
+      {isCreateOpen && (
+        <Suspense fallback={null}>
+          <CreateDiscussionDialog
+            open={isCreateOpen}
+            courses={courses}
+            draft={newThread}
+            images={threadImages}
+            imagePreviews={threadImagePreviews}
+            fileInputRef={threadFileInputRef}
+            isSaving={isCreatingThread}
+            error={createThreadError}
+            onOpenChange={open => {
+              setIsCreateOpen(open);
+              if (!open) setCreateThreadError("");
+            }}
+            onDraftChange={setNewThread}
+            onRemoveImage={index => {
+              setThreadImages(current => current.filter((_, itemIndex) => itemIndex !== index));
+              setThreadImagePreviews(current => current.filter((_, itemIndex) => itemIndex !== index));
+            }}
+            onAddImages={files => {
+              if (files.length + threadImages.length > 5) {
+                notify.warning("A discussion can include up to 5 images.");
+                return;
+              }
+              setThreadImages(current => [...current, ...files]);
+              setThreadImagePreviews(current => [
+                ...current,
+                ...files.map(file => URL.createObjectURL(file)),
+              ]);
+            }}
+            onSubmit={handleCreateThread}
+          />
+        </Suspense>
+      )}
 
-      <EditDiscussionDialog
-        open={Boolean(editingThread)}
-        draft={editThread}
-        existingImages={editThreadExistingImages}
-        images={editThreadImages}
-        imagePreviews={editThreadImagePreviews}
-        fileInputRef={editThreadFileInputRef}
-        isSaving={isSavingThreadEdit}
-        error={editThreadError}
-        onOpenChange={open => {
-          if (!open) {
-            setEditingThread(null);
-            setEditThreadError("");
-          }
-        }}
-        onDraftChange={setEditThread}
-        onRemoveExistingImage={index =>
-          setEditThreadExistingImages(current =>
-            current.filter((_, itemIndex) => itemIndex !== index)
-          )
-        }
-        onRemoveNewImage={index => {
-          setEditThreadImages(current =>
-            current.filter((_, itemIndex) => itemIndex !== index)
-          );
-          setEditThreadImagePreviews(current =>
-            current.filter((_, itemIndex) => itemIndex !== index)
-          );
-        }}
-        onAddImages={files => {
-          if (
-            files.length
-              + editThreadImages.length
-              + editThreadExistingImages.length
-              > 5
-          ) {
-            notify.warning("A discussion can include up to 5 images.");
-            return;
-          }
-          setEditThreadImages(current => [...current, ...files]);
-          setEditThreadImagePreviews(current => [
-            ...current,
-            ...files.map(file => URL.createObjectURL(file)),
-          ]);
-        }}
-        onSubmit={handleSaveThreadEdit}
-      />
+      {editingThread && (
+        <Suspense fallback={null}>
+          <EditDiscussionDialog
+            open={Boolean(editingThread)}
+            draft={editThread}
+            existingImages={editThreadExistingImages}
+            images={editThreadImages}
+            imagePreviews={editThreadImagePreviews}
+            fileInputRef={editThreadFileInputRef}
+            isSaving={isSavingThreadEdit}
+            error={editThreadError}
+            onOpenChange={open => {
+              if (!open) {
+                setEditingThread(null);
+                setEditThreadError("");
+              }
+            }}
+            onDraftChange={setEditThread}
+            onRemoveExistingImage={index =>
+              setEditThreadExistingImages(current =>
+                current.filter((_, itemIndex) => itemIndex !== index)
+              )
+            }
+            onRemoveNewImage={index => {
+              setEditThreadImages(current =>
+                current.filter((_, itemIndex) => itemIndex !== index)
+              );
+              setEditThreadImagePreviews(current =>
+                current.filter((_, itemIndex) => itemIndex !== index)
+              );
+            }}
+            onAddImages={files => {
+              if (
+                files.length
+                  + editThreadImages.length
+                  + editThreadExistingImages.length
+                  > 5
+              ) {
+                notify.warning("A discussion can include up to 5 images.");
+                return;
+              }
+              setEditThreadImages(current => [...current, ...files]);
+              setEditThreadImagePreviews(current => [
+                ...current,
+                ...files.map(file => URL.createObjectURL(file)),
+              ]);
+            }}
+            onSubmit={handleSaveThreadEdit}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

@@ -324,8 +324,8 @@ export default function App() {
   const collapsedCenterClass = sidebarCollapsed ? 'lg:justify-center lg:px-2' : '';
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex min-h-screen">
+    <div className="min-h-screen overflow-x-clip bg-background">
+      <div className="flex min-h-screen min-w-0 overflow-x-clip">
         {/* Mobile Sidebar Overlay */}
         {sidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
@@ -430,7 +430,7 @@ export default function App() {
 
         {/* Main Content Area */}
 
-        <div className="flex-1 lg:ml-0 min-w-0">
+        <div className="min-w-0 flex-1 overflow-x-hidden lg:ml-0">
           <header className="bg-background border-b sticky top-0 z-30">
             <div className="flex items-center justify-between px-4 sm:px-6 py-4">
               <div className="flex items-center gap-4">
@@ -451,7 +451,7 @@ export default function App() {
           </header>
 
           <main
-            className={`mx-auto w-full p-4 sm:p-6 lg:p-8 ${
+            className={`mx-auto w-full min-w-0 p-4 sm:p-6 lg:p-8 ${
           isWideDashboard ? 'max-w-[1600px]' : 'max-w-7xl'
             }`}
           >

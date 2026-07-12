@@ -129,7 +129,7 @@ const toCourseMentionSuggestion = (course: {
   token: course.course_code,
   title: course.course_code,
   subtitle: course.chinese_name
-    ? `${course.name || "Course"} 路 ${course.chinese_name}`
+    ? `${course.name || "Course"} - ${course.chinese_name}`
     : course.name || "Course",
   badge: "Course",
 });

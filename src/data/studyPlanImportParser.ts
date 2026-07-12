@@ -379,7 +379,17 @@ const parseStudyPlanRows = ({
         if (!courseName || courseName.length <= 1) continue;
         if (!courseCode && /^\d+(?:\.\d+)?$/.test(courseName)) continue;
 
-        for (const choice of expandChoiceCourses(courseCode, courseName)) {
+        const courseChoices = expandChoiceCourses(courseCode, courseName);
+        const choiceGroupPlanCourseKey = courseChoices.length > 1
+          ? getPlanCourseKey({
+            courseCode,
+            courseName,
+            creditHours,
+            isPlaceholder: false,
+          })
+          : null;
+
+        for (const choice of courseChoices) {
           if (!choice.courseName || choice.courseName.length <= 1) continue;
 
           const isPlaceholder = isPlaceholderCourse(choice.courseCode, choice.courseName, category);
@@ -391,7 +401,7 @@ const parseStudyPlanRows = ({
           });
           const position = (termPositions.get(block.termCode) || 0) + 1;
           termPositions.set(block.termCode, position);
-          const planCourseKey = getPlanCourseKey({
+          const planCourseKey = choiceGroupPlanCourseKey || getPlanCourseKey({
             courseCode: choice.courseCode,
             courseName: choice.courseName,
             creditHours,
@@ -421,7 +431,7 @@ const parseStudyPlanRows = ({
 const mergeParsedCourses = (courses: ParsedStudyPlanCourse[]) => {
   const merged = new Map<string, ParsedStudyPlanCourse>();
   for (const course of courses) {
-    const key = `${course.termCode}::${course.planCourseKey}`;
+    const key = `${course.termCode}::${course.planCourseKey}::${course.position}::${course.courseCode || course.courseName}`;
     const existing = merged.get(key);
     if (!existing) {
       merged.set(key, { ...course, sourceFiles: Array.from(new Set(course.sourceFiles)) });

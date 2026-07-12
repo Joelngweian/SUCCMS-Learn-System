@@ -227,6 +227,31 @@ export type Database = {
           },
         ]
       >
+      assignment_marking_guides: Table<
+        {
+          assignment_id: string
+          marking_guide: string
+          updated_by: string | null
+          updated_at: string
+        },
+        "assignment_id" | "marking_guide",
+        [
+          {
+            foreignKeyName: "assignment_marking_guides_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: true
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignment_marking_guides_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      >
       attendance: Table<
         {
           id: string

@@ -174,9 +174,6 @@ export function StudentStudyPlansTabContent() {
                       <UserRoundCheck className="h-5 w-5 text-primary" />
                       Student Study Plan Assignment
                     </CardTitle>
-                    <CardDescription>
-                      AARO assigns the exact programme, intake and track, such as CS 2026B B1, before students browse courses.
-                    </CardDescription>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-center text-sm">
                     <div className="rounded-lg border px-3 py-2">
@@ -195,8 +192,22 @@ export function StudentStudyPlansTabContent() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <div className="space-y-1 md:col-span-2">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)]">
+                  <div className="space-y-1">
+                    <Label>Programme</Label>
+                    <Select value={studentAssignmentProgrammeFilter} onValueChange={setStudentAssignmentProgrammeFilter}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="All programmes" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL_FILTER_VALUE}>All programmes</SelectItem>
+                        {studentProgrammeOptions.map(programme => (
+                          <SelectItem key={programme} value={programme}>{programme}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
                     <Label>Study Plan Version</Label>
                     <Select
                       value={selectedStudentAssignmentVersionId}
@@ -218,20 +229,6 @@ export function StudentStudyPlansTabContent() {
                             </SelectItem>
                           ))
                         )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Programme</Label>
-                    <Select value={studentAssignmentProgrammeFilter} onValueChange={setStudentAssignmentProgrammeFilter}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="All programmes" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={ALL_FILTER_VALUE}>All programmes</SelectItem>
-                        {studentProgrammeOptions.map(programme => (
-                          <SelectItem key={programme} value={programme}>{programme}</SelectItem>
-                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -311,7 +308,7 @@ export function StudentStudyPlansTabContent() {
                       disabled={isAssigningStudents || selectedStudentIds.length === 0 || !selectedStudentAssignmentVersionId}
                     >
                       {isAssigningStudents ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserRoundCheck className="mr-2 h-4 w-4" />}
-                      Assign selected
+                      Assign
                     </Button>
                     <Button
                       type="button"
@@ -320,7 +317,7 @@ export function StudentStudyPlansTabContent() {
                       onClick={() => void handleUnassignStudents()}
                       disabled={isAssigningStudents || selectedStudentIds.length === 0}
                     >
-                      Unassign selected
+                      Unassign
                     </Button>
                   </div>
                 </div>

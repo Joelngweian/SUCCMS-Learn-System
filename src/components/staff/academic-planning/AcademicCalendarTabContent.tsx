@@ -225,31 +225,29 @@ export function AcademicCalendarTabContent() {
                       </Alert>
                     )}
 
-                    <div className="overflow-x-auto rounded-lg border bg-background">
-                      <div className="min-w-[520px]">
-                        <div className="grid grid-cols-[120px_1fr_110px] gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-semibold uppercase text-muted-foreground">
-                          <span>Semester</span>
-                          <span>Teaching</span>
-                          <span>Status</span>
-                        </div>
-                        {academicCalendarPreview.terms.map(term => (
-                          <div
-                            key={term.code}
-                            className="grid grid-cols-[120px_1fr_110px] gap-3 border-b px-3 py-3 text-sm last:border-b-0"
-                          >
-                            <div>
-                              <p className="font-semibold">{term.code}</p>
-                              <p className="text-xs text-muted-foreground">{term.name}</p>
-                            </div>
-                            <span>{formatDateLabel(term.teachingStartsAt)} - {formatDateLabel(term.teachingEndsAt)}</span>
-                            <span>
-                              <Badge className={academicCalendarStatusClassName[term.status]} variant="secondary">
-                                {term.status}
-                              </Badge>
-                            </span>
-                          </div>
-                        ))}
+                    <div className="overflow-hidden rounded-lg border bg-background">
+                      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_5.5rem] gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-semibold uppercase text-muted-foreground">
+                        <span>Semester</span>
+                        <span>Teaching</span>
+                        <span>Status</span>
                       </div>
+                      {academicCalendarPreview.terms.map(term => (
+                        <div
+                          key={term.code}
+                          className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_5.5rem] gap-3 border-b px-3 py-3 text-sm last:border-b-0"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-semibold">{term.code}</p>
+                            <p className="break-words text-xs text-muted-foreground">{term.name}</p>
+                          </div>
+                          <span className="min-w-0 break-words">{formatDateLabel(term.teachingStartsAt)} - {formatDateLabel(term.teachingEndsAt)}</span>
+                          <span>
+                            <Badge className={academicCalendarStatusClassName[term.status]} variant="secondary">
+                              {term.status}
+                            </Badge>
+                          </span>
+                        </div>
+                      ))}
                     </div>
 
                     <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">

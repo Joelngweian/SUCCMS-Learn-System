@@ -115,11 +115,17 @@ export type StaffAcademicPlanningContextValue = {
   versionCourseTermFilter: string;
   setVersionCourseTermFilter: Dispatch<SetStateAction<string>>;
   filteredVersionCourses: DbStudyPlanCourse[];
-  versionCourseGroups: { courses: DbStudyPlanCourse[]; termCode: string; totalCredits: number }[];
+  versionCourseGroups: {
+    choiceCourseIds: string[];
+    courses: DbStudyPlanCourse[];
+    creditLimit: number | null;
+    termCode: string;
+    totalCredits: number;
+  }[];
   courseForm: StudyPlanCourseForm;
   setCourseForm: Dispatch<SetStateAction<StudyPlanCourseForm>>;
   isSavingCourse: boolean;
-  handleAddCourse: () => Promise<void>;
+  handleAddCourse: () => Promise<boolean>;
   handleDeleteCourse: (courseId: string) => Promise<void>;
   academicCalendarPreview: ParsedAcademicCalendar | null;
   setAcademicCalendarPreview: Dispatch<SetStateAction<ParsedAcademicCalendar | null>>;

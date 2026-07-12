@@ -5,12 +5,17 @@ import {
   type DragEvent,
   type RefObject,
 } from "react";
-import { ImagePlus, Loader2, Send, X } from "lucide-react";
+import { ImagePlus, Loader2, Send, Video, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 import { Textarea } from "../ui/textarea";
 import { CampusMentionSuggestions } from "./CampusMentionSuggestions";
+import { LazyForumEmojiPicker } from "./LazyForumEmojiPicker";
+import {
+  MAX_CAMPUS_POST_MEDIA_FILES,
+  isCampusVideoType,
+} from "./campusFeedLimits";
 import { getCampusMemberInitials } from "./campusFeedPresentation";
 import type {
   ActiveCampusMention,
@@ -31,6 +36,7 @@ export function CampusPostComposer({
   onMentionChange,
   onMentionSelect,
   onDropMedia,
+  onEmojiSelect,
   onRemoveSelectedMedia,
   onSelectMedia,
   profileAvatarUrl,
@@ -53,6 +59,7 @@ export function CampusPostComposer({
   ) => void;
   onMentionSelect: (suggestion: CampusMentionSuggestion) => void;
   onDropMedia: (files: File[]) => void;
+  onEmojiSelect: (emoji: string) => void;
   onRemoveSelectedMedia: (mediaId: string) => void;
   onSelectMedia: (event: ChangeEvent<HTMLInputElement>) => void;
   profileAvatarUrl?: string | null;
@@ -61,7 +68,8 @@ export function CampusPostComposer({
   textareaRef: RefObject<HTMLTextAreaElement>;
 }) {
   const firstName = profileName?.split(" ")[0] || "Scholar";
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const [isDraggingMedia, setIsDraggingMedia] = useState(false);
 
   const hasDraggedFiles = (event: DragEvent<HTMLDivElement>) =>
@@ -148,11 +156,24 @@ export function CampusPostComposer({
                     key={media.id}
                     className="group relative overflow-hidden rounded-lg border bg-muted"
                   >
-                    <img
-                      src={media.previewUrl}
-                      alt={media.file.name}
-                      className="h-36 w-full object-cover"
-                    />
+                    {isCampusVideoType(media.file.type) ? (
+                      <video
+                        src={media.previewUrl}
+                        controls
+                        muted
+                        playsInline
+                        preload="metadata"
+                        className="h-36 w-full bg-black object-cover"
+                      >
+                        <track kind="captions" />
+                      </video>
+                    ) : (
+                      <img
+                        src={media.previewUrl}
+                        alt={media.file.name}
+                        className="h-36 w-full object-cover"
+                      />
+                    )}
                     <Button
                       type="button"
                       variant="secondary"
@@ -180,24 +201,49 @@ export function CampusPostComposer({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isCreating || selectedMedia.length >= 4}
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={
+                    isCreating
+                    || selectedMedia.length >= MAX_CAMPUS_POST_MEDIA_FILES
+                  }
                 >
                   <ImagePlus className="h-4 w-4 text-emerald-600" />
                   Photo
                 </Button>
                 <input
-                  ref={fileInputRef}
+                  ref={photoInputRef}
                   type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  accept="image/jpeg,image/png,image/webp"
                   multiple
                   className="hidden"
                   onChange={onSelectMedia}
                 />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => videoInputRef.current?.click()}
+                  disabled={
+                    isCreating
+                    || selectedMedia.length >= MAX_CAMPUS_POST_MEDIA_FILES
+                  }
+                >
+                  <Video className="h-4 w-4 text-blue-600" />
+                  Video
+                </Button>
+                <input
+                  ref={videoInputRef}
+                  type="file"
+                  accept="video/mp4,video/webm,video/quicktime"
+                  multiple
+                  className="hidden"
+                  onChange={onSelectMedia}
+                />
+                <LazyForumEmojiPicker onSelect={onEmojiSelect} />
                 <span className="hidden text-xs text-muted-foreground sm:inline">
                   {isDraggingMedia
-                    ? "Drop photos here"
-                    : "Campus-wide · students, lecturers and admins"}
+                    ? "Drop photos or videos here"
+                    : "Campus-wide - students, lecturers and admins"}
                 </span>
               </div>
               <Button

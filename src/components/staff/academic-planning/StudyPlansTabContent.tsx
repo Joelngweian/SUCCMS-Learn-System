@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   CalendarDays,
   CheckCircle2,
@@ -20,13 +21,14 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui/select";
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "../../ui/table";
+import { emptyCourseForm } from "./useStudyPlanCourseHandlers";
 import { useStaffAcademicPlanningContext } from "./useStaffAcademicPlanningContext";
 
 type StudentAssignmentStatusFilter = "unassigned" | "assigned" | "all";
 type AssignmentStatusFilter = "need" | "assigned" | "all";
 
 export function StudyPlansTabContent() {
+  const [isAddCourseDialogOpen, setIsAddCourseDialogOpen] = useState(false);
   const {
     ALL_FILTER_VALUE,
     ASSIGNMENT_COURSES_PAGE_SIZE,
@@ -161,7 +163,17 @@ export function StudyPlansTabContent() {
     lecturerLabel,
     setTemplateHelpType,
     templateHelpType,
- } = useStaffAcademicPlanningContext();
+  } = useStaffAcademicPlanningContext();
+
+  const openAddCourseDialog = (termCode: string) => {
+    setCourseForm({ ...emptyCourseForm, termCode });
+    setIsAddCourseDialogOpen(true);
+  };
+
+  const handleAddCourseFromDialog = async () => {
+    const wasAdded = await handleAddCourse();
+    if (wasAdded) setIsAddCourseDialogOpen(false);
+  };
 
   return (
     <>
@@ -344,28 +356,26 @@ export function StudyPlansTabContent() {
                                     <span className="text-sm font-medium">{term.courses.length} course(s)</span>
                                   </div>
                                 </div>
-                                <div className="overflow-x-auto">
-                                  <div className="min-w-[560px]">
-                                    <div className="grid grid-cols-[44px_104px_minmax(180px,1fr)_120px_64px] gap-2 border-b px-3 py-2 text-xs font-semibold text-muted-foreground">
-                                      <span>No.</span>
-                                      <span>Code</span>
-                                      <span>Course Name</span>
-                                      <span>Category</span>
-                                      <span>Credits</span>
-                                    </div>
-                                    {term.courses.map(course => (
-                                      <div
-                                        key={term.termCode + "-full-" + course.planCourseKey + "-" + course.position}
-                                        className="grid grid-cols-[44px_104px_minmax(180px,1fr)_120px_64px] gap-2 border-b px-3 py-1.5 text-sm last:border-b-0"
-                                      >
-                                        <span className="text-muted-foreground">{course.position}</span>
-                                        <span className="min-w-0 break-all font-medium">{course.courseCode || "No code"}</span>
-                                        <span className="min-w-0 break-words">{course.courseName}</span>
-                                        <span className="min-w-0 break-words text-muted-foreground">{course.category || "-"}</span>
-                                        <span>{course.creditHours || "-"}</span>
-                                      </div>
-                                    ))}
+                                <div>
+                                  <div className="grid grid-cols-[2.25rem_minmax(0,0.9fr)_minmax(0,1.8fr)_minmax(0,1fr)_3rem] gap-2 border-b px-3 py-2 text-xs font-semibold text-muted-foreground">
+                                    <span>No.</span>
+                                    <span>Code</span>
+                                    <span>Course Name</span>
+                                    <span>Category</span>
+                                    <span>Credits</span>
                                   </div>
+                                  {term.courses.map(course => (
+                                    <div
+                                      key={term.termCode + "-full-" + course.planCourseKey + "-" + course.position}
+                                      className="grid grid-cols-[2.25rem_minmax(0,0.9fr)_minmax(0,1.8fr)_minmax(0,1fr)_3rem] gap-2 border-b px-3 py-1.5 text-sm last:border-b-0"
+                                    >
+                                      <span className="text-muted-foreground">{course.position}</span>
+                                      <span className="min-w-0 break-all font-medium">{course.courseCode || "No code"}</span>
+                                      <span className="min-w-0 break-words">{course.courseName}</span>
+                                      <span className="min-w-0 break-words text-muted-foreground">{course.category || "-"}</span>
+                                      <span>{course.creditHours || "-"}</span>
+                                    </div>
+                                  ))}
                                 </div>
                               </section>
                             ))}
@@ -423,67 +433,12 @@ export function StudyPlansTabContent() {
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>Add Course to Selected Study Plan</CardTitle>
-
-              </CardHeader>
-              <CardContent className="grid gap-3 md:grid-cols-6">
-                <div className="space-y-1 md:col-span-1">
-                  <Label>Semester</Label>
-                  <Input
-                    value={courseForm.termCode}
-                    onChange={event => setCourseForm(current => ({ ...current, termCode: event.target.value }))}
-                    placeholder="2026B"
-                  />
-                </div>
-                <div className="space-y-1 md:col-span-1">
-                  <Label>Course Code</Label>
-                  <Input
-                    value={courseForm.courseCode}
-                    onChange={event => setCourseForm(current => ({ ...current, courseCode: event.target.value }))}
-                    placeholder="CSIS2033"
-                  />
-                </div>
-                <div className="space-y-1 md:col-span-2">
-                  <Label>Course Name</Label>
-                  <Input
-                    value={courseForm.courseName}
-                    onChange={event => setCourseForm(current => ({ ...current, courseName: event.target.value }))}
-                    placeholder="Course name"
-                  />
-                </div>
-                <div className="space-y-1 md:col-span-1">
-                  <Label>Category</Label>
-                  <Input
-                    value={courseForm.category}
-                    onChange={event => setCourseForm(current => ({ ...current, category: event.target.value }))}
-                    placeholder="Core"
-                  />
-                </div>
-                <div className="space-y-1 md:col-span-1">
-                  <Label>Credits</Label>
-                  <Input
-                    value={courseForm.creditHours}
-                    onChange={event => setCourseForm(current => ({ ...current, creditHours: event.target.value }))}
-                    inputMode="numeric"
-                  />
-                </div>
-                <div className="md:col-span-6">
-                  <Button onClick={() => void handleAddCourse()} disabled={!selectedVersionId || !courseForm.courseName.trim() || isSavingCourse}>
-                    {isSavingCourse ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                    Add Course
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <CardTitle>Courses in This Version</CardTitle>
 
                   </div>
-                  <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-[920px] xl:grid-cols-5">
+                  <div className="grid w-full min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
                     <div className="space-y-1 sm:col-span-2 xl:col-span-1">
                       <Label>Version</Label>
                       <Select
@@ -589,7 +544,7 @@ export function StudyPlansTabContent() {
                       key={`${selectedVersionId}-${versionCourseTermFilter}`}
                       type="multiple"
                       defaultValue={versionCourseGroups.map(group => group.termCode)}
-                      className="space-y-3"
+                      className="min-w-0 space-y-3"
                     >
                       {versionCourseGroups.map(group => (
                         <AccordionItem
@@ -597,89 +552,95 @@ export function StudyPlansTabContent() {
                           value={group.termCode}
                           className="overflow-hidden rounded-xl border bg-card"
                         >
-                          <AccordionTrigger className="px-4 py-3 hover:no-underline">
-                            <div className="flex w-full flex-col gap-2 pr-3 text-left sm:flex-row sm:items-center sm:justify-between">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <Badge className="bg-blue-600 text-white hover:bg-blue-600 dark:bg-blue-500">
-                                  {group.termCode}
-                                </Badge>
-                                <span className="text-sm text-muted-foreground">
-                                  {group.courses.length} course{group.courses.length === 1 ? "" : "s"}
+                          <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex flex-wrap items-center gap-2 text-left">
+                              <Badge className="bg-blue-600 text-white hover:bg-blue-600 dark:bg-blue-500">
+                                {group.termCode}
+                              </Badge>
+                              <span className="text-sm text-muted-foreground">
+                                {group.courses.length} course{group.courses.length === 1 ? "" : "s"}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 border-blue-200 px-3 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/40"
+                                onClick={() => openAddCourseDialog(group.termCode)}
+                              >
+                                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                                Add course
+                              </Button>
+                              <AccordionTrigger className="h-8 w-8 flex-none items-center justify-center rounded-md border p-0 hover:bg-muted hover:no-underline">
+                                <span className="sr-only">Toggle {group.termCode}</span>
+                              </AccordionTrigger>
+                            </div>
+                          </div>
+                          <AccordionContent className="px-0 pb-0">
+                            <div className="overflow-hidden">
+                              <div className="grid grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_5.5rem_2.75rem] gap-2 border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground">
+                                <span className="text-center">No.</span>
+                                <span>Course Name</span>
+                                <span>Code</span>
+                                <span>Category</span>
+                                <span className="text-center">Credit</span>
+                                <span className="text-right">Action</span>
+                              </div>
+                              {group.courses.map((course, index) => {
+                                const courseCode = course.course_code?.trim() || "";
+                                const isChoiceCourse =
+                                  courseCode.includes("/") ||
+                                  course.course_name.includes("/") ||
+                                  group.choiceCourseIds.includes(course.id);
+
+                                return (
+                                  <div
+                                    key={course.id}
+                                    className="grid grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_5.5rem_2.75rem] gap-2 border-b px-3 py-2 text-sm last:border-b-0"
+                                  >
+                                    <span className="text-center text-muted-foreground">
+                                      {course.position || index + 1}
+                                    </span>
+                                    <div className="min-w-0 font-medium leading-relaxed">
+                                      <span className="break-words">{course.course_name}</span>
+                                      {isChoiceCourse ? (
+                                        <Badge variant="outline" className="mt-1 w-fit border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200">
+                                          Student chooses one
+                                        </Badge>
+                                      ) : null}
+                                    </div>
+                                    <span className="min-w-0 whitespace-pre-line break-all font-medium leading-relaxed">
+                                      {courseCode ? courseCode.replace(/\//g, "/\n") : "-"}
+                                    </span>
+                                    <span className="min-w-0 break-words text-muted-foreground">
+                                      {course.category || "-"}
+                                    </span>
+                                    <span className="text-center font-medium">
+                                      {course.credit_hours ?? "-"}
+                                    </span>
+                                    <span className="text-right">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                        onClick={() => void handleDeleteCourse(course.id)}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                        <span className="sr-only">Remove course</span>
+                                      </Button>
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                              <div className="grid grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_5.5rem_2.75rem] gap-2 border-t bg-muted/50 px-3 py-2 text-sm font-semibold">
+                                <span className="col-span-4 text-right">Total credit:</span>
+                                <span className={`whitespace-nowrap text-center text-base font-bold ${group.creditLimit !== null && group.totalCredits > group.creditLimit ? "text-destructive" : ""}`}>
+                                  {group.totalCredits}{group.creditLimit !== null ? ` / ${group.creditLimit}` : ""}
                                 </span>
+                                <span />
                               </div>
                             </div>
-                          </AccordionTrigger>
-                          <AccordionContent className="px-0 pb-0">
-                            <Table className="min-w-[760px]">
-                              <TableHeader>
-                                <TableRow className="bg-muted/40 hover:bg-muted/40">
-                                  <TableHead className="w-14 text-center">No.</TableHead>
-                                  <TableHead className="min-w-[280px]">Course Name</TableHead>
-                                  <TableHead className="min-w-[140px]">Code</TableHead>
-                                  <TableHead className="min-w-[160px]">Category</TableHead>
-                                  <TableHead className="w-20 text-center">Credit</TableHead>
-                                  <TableHead className="w-16 text-right">Action</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {group.courses.map((course, index) => {
-                                  const courseCode = course.course_code?.trim() || "";
-                                  const isChoiceCourse =
-                                    courseCode.includes("/") || course.course_name.includes("/");
-
-                                  return (
-                                    <TableRow key={course.id}>
-                                      <TableCell className="text-center text-muted-foreground">
-                                        {course.position || index + 1}
-                                      </TableCell>
-                                      <TableCell className="max-w-[420px] whitespace-normal font-medium leading-relaxed">
-                                        <div className="flex flex-col gap-1">
-                                          <span>{course.course_name}</span>
-                                          {isChoiceCourse ? (
-                                            <Badge variant="outline" className="w-fit border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200">
-                                              Student chooses one
-                                            </Badge>
-                                          ) : null}
-                                        </div>
-                                      </TableCell>
-                                      <TableCell className="whitespace-normal font-medium leading-relaxed">
-                                        <span className="whitespace-pre-line">
-                                          {courseCode ? courseCode.replace(/\//g, "/\n") : "-"}
-                                        </span>
-                                      </TableCell>
-                                      <TableCell className="whitespace-normal text-muted-foreground">
-                                        {course.category || "-"}
-                                      </TableCell>
-                                      <TableCell className="text-center font-medium">
-                                        {course.credit_hours ?? "-"}
-                                      </TableCell>
-                                      <TableCell className="text-right">
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                          onClick={() => void handleDeleteCourse(course.id)}
-                                        >
-                                          <Trash2 className="h-4 w-4" />
-                                          <span className="sr-only">Remove course</span>
-                                        </Button>
-                                      </TableCell>
-                                    </TableRow>
-                                  );
-                                })}
-                              </TableBody>
-                              <TableFooter>
-                                <TableRow>
-                                  <TableCell colSpan={4} className="text-right font-semibold">
-                                    Total credit:
-                                  </TableCell>
-                                  <TableCell className="text-center text-base font-bold">
-                                    {group.totalCredits}
-                                  </TableCell>
-                                  <TableCell />
-                                </TableRow>
-                              </TableFooter>
-                            </Table>
                           </AccordionContent>
                         </AccordionItem>
                       ))}
@@ -688,6 +649,75 @@ export function StudyPlansTabContent() {
                 )}
               </CardContent>
             </Card>
+            <Dialog open={isAddCourseDialogOpen} onOpenChange={setIsAddCourseDialogOpen}>
+              <DialogContent className="sm:max-w-[720px]">
+                <DialogHeader>
+                  <DialogTitle>Add Course to {courseForm.termCode}</DialogTitle>
+                  <DialogDescription>
+                    This course will be added to the selected semester in the current study plan version.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>Course Code</Label>
+                    <Input
+                      value={courseForm.courseCode}
+                      onChange={event => setCourseForm(current => ({ ...current, courseCode: event.target.value }))}
+                      placeholder="CSIS2033"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Credits</Label>
+                    <Input
+                      value={courseForm.creditHours}
+                      onChange={event => setCourseForm(current => ({ ...current, creditHours: event.target.value }))}
+                      inputMode="numeric"
+                    />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label>Course Name</Label>
+                    <Input
+                      value={courseForm.courseName}
+                      onChange={event => setCourseForm(current => ({ ...current, courseName: event.target.value }))}
+                      placeholder="Course name"
+                    />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label>Category</Label>
+                    <Input
+                      value={courseForm.category}
+                      onChange={event => setCourseForm(current => ({ ...current, category: event.target.value }))}
+                      placeholder="Core"
+                    />
+                  </div>
+                </div>
+
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsAddCourseDialogOpen(false)}
+                    disabled={isSavingCourse}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    className="bg-blue-600 text-white hover:bg-blue-700"
+                    onClick={() => void handleAddCourseFromDialog()}
+                    disabled={!selectedVersionId || !courseForm.courseName.trim() || isSavingCourse}
+                  >
+                    {isSavingCourse ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="mr-2 h-4 w-4" />
+                    )}
+                    Add Course
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
     </>
   );
 }

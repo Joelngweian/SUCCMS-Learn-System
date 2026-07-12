@@ -1,16 +1,24 @@
+import data from "@emoji-mart/data";
+import Picker from "@emoji-mart/react";
 import { Smile } from "lucide-react";
+import { useTheme } from "../ThemeProvider";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "../ui/popover";
-import { COMMENT_EMOJIS } from "./forumUtils";
 
 interface ForumEmojiPickerProps {
   onSelect: (emoji: string) => void;
 }
 
+interface EmojiMartSelection {
+  native?: string;
+}
+
 export function ForumEmojiPicker({ onSelect }: ForumEmojiPickerProps) {
+  const { resolvedTheme } = useTheme();
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -26,19 +34,26 @@ export function ForumEmojiPicker({ onSelect }: ForumEmojiPickerProps) {
       <PopoverContent
         side="top"
         align="end"
-        className="grid w-52 grid-cols-6 gap-1 rounded-lg border border-gray-200 bg-white p-2 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+        sideOffset={8}
+        className="h-[min(420px,70vh)] w-[340px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-gray-200 bg-white p-0 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+        onWheel={event => event.stopPropagation()}
       >
-        {COMMENT_EMOJIS.map(emoji => (
-          <button
-            key={emoji}
-            type="button"
-            className="flex h-8 w-8 items-center justify-center rounded text-lg hover:bg-gray-100 dark:hover:bg-zinc-800"
-            onClick={() => onSelect(emoji)}
-            aria-label={`Add ${emoji}`}
-          >
-            {emoji}
-          </button>
-        ))}
+        <Picker
+          data={data}
+          theme={resolvedTheme}
+          previewPosition="none"
+          skinTonePosition="none"
+          navPosition="bottom"
+          maxFrequentRows={1}
+          perLine={8}
+          style={{
+            display: "block",
+            height: "100%",
+          }}
+          onEmojiSelect={(emoji: EmojiMartSelection) => {
+            if (emoji.native) onSelect(emoji.native);
+          }}
+        />
       </PopoverContent>
     </Popover>
   );
