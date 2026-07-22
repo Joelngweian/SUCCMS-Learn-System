@@ -169,9 +169,12 @@ export default function App() {
 
   // Derived State
   const userRole = (profile?.role as UserRole) || 'student';
+  const isStudyPlanManagement =
+    userRole === 'staff' && location.pathname === '/study-plan-management';
   const isWideDashboard =
-    (userRole === 'student' || userRole === 'lecturer') &&
-    location.pathname === '/';
+    ((userRole === 'student' || userRole === 'lecturer') &&
+      location.pathname === '/') ||
+    isStudyPlanManagement;
   
   const userData = profile ? {
     id: profile.id,
@@ -452,7 +455,7 @@ export default function App() {
 
           <main
             className={`mx-auto w-full min-w-0 p-4 sm:p-6 lg:p-8 ${
-          isWideDashboard ? 'max-w-[1600px]' : 'max-w-7xl'
+          isStudyPlanManagement ? 'max-w-none' : isWideDashboard ? 'max-w-[1600px]' : 'max-w-7xl'
             }`}
           >
             <Suspense fallback={<PageLoadingFallback />}>

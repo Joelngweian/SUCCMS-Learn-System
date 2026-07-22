@@ -245,6 +245,9 @@ export function CourseAttendance({
         present: number;
         absent: number;
         total: number;
+        startsAt: string | null;
+        checkInWindowMinutes: number | null;
+        sessions: AttendanceSession[];
       }
     >();
 
@@ -255,9 +258,23 @@ export function CourseAttendance({
         present: 0,
         absent: 0,
         total: 0,
+        startsAt: null,
+        checkInWindowMinutes: null,
+        sessions: [],
       };
 
       summary.slots += 1;
+      summary.sessions = [...summary.sessions, session].sort((a, b) => {
+        const slotSort = (a.slot_no || 1) - (b.slot_no || 1);
+        if (slotSort !== 0) return slotSort;
+        return a.starts_at.localeCompare(b.starts_at);
+      });
+      summary.startsAt =
+        !summary.startsAt || session.starts_at < summary.startsAt
+          ? session.starts_at
+          : summary.startsAt;
+      summary.checkInWindowMinutes =
+        summary.checkInWindowMinutes ?? session.check_in_window_minutes ?? null;
       grouped.set(session.class_date, summary);
     });
 
@@ -268,6 +285,9 @@ export function CourseAttendance({
         present: 0,
         absent: 0,
         total: 0,
+        startsAt: null,
+        checkInWindowMinutes: null,
+        sessions: [],
       };
 
       const status = getRecordStatus(record);
@@ -760,7 +780,7 @@ export function CourseAttendance({
     setIsCheckingIn(false);
   };
 
-  const handleExportAttendance = async () => {
+  const handleExportAttendance = async (dateOverride?: string) => {
     if (!isLecturer || sortedStudents.length === 0) return;
 
     setIsExportingAttendance(true);
@@ -768,36 +788,41 @@ export function CourseAttendance({
     setSuccessMessage("");
 
     try {
+      const exportDate = dateOverride || selectedDate;
+      const exportSession = dateOverride ? null : selectedSession;
+      const exportSessionsForDate = sessions.filter(
+        (session) => session.class_date === exportDate,
+      );
       const currentSessionIds = new Set(
-        (selectedSession ? [selectedSession] : sessionsForSelectedDate).map(
+        (exportSession ? [exportSession] : exportSessionsForDate).map(
           (session) => session.id,
         ),
       );
       const currentRecords = records.filter((record) =>
-        selectedSession
-          ? record.session_id === selectedSession.id
+        exportSession
+          ? record.session_id === exportSession.id
           : currentSessionIds.size > 0
             ? record.session_id != null && currentSessionIds.has(record.session_id)
-            : record.class_date === selectedDate && record.session_id == null,
+            : record.class_date === exportDate && record.session_id == null,
       );
-      const currentSessions = selectedSession
-        ? [selectedSession]
-        : sessionsForSelectedDate;
+      const currentSessions = exportSession
+        ? [exportSession]
+        : exportSessionsForDate;
 
       await exportAttendanceWorkbook({
         courseCode,
         courseName,
         courseId,
-        reportType: selectedSession
+        reportType: exportSession
           ? `Current Class - ${formatClassDate(
-              selectedSession.class_date,
-            )} ${formatSessionSlotLabel(selectedSession)}`
-          : `Current Class - ${formatClassDate(selectedDate)}`,
-        fileSuffix: selectedSession
-          ? `attendance-${selectedSession.class_date}-${formatSessionSlotLabel(
-              selectedSession,
+              exportSession.class_date,
+            )} ${formatSessionSlotLabel(exportSession)}`
+          : `Current Class - ${formatClassDate(exportDate)}`,
+        fileSuffix: exportSession
+          ? `attendance-${exportSession.class_date}-${formatSessionSlotLabel(
+              exportSession,
             )}`
-          : `attendance-${selectedDate}`,
+          : `attendance-${exportDate}`,
         students: sortedStudents,
         records: currentRecords,
         sessions: currentSessions,
@@ -878,62 +903,8 @@ export function CourseAttendance({
 
   return (
     <>
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
-      <div className="min-w-0 space-y-5">
+      <div className="space-y-5">
         <AttendanceSummaryCards summary={selectedSummary} />
-
-        <TeacherAttendanceControls
-          selectedDate={selectedDate}
-          today={today}
-          classHours={classHours}
-          classStartTime={classStartTime}
-          sessionDuration={sessionDuration}
-          sessionsForDate={sessionsForSelectedDate}
-          selectedSessionId={selectedSession?.id || null}
-          selectedSession={selectedSession}
-          sessionIsOpen={sessionIsOpen}
-          sessionIsUpcoming={sessionIsUpcoming}
-          sessionHasExpired={sessionHasExpired}
-          canOpenCheckIn={canOpenCheckIn}
-          showClassCompletionNotice={showClassCompletionNotice}
-          reviewCompletedClass={reviewCompletedClass}
-          isManagingSession={isManagingSession}
-          isExportingAttendance={isExportingAttendance}
-          isExportingAttendanceSummary={isExportingAttendanceSummary}
-          canExportAttendance={sessionsForSelectedDate.length > 0}
-          canExportAttendanceSummary={sessions.length > 0}
-          missingSlotCount={missingSlotNumbers.length}
-          canAddMissingSlots={canOpenCheckIn && missingSlotNumbers.length > 0}
-          unmarkedCount={selectedSummary.unmarked}
-          studentCount={sortedStudents.length}
-          onSelectedDateChange={(value) => {
-            setSelectedDate(value);
-            setSelectedSessionId(null);
-            setReviewingCompletedDate(null);
-            setSuccessMessage("");
-          }}
-          onClassHoursChange={setClassHours}
-          onClassStartTimeChange={setClassStartTime}
-          onSessionDurationChange={setSessionDuration}
-          onSelectedSessionChange={(value) => {
-            setSelectedSessionId(value);
-            setSuccessMessage("");
-          }}
-          onExportAttendance={() => void handleExportAttendance()}
-          onExportAttendanceSummary={() =>
-            void handleExportAttendanceSummary()
-          }
-          onAddMissingSlots={() => void addMissingHourlySlots()}
-          onCopyCode={copyCheckInCode}
-          onCloseSession={() => void closeCheckInSession()}
-          onCorrectDate={openDateCorrection}
-          onStartSession={() => setStartConfirmationOpen(true)}
-          onExitCompletedReview={() => {
-            setReviewingCompletedDate(null);
-            setSelectedSessionId(null);
-            setSuccessMessage("");
-          }}
-        />
 
         {errorMessage && (
           <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -946,60 +917,136 @@ export function CourseAttendance({
           </div>
         )}
 
-        <RecentClassesDialogButton
-          sessions={sessionSummaries}
-          selectedDate={selectedDate}
-          onSelect={(date) => {
-            setSelectedDate(date);
-            setSelectedSessionId(null);
-            setReviewingCompletedDate(date);
-            setSuccessMessage("");
-          }}
-        />
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start">
+          <div className="min-w-0 space-y-4">
+            <RecentClassesDialogButton
+              sessions={sessionSummaries}
+              selectedDate={selectedDate}
+              onSelect={(date) => {
+                setSelectedDate(date);
+                setSelectedSessionId(null);
+                setReviewingCompletedDate(date);
+                setSuccessMessage("");
+              }}
+            />
 
-        {shouldShowAttendanceRoster && (
-          <TeacherAttendanceRoster
-          students={sortedStudents}
-          filteredStudents={filteredStudents}
-          paginatedStudents={paginatedStudents}
-          draft={draft}
-          selectedRecordsByStudent={selectedRecordsByStudent}
-          searchQuery={searchQuery}
-          statusFilter={statusFilter}
-          unmarkedCount={selectedSummary.unmarked}
-          currentPage={currentPage}
-          totalPages={totalPages}
-          pageSize={pageSize}
-          dirtyCount={dirtyStudentIds.size}
-          isSaving={isSaving}
-          onSearchQueryChange={setSearchQuery}
-          onStatusFilterChange={setStatusFilter}
-          onMarkAllPresent={() => setStatuses(() => true, "present")}
-          onMarkRemainingAbsent={() =>
-            setStatuses(
-              (studentId) => draft[studentId] == null,
-              "absent"
-            )
-          }
-          onSave={() => void handleSaveAttendance()}
-          onStatusChange={updateStatus}
-          onPageChange={setCurrentPage}
-        />
-        )}
-      </div>
+            {shouldShowAttendanceRoster ? (
+              <TeacherAttendanceRoster
+                students={sortedStudents}
+                filteredStudents={filteredStudents}
+                paginatedStudents={paginatedStudents}
+                draft={draft}
+                selectedRecordsByStudent={selectedRecordsByStudent}
+                searchQuery={searchQuery}
+                statusFilter={statusFilter}
+                unmarkedCount={selectedSummary.unmarked}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                pageSize={pageSize}
+                dirtyCount={dirtyStudentIds.size}
+                isSaving={isSaving}
+                onSearchQueryChange={setSearchQuery}
+                onStatusFilterChange={setStatusFilter}
+                onMarkAllPresent={() => setStatuses(() => true, "present")}
+                onMarkRemainingAbsent={() =>
+                  setStatuses(
+                    (studentId) => draft[studentId] == null,
+                    "absent",
+                  )
+                }
+                onSave={() => void handleSaveAttendance()}
+                onStatusChange={updateStatus}
+                onPageChange={setCurrentPage}
+              />
+            ) : (
+              <div className="rounded-xl border bg-card p-10 text-center text-sm text-muted-foreground shadow-sm">
+                <p className="font-medium text-foreground">
+                  No attendance slot selected
+                </p>
+                <p className="mt-1">
+                  Set up today&apos;s class on the right, or select a saved
+                  class from Recent Classes.
+                </p>
+              </div>
+            )}
+          </div>
 
-      <div className="hidden xl:block">
-        <RecentClasses
-          sessions={sessionSummaries}
-          selectedDate={selectedDate}
-          onSelect={(date) => {
-            setSelectedDate(date);
-            setSelectedSessionId(null);
-            setReviewingCompletedDate(date);
-            setSuccessMessage("");
-          }}
-        />
-      </div>
+          <div className="space-y-4">
+            <TeacherAttendanceControls
+              selectedDate={selectedDate}
+              today={today}
+              classHours={classHours}
+              classStartTime={classStartTime}
+              sessionDuration={sessionDuration}
+              sessionsForDate={sessionsForSelectedDate}
+              selectedSessionId={selectedSession?.id || null}
+              selectedSession={selectedSession}
+              sessionIsOpen={sessionIsOpen}
+              sessionIsUpcoming={sessionIsUpcoming}
+              sessionHasExpired={sessionHasExpired}
+              canOpenCheckIn={canOpenCheckIn}
+              showClassCompletionNotice={showClassCompletionNotice}
+              reviewCompletedClass={reviewCompletedClass}
+              isManagingSession={isManagingSession}
+              isExportingAttendanceSummary={isExportingAttendanceSummary}
+              canExportAttendanceSummary={sessions.length > 0}
+              missingSlotCount={missingSlotNumbers.length}
+              canAddMissingSlots={
+                canOpenCheckIn && missingSlotNumbers.length > 0
+              }
+              unmarkedCount={selectedSummary.unmarked}
+              studentCount={sortedStudents.length}
+              onSelectedDateChange={(value) => {
+                setSelectedDate(value);
+                setSelectedSessionId(null);
+                setReviewingCompletedDate(null);
+                setSuccessMessage("");
+              }}
+              onClassHoursChange={setClassHours}
+              onClassStartTimeChange={setClassStartTime}
+              onSessionDurationChange={setSessionDuration}
+              onSelectedSessionChange={(value) => {
+                setSelectedSessionId(value);
+                setSuccessMessage("");
+              }}
+              onExportAttendanceSummary={() =>
+                void handleExportAttendanceSummary()
+              }
+              onAddMissingSlots={() => void addMissingHourlySlots()}
+              onCopyCode={copyCheckInCode}
+              onCloseSession={() => void closeCheckInSession()}
+              onCorrectDate={openDateCorrection}
+              onStartSession={() => setStartConfirmationOpen(true)}
+              onExitCompletedReview={() => {
+                setReviewingCompletedDate(null);
+                setSelectedSessionId(null);
+                setSuccessMessage("");
+              }}
+            />
+
+            <div className="hidden xl:block">
+              <RecentClasses
+                sessions={sessionSummaries}
+                students={sortedStudents}
+                records={records}
+                selectedDate={selectedDate}
+                canExportAttendance={
+                  sessionsForSelectedDate.length > 0 && sortedStudents.length > 0
+                }
+                isExportingAttendance={isExportingAttendance}
+                onExportAttendance={(session) =>
+                  void handleExportAttendance(session.date)
+                }
+                onSelect={(date) => {
+                  setSelectedDate(date);
+                  setSelectedSessionId(null);
+                  setReviewingCompletedDate(date);
+                  setSuccessMessage("");
+                }}
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       <TeacherAttendanceDialogs

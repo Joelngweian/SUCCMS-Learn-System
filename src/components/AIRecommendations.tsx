@@ -160,6 +160,7 @@ export function AIRecommendations({
           body: {
             courses,
             overview: performanceData?.overview || {},
+            forceRefresh,
           },
         },
       );

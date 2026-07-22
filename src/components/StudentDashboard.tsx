@@ -6,7 +6,6 @@ import {
   COURSE_OFFERING_SELECT,
   normalizeCourseOffering,
 } from "@/lib/courseOfferings";
-import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { CampusFeed } from "@/components/campus-feed";
 import { Stories } from "./Stories";
@@ -52,7 +51,6 @@ import {
 } from "./student-dashboard/studentDashboardData";
 import {
   AlertCircle,
-  Brain,
   Sparkles,
   Loader2,
 } from "lucide-react";
@@ -733,25 +731,18 @@ export function StudentDashboard() {
   );
 
   return (
-    <div className="grid grid-cols-1 gap-8 animate-in fade-in duration-500 2xl:grid-cols-[minmax(0,1fr)_360px] 2xl:items-start">
-      <div className="min-w-0 space-y-8">
+    <div className="mx-auto grid w-full max-w-[1320px] grid-cols-1 gap-6 animate-in fade-in duration-500 2xl:grid-cols-[minmax(0,1fr)_360px] 2xl:items-start">
+      <div className="min-w-0 space-y-6">
         <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">
               Welcome back, {profile?.full_name?.split(" ")[0] || "Scholar"}!
             </h1>
-            <p className="mt-1 flex items-center gap-2 text-muted-foreground">
-              <Sparkles className="h-4 w-4 text-purple-500" />
-              {isLoadingAi
-                ? 'AI Assistant: "Finding relevant resources for your current courses..."'
-                : `AI Assistant: "I've found ${aiData.studyMaterials.length} relevant resources based on your enrollment."`}
+            <p className="mt-1 text-sm text-muted-foreground">
+              Stories, courses and campus activity are ready.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge className="bg-purple-100 px-3 py-1 text-purple-800 transition-colors hover:bg-purple-200">
-              <Brain className="mr-1 h-3 w-3" />
-              {isLoadingAi ? "Preparing Study Plan" : "AI Study Plan Ready"}
-            </Badge>
             <Sheet
               open={isStudyPanelOpen}
               onOpenChange={setIsStudyPanelOpen}
@@ -763,7 +754,7 @@ export function StudentDashboard() {
                   size="sm"
                   className="2xl:hidden"
                 >
-                  <Sparkles className="h-4 w-4 text-purple-500" />
+                  <Sparkles className="h-4 w-4 text-primary" />
                   Study Panel
                 </Button>
               </SheetTrigger>
@@ -773,7 +764,7 @@ export function StudentDashboard() {
               >
                 <SheetTitle className="sr-only">Your Study Panel</SheetTitle>
                 <SheetDescription className="sr-only">
-                  Quick study actions, AI insights and course shortcuts.
+                  Quick study actions, course shortcuts and campus updates.
                 </SheetDescription>
                 <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
                   {studyPanel}
@@ -790,7 +781,8 @@ export function StudentDashboard() {
           </div>
         )}
 
-        <div className="overflow-hidden rounded-2xl border bg-card px-4 pt-4 shadow-sm sm:px-6 sm:pt-5">
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold tracking-tight">Stories</h2>
           <Stories
             currentUserName={profile?.full_name || "Your Story"}
             currentUserInitials={(profile?.full_name || "YS")
@@ -799,16 +791,20 @@ export function StudentDashboard() {
               .join("")}
             currentUserAvatar={profile?.avatar_url}
             currentUserRole={profile?.role}
+            compact
           />
-        </div>
+        </section>
 
-        <StudentStatsGrid
-          enrolledCount={enrolledCourses.length}
-          pendingAssignments={stats.pendingAssignments}
-          gpa={stats.gpa}
-          credits={stats.credits}
-          unreadAlerts={stats.unreadAlerts}
-        />
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold tracking-tight">Student Data</h2>
+          <StudentStatsGrid
+            enrolledCount={enrolledCourses.length}
+            pendingAssignments={stats.pendingAssignments}
+            gpa={stats.gpa}
+            credits={stats.credits}
+            unreadAlerts={stats.unreadAlerts}
+          />
+        </section>
 
         <main className="min-w-0">
           <CampusFeed />

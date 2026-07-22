@@ -74,25 +74,40 @@ function PanelCard({
   children,
   description,
   icon,
+  onAction,
+  actionLabel = "View all",
   title,
 }: {
   children: ReactNode;
   description: string;
   icon: ReactNode;
+  onAction?: () => void;
+  actionLabel?: string;
   title: string;
 }) {
   return (
-    <Card className="overflow-hidden shadow-sm">
-      <div className="flex items-center gap-3 border-b px-4 py-3">
-        <div className="rounded-lg bg-primary/10 p-2 text-primary">{icon}</div>
+    <Card className="overflow-hidden rounded-2xl shadow-sm">
+      <div className="flex items-center gap-3 border-b px-3 py-2.5">
+        <div className="rounded-xl bg-primary/10 p-2 text-primary">{icon}</div>
         <div className="min-w-0 flex-1">
-          <p className="font-semibold">{title}</p>
+          <p className="text-sm font-semibold">{title}</p>
           <p className="truncate text-xs text-muted-foreground">
             {description}
           </p>
         </div>
+        {onAction && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-primary hover:text-primary"
+            onClick={onAction}
+          >
+            {actionLabel}
+          </Button>
+        )}
       </div>
-      <CardContent className="px-4 pb-4 pt-3">{children}</CardContent>
+      <CardContent className="px-3 pb-3 pt-2.5">{children}</CardContent>
     </Card>
   );
 }
@@ -112,21 +127,24 @@ function ExpandableRailCard({
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <Card className="overflow-hidden shadow-sm">
+      <Card className="overflow-hidden rounded-2xl shadow-sm">
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-muted/40"
+            className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
           >
-            <div className="rounded-lg bg-primary/10 p-2 text-primary">
+            <div className="rounded-xl bg-primary/10 p-2 text-primary">
               {icon}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-semibold">{title}</p>
+              <p className="text-sm font-semibold">{title}</p>
               <p className="truncate text-xs text-muted-foreground">
                 {description}
               </p>
             </div>
+            <span className="hidden text-xs font-medium text-primary sm:inline">
+              {open ? "Hide" : "View all"}
+            </span>
             <ChevronDown
               className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
                 open ? "rotate-180" : ""
@@ -135,7 +153,7 @@ function ExpandableRailCard({
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <CardContent className="border-t px-4 pb-4 pt-3">
+          <CardContent className="border-t px-3 pb-3 pt-2.5">
             {children}
           </CardContent>
         </CollapsibleContent>
@@ -196,11 +214,11 @@ export function StudentDashboardRightRail({
   upcomingAssignments: DashboardAssignment[];
 }) {
   return (
-    <aside className="space-y-4 2xl:sticky 2xl:top-24 2xl:max-h-[calc(100vh-7rem)] 2xl:self-start 2xl:overflow-y-auto 2xl:pr-1">
+    <aside className="space-y-3 2xl:sticky 2xl:top-24 2xl:self-start">
       <div className="flex items-center gap-2 px-1">
         <Sparkles className="h-4 w-4 text-purple-500" />
-        <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-          Your Study Panel
+        <h2 className="text-base font-semibold tracking-tight">
+          Study Panel
         </h2>
       </div>
 
@@ -247,7 +265,7 @@ export function StudentDashboardRightRail({
             ))}
           </div>
         ) : (
-          <p className="py-4 text-center text-sm text-muted-foreground">
+          <p className="py-3 text-center text-sm text-muted-foreground">
             Insights appear after grades, submissions, or attendance data is
             available.
           </p>
@@ -290,7 +308,7 @@ export function StudentDashboardRightRail({
             ))}
           </div>
         ) : (
-          <p className="py-4 text-center text-sm text-muted-foreground">
+          <p className="py-3 text-center text-sm text-muted-foreground">
             No upcoming assignments.
           </p>
         )}
@@ -302,6 +320,7 @@ export function StudentDashboardRightRail({
         title="Jump Back In"
         description="Continue your recent courses"
         icon={<Clock className="h-4 w-4" />}
+        onAction={onBrowseCourses}
       >
         {recentCourses.length > 0 ? (
           <div className="space-y-2">
@@ -335,7 +354,7 @@ export function StudentDashboardRightRail({
             ))}
           </div>
         ) : (
-          <p className="py-4 text-center text-sm text-muted-foreground">
+          <p className="py-3 text-center text-sm text-muted-foreground">
             Enrol in a course to get started.
           </p>
         )}
@@ -376,7 +395,7 @@ export function StudentDashboardRightRail({
             ))}
           </div>
         ) : (
-          <p className="py-4 text-center text-sm text-muted-foreground">
+          <p className="py-3 text-center text-sm text-muted-foreground">
             No study recommendations are available yet.
           </p>
         )}
@@ -511,7 +530,7 @@ export function StudentDashboardRightRail({
             ))}
           </div>
         ) : (
-          <p className="py-4 text-center text-sm text-muted-foreground">
+          <p className="py-3 text-center text-sm text-muted-foreground">
             No active announcements.
           </p>
         )}

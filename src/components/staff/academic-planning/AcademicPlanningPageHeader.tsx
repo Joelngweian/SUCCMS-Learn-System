@@ -14,11 +14,10 @@ export function AcademicPlanningPageHeader({
     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-          AARO Staff Dashboard
+          Study Plan Management
         </h1>
         <p className="text-muted-foreground">
-          Manage study plan versions, course structures and lecturer class
-          assignment.
+          Manage study plans, student tracks and course assignment.
         </p>
       </div>
       <Button variant="outline" onClick={onRefresh} disabled={isLoading}>

@@ -5,7 +5,6 @@ import {
   Download,
   Info,
   Loader2,
-  MoreHorizontal,
   Play,
   RotateCcw,
   Square,
@@ -14,12 +13,6 @@ import {
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -33,6 +26,7 @@ import {
   formatClassDate,
   formatTime,
   getSessionCheckInEnd,
+  getSessionScheduledEnd,
   getSessionTimingState,
   type AttendanceSession,
 } from "./attendanceTypes";
@@ -53,9 +47,7 @@ interface TeacherAttendanceControlsProps {
   showClassCompletionNotice: boolean;
   reviewCompletedClass: boolean;
   isManagingSession: boolean;
-  isExportingAttendance: boolean;
   isExportingAttendanceSummary: boolean;
-  canExportAttendance: boolean;
   canExportAttendanceSummary: boolean;
   missingSlotCount: number;
   canAddMissingSlots: boolean;
@@ -66,7 +58,6 @@ interface TeacherAttendanceControlsProps {
   onClassStartTimeChange: (value: string) => void;
   onSessionDurationChange: (value: string) => void;
   onSelectedSessionChange: (value: string) => void;
-  onExportAttendance: () => void;
   onExportAttendanceSummary: () => void;
   onAddMissingSlots: () => void;
   onCopyCode: () => void;
@@ -92,9 +83,7 @@ export function TeacherAttendanceControls({
   showClassCompletionNotice,
   reviewCompletedClass,
   isManagingSession,
-  isExportingAttendance,
   isExportingAttendanceSummary,
-  canExportAttendance,
   canExportAttendanceSummary,
   missingSlotCount,
   canAddMissingSlots,
@@ -105,7 +94,6 @@ export function TeacherAttendanceControls({
   onClassStartTimeChange,
   onSessionDurationChange,
   onSelectedSessionChange,
-  onExportAttendance,
   onExportAttendanceSummary,
   onAddMissingSlots,
   onCopyCode,
@@ -134,6 +122,18 @@ export function TeacherAttendanceControls({
     missingSlotCount === 0 &&
     completedSlotCount === sessionsForDate.length;
   const hideCompletedClassDetails = classIsCompleted && !reviewCompletedClass;
+  const formatCompactSessionWindow = (session: AttendanceSession) => {
+    const formatCompactTime = (date: string) =>
+      new Date(date).toLocaleTimeString("en-MY", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+
+    return `${formatCompactTime(session.starts_at)}–${formatCompactTime(
+      getSessionScheduledEnd(session).toISOString(),
+    )}`;
+  };
 
   const getSessionState = (session: AttendanceSession) => {
     if (session.status === "closed") {
@@ -170,77 +170,22 @@ export function TeacherAttendanceControls({
   };
 
   return (
-    <div className="rounded-lg border bg-card p-3 sm:p-4">
+    <div className="rounded-xl border bg-card p-4 shadow-sm">
       <div className="flex flex-col gap-4">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-3">
           <div className="min-w-0">
             <h2 className="text-base font-semibold sm:text-lg">
-              Class Attendance
+              Class Setup
             </h2>
             <p className="max-w-2xl text-xs text-muted-foreground sm:text-sm">
-              Create one check-in slot per class hour, then review each hour
-              separately.
+              Create hourly check-in slots and review each class hour.
             </p>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2 self-start">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="sm:hidden"
-                  aria-label="Attendance export options"
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem
-                  disabled={!canExportAttendance || isExportingAttendance}
-                  onClick={onExportAttendance}
-                >
-                  {isExportingAttendance ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Download className="mr-2 h-4 w-4" />
-                  )}
-                  Export Current Class
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={
-                    !canExportAttendanceSummary ||
-                    isExportingAttendanceSummary
-                  }
-                  onClick={onExportAttendanceSummary}
-                >
-                  {isExportingAttendanceSummary ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Download className="mr-2 h-4 w-4" />
-                  )}
-                  Export Summary
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          <div className="grid w-full gap-2">
             <Button
               type="button"
               variant="outline"
-              className="hidden sm:inline-flex"
-              onClick={onExportAttendance}
-              disabled={!canExportAttendance || isExportingAttendance}
-            >
-              {isExportingAttendance ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
-              Export Current Class
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="hidden sm:inline-flex"
+              className="justify-center whitespace-nowrap"
               onClick={onExportAttendanceSummary}
               disabled={
                 !canExportAttendanceSummary || isExportingAttendanceSummary
@@ -288,9 +233,10 @@ export function TeacherAttendanceControls({
         )}
 
         {hasSessionsForDate && !hideCompletedClassDetails && (
-          <div className="border-t pt-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
+          <div className="order-3 border-t pt-4">
+            <p className="mb-2 text-sm font-medium">Hourly Check-In Slots</p>
+            <div className="flex flex-col gap-3">
+              <div className="grid grid-cols-3 gap-2">
                 {sessionsForDate.map((session) => {
                   const state = getSessionState(session);
 
@@ -299,24 +245,17 @@ export function TeacherAttendanceControls({
                       type="button"
                       key={session.id}
                       onClick={() => onSelectedSessionChange(session.id)}
-                      className={`min-w-[150px] rounded-lg border px-3 py-2 text-left text-sm transition-colors sm:min-w-0 ${
+                      className={`min-w-0 rounded-md border px-2 py-2 text-center text-xs transition-colors ${
                         selectedSessionId === session.id
                           ? "border-primary bg-primary/5 text-primary"
-                          : "bg-muted/20 hover:bg-muted/40"
+                          : "border-blue-100 bg-blue-50/40 text-blue-700 hover:bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300"
                       }`}
+                      title={`${formatSessionSlotLabel(session)} · ${
+                        state.label
+                      } · ${formatSessionWindow(session)}`}
                     >
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="font-medium">
-                          {formatSessionSlotLabel(session)}
-                        </span>
-                        <span
-                          className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${state.className}`}
-                        >
-                          {state.label}
-                        </span>
-                      </span>
-                      <span className="mt-1 block text-xs text-muted-foreground">
-                        {formatSessionWindow(session)}
+                      <span className="block truncate font-semibold">
+                        {formatCompactSessionWindow(session)}
                       </span>
                     </button>
                   );
@@ -327,7 +266,7 @@ export function TeacherAttendanceControls({
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full shrink-0 sm:w-auto"
+                  className="w-full justify-center"
                   onClick={onAddMissingSlots}
                   disabled={!canAddMissingSlots || isManagingSession}
                 >
@@ -345,8 +284,8 @@ export function TeacherAttendanceControls({
         )}
 
         {hasSessionsForDate && selectedSession && !hideCompletedClassDetails && (
-          <div className="space-y-3">
-            <div className="flex flex-col gap-3 rounded-lg border bg-muted/10 p-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="order-4 space-y-3">
+            <div className="flex flex-col gap-3 rounded-lg border bg-muted/10 p-3">
               <div className="flex flex-wrap items-center gap-3">
               {selectedSessionIsCompleted ? (
                 <div>
@@ -410,7 +349,7 @@ export function TeacherAttendanceControls({
             {selectedSessionCanComplete ? (
               <Button
                 type="button"
-                className="w-full sm:w-auto"
+                className="w-full justify-center"
                 onClick={onCloseSession}
                 disabled={isManagingSession}
               >
@@ -425,7 +364,7 @@ export function TeacherAttendanceControls({
               <Button
                 type="button"
                 variant="outline"
-                className="w-full sm:w-auto"
+                className="w-full justify-center"
                 onClick={onCloseSession}
                 disabled={isManagingSession}
               >
@@ -440,7 +379,7 @@ export function TeacherAttendanceControls({
               <Button
                 type="button"
                 variant="outline"
-                className="w-full sm:w-auto"
+                className="w-full justify-center"
                 onClick={onCloseSession}
                 disabled={isManagingSession}
               >
@@ -544,7 +483,7 @@ export function TeacherAttendanceControls({
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <div className="order-2 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
           <div className="w-full">
             <label
               htmlFor="attendance-date"
@@ -620,7 +559,7 @@ export function TeacherAttendanceControls({
         </div>
 
         {!hasSessionsForDate && (
-          <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="order-3 flex flex-col gap-3 border-t pt-4">
             <div>
               <p className="text-sm font-medium">
                 No check-in slots for this date
@@ -635,7 +574,7 @@ export function TeacherAttendanceControls({
             </div>
             <Button
               type="button"
-              className="w-full sm:w-auto"
+              className="w-full justify-center whitespace-nowrap"
               onClick={onStartSession}
               disabled={isManagingSession || !canOpenCheckIn}
             >

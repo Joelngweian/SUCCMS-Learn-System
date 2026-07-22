@@ -18,7 +18,9 @@ export type CoursePerson = Pick<
   | "cover_url"
   | "faculty"
   | "programme"
->;
+> & {
+  email?: string | null;
+};
 export type CourseMaterial = TableRow<"course_materials">;
 export type CourseProfileDisplay = {
   full_name: string;

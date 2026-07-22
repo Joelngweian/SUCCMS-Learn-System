@@ -1,9 +1,12 @@
 import type {
+  AttendanceRecord,
   AttendanceSummary,
+  CourseStudent,
   SessionSummary,
 } from "./attendanceTypes";
-import { formatClassDate } from "./attendanceTypes";
-import { CalendarDays, Check } from "lucide-react";
+import { formatClassDate, formatTime, getRecordStatus } from "./attendanceTypes";
+import { CalendarDays, Check, ChevronRight, Download, Loader2, X } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -57,18 +60,16 @@ export function AttendanceSummaryCards({
       className:
         "border-slate-200 bg-muted/30 text-muted-foreground dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300",
       valueClassName: "dark:text-slate-100",
-      spanClassName: "col-span-2 sm:col-span-1",
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
+    <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
       {cards.map((card) => (
         <div
           key={card.label}
-          className={`rounded-lg border p-2.5 sm:p-3 ${card.className} ${
-            card.spanClassName || ""
-          }`}
+          className={`border-b border-r p-3 last:border-r-0 sm:p-4 lg:border-b-0 ${card.className}`}
         >
           <p className="text-xs">{card.label}</p>
           <p
@@ -78,6 +79,7 @@ export function AttendanceSummaryCards({
           </p>
         </div>
       ))}
+      </div>
     </div>
   );
 }
@@ -86,7 +88,58 @@ interface RecentClassesProps {
   sessions: SessionSummary[];
   selectedDate: string;
   onSelect: (date: string) => void;
+  students?: CourseStudent[];
+  records?: AttendanceRecord[];
+  onExportAttendance?: (session: SessionSummary) => void;
+  canExportAttendance?: boolean;
+  isExportingAttendance?: boolean;
 }
+
+const getTodayDateKey = () => {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+};
+
+const formatRecentClassTitle = (date: string) =>
+  new Date(`${date}T00:00:00`).toLocaleDateString("en-MY", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+
+const formatRecentClassMeta = (session: SessionSummary) => {
+  const startTime = session.startsAt ? formatTime(session.startsAt) : "No time";
+  const hours = `${session.slots} hour${session.slots === 1 ? "" : "s"}`;
+  const window = `${session.checkInWindowMinutes || 15} min window`;
+  return `${startTime} · ${hours} · ${window}`;
+};
+
+const getStudentDisplayId = (student: CourseStudent) =>
+  student.email?.split("@")[0]?.toUpperCase() || student.username || "-";
+
+const getStatusBadgeClassName = (status: string) => {
+  if (status === "present") {
+    return "border-green-200 bg-green-50 text-green-700 dark:border-green-900/60 dark:bg-green-950/35 dark:text-green-300";
+  }
+  if (status === "late") {
+    return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/35 dark:text-amber-300";
+  }
+  if (status === "absent") {
+    return "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/35 dark:text-red-300";
+  }
+  if (status === "excused") {
+    return "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/35 dark:text-blue-300";
+  }
+  return "border-slate-200 bg-muted/40 text-muted-foreground";
+};
+
+const formatStatusLabel = (status: string) =>
+  status === "unmarked"
+    ? "Not checked in"
+    : status.charAt(0).toUpperCase() + status.slice(1);
 
 export function RecentClassesDialogButton({
   sessions,
@@ -178,9 +231,30 @@ export function RecentClasses({
   sessions,
   selectedDate,
   onSelect,
+  students = [],
+  records = [],
+  onExportAttendance,
+  canExportAttendance = false,
+  isExportingAttendance = false,
 }: RecentClassesProps) {
+  const [detailsSession, setDetailsSession] = useState<SessionSummary | null>(
+    null,
+  );
+  const today = getTodayDateKey();
+  const recordsByStudentAndSession = useMemo(() => {
+    const lookup = new Map<string, AttendanceRecord>();
+
+    records.forEach((record) => {
+      if (record.student_id && record.session_id) {
+        lookup.set(`${record.student_id}:${record.session_id}`, record);
+      }
+    });
+
+    return lookup;
+  }, [records]);
+
   return (
-    <aside className="space-y-3 xl:sticky xl:top-4 xl:self-start">
+    <aside className="rounded-xl border bg-card p-4 shadow-sm xl:sticky xl:top-4 xl:self-start">
       <div>
         <h3 className="text-sm font-semibold">Recent Classes</h3>
         <p className="text-xs text-muted-foreground">
@@ -189,40 +263,188 @@ export function RecentClasses({
       </div>
 
       {sessions.length === 0 ? (
-        <div className="rounded-lg border bg-muted/10 p-4 text-sm text-muted-foreground">
+        <div className="mt-3 rounded-lg border bg-muted/10 p-4 text-sm text-muted-foreground">
           No saved class sessions yet.
         </div>
       ) : (
-        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 xl:mx-0 xl:block xl:space-y-2 xl:overflow-visible xl:px-0 xl:pb-0">
+        <div className="mt-3 overflow-hidden rounded-lg border">
           {sessions.slice(0, 8).map((session) => (
             <button
               type="button"
               key={session.date}
-              onClick={() => onSelect(session.date)}
-              className={`min-w-[210px] rounded-lg border p-3 text-left transition-colors xl:w-full ${
+              onClick={() => {
+                onSelect(session.date);
+                setDetailsSession(session);
+              }}
+              className={`flex w-full items-center justify-between gap-3 border-b px-3 py-2.5 text-left transition-colors last:border-b-0 ${
                 selectedDate === session.date
-                  ? "border-primary bg-primary/5"
+                  ? "bg-primary/5"
                   : "bg-card hover:bg-muted/30"
               }`}
             >
-              <p className="text-sm font-medium">
-                {formatClassDate(session.date)}
-              </p>
-              <div className="mt-2 flex items-center gap-3 text-xs">
-                <span className="text-muted-foreground">
-                  {session.slots} slot{session.slots === 1 ? "" : "s"}
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-semibold text-primary">
+                  {formatRecentClassTitle(session.date)}
+                  {session.date === today ? " (Today)" : ""}
                 </span>
-                <span className="text-green-700 dark:text-green-300">
-                  {session.present} credited
+                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                  {formatRecentClassMeta(session)}
                 </span>
-                <span className="text-red-700 dark:text-red-300">
-                  {session.absent} absent
-                </span>
-              </div>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
             </button>
           ))}
         </div>
       )}
+
+      <Dialog
+        open={Boolean(detailsSession)}
+        onOpenChange={(open) => {
+          if (!open) setDetailsSession(null);
+        }}
+      >
+        <DialogContent
+          hideCloseButton
+          className="h-[92vh] w-[98vw] !max-w-[98vw] overflow-hidden p-0 sm:!max-w-[1500px]"
+        >
+          <DialogHeader className="border-b px-4 py-4 text-left sm:px-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <DialogTitle>
+                  {detailsSession
+                    ? formatRecentClassTitle(detailsSession.date)
+                    : "Recent Class"}
+                </DialogTitle>
+                <DialogDescription>
+                  {detailsSession ? formatRecentClassMeta(detailsSession) : ""}
+                </DialogDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                {detailsSession && onExportAttendance && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="justify-center whitespace-nowrap"
+                    onClick={() => onExportAttendance(detailsSession)}
+                    disabled={!canExportAttendance || isExportingAttendance}
+                  >
+                    {isExportingAttendance ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="mr-2 h-4 w-4" />
+                    )}
+                    Export Current Class
+                  </Button>
+                )}
+                <DialogClose asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 shrink-0 rounded-full"
+                    aria-label="Close"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </DialogClose>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {detailsSession && (
+            <div className="h-[calc(92vh-92px)] overflow-y-auto p-4 sm:p-6">
+              {students.length === 0 ? (
+                <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                  No students enrolled.
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-xl border bg-card">
+                  <div className="h-full max-h-[calc(92vh-150px)] overflow-auto">
+                    <table className="w-full table-fixed text-sm">
+                      <colgroup>
+                        <col className="w-12" />
+                        <col className="w-[30%]" />
+                        <col className="w-[18%]" />
+                        {detailsSession.sessions.map((slot) => (
+                          <col key={slot.id} />
+                        ))}
+                      </colgroup>
+                      <thead className="sticky top-0 z-10 bg-muted/70 backdrop-blur">
+                        <tr className="border-b text-xs text-muted-foreground">
+                          <th className="px-3 py-2 text-left font-medium">
+                            No.
+                          </th>
+                          <th className="px-3 py-2 text-left font-medium">
+                            Student
+                          </th>
+                          <th className="px-3 py-2 text-left font-medium">
+                            Student ID
+                          </th>
+                          {detailsSession.sessions.map((slot) => (
+                            <th
+                              key={slot.id}
+                              className="px-3 py-2 text-left font-medium"
+                            >
+                              {slot.slot_label || `Hour ${slot.slot_no || 1}`}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {students.map((student, index) => (
+                          <tr
+                            key={student.id}
+                            className="border-b last:border-b-0 hover:bg-muted/20"
+                          >
+                            <td className="px-3 py-3 text-muted-foreground">
+                              {index + 1}
+                            </td>
+                            <td className="px-3 py-3">
+                              <p className="truncate font-medium">
+                                {student.full_name ||
+                                  student.username ||
+                                  "Student"}
+                              </p>
+                              {student.email && (
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {student.email}
+                                </p>
+                              )}
+                            </td>
+                            <td className="truncate px-3 py-3 text-muted-foreground">
+                              {getStudentDisplayId(student)}
+                            </td>
+                            {detailsSession.sessions.map((slot) => {
+                              const record = recordsByStudentAndSession.get(
+                                `${student.id}:${slot.id}`,
+                              );
+                              const status = record
+                                ? getRecordStatus(record)
+                                : "unmarked";
+
+                              return (
+                                <td key={slot.id} className="px-3 py-3">
+                                  <span
+                                    className={`inline-flex max-w-full truncate rounded-full border px-2 py-0.5 text-xs leading-tight ${getStatusBadgeClassName(
+                                      status,
+                                    )}`}
+                                  >
+                                    {formatStatusLabel(status)}
+                                  </span>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

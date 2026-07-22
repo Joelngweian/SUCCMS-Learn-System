@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   CalendarDays,
   CheckCircle2,
+  Filter,
   FileSpreadsheet,
   Info,
   Loader2,
@@ -29,6 +30,8 @@ type AssignmentStatusFilter = "need" | "assigned" | "all";
 
 export function StudyPlansTabContent() {
   const [isAddCourseDialogOpen, setIsAddCourseDialogOpen] = useState(false);
+  const [isUploadStudyPlanDialogOpen, setIsUploadStudyPlanDialogOpen] = useState(false);
+  const [showVersionAdvancedFilters, setShowVersionAdvancedFilters] = useState(false);
   const {
     ALL_FILTER_VALUE,
     ASSIGNMENT_COURSES_PAGE_SIZE,
@@ -177,20 +180,18 @@ export function StudyPlansTabContent() {
 
   return (
     <>
-            <Card id="upload-study-plan" className="scroll-mt-24">
-              <CardHeader>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <FileSpreadsheet className="h-5 w-5 text-primary" />
-                      Upload Study Plan
-                    </CardTitle>
-
-                  </div>
-
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
+            <Dialog open={isUploadStudyPlanDialogOpen} onOpenChange={setIsUploadStudyPlanDialogOpen}>
+              <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[760px]">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <FileSpreadsheet className="h-5 w-5 text-primary" />
+                    Upload Study Plan
+                  </DialogTitle>
+                  <DialogDescription>
+                    Upload the standard study plan Excel file, preview it, then confirm import.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
                 <div className="rounded-lg border border-dashed p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="space-y-1">
@@ -429,18 +430,41 @@ export function StudyPlansTabContent() {
                     </div>
                   </div>
                 )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
+                </div>
+              </DialogContent>
+            </Dialog>
+            <Card className="border-0 shadow-none">
+              <CardHeader className="px-0 pt-0">
+                <div className="space-y-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <CardTitle>Courses in This Version</CardTitle>
-
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="w-full bg-blue-600 text-white hover:bg-blue-700 sm:w-auto"
+                      onClick={() => setIsUploadStudyPlanDialogOpen(true)}
+                    >
+                      <UploadCloud className="mr-2 h-4 w-4" />
+                      Upload Study Plan
+                    </Button>
                   </div>
-                  <div className="grid w-full min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                    <div className="space-y-1 sm:col-span-2 xl:col-span-1">
-                      <Label>Version</Label>
+                  <div className="grid w-full min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="space-y-1">
+                      <Label>Programme</Label>
+                      <Select value={versionProgrammeFilter} onValueChange={setVersionProgrammeFilter}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Programme" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={ALL_FILTER_VALUE}>All programmes</SelectItem>
+                          {versionProgrammeOptions.map(programme => (
+                            <SelectItem key={programme} value={programme}>{programme}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Study Plan Version</Label>
                       <Select
                         value={selectedVersionId}
                         onValueChange={setSelectedVersionId}
@@ -465,48 +489,6 @@ export function StudyPlansTabContent() {
                       </Select>
                     </div>
                     <div className="space-y-1">
-                      <Label>Programme</Label>
-                      <Select value={versionProgrammeFilter} onValueChange={setVersionProgrammeFilter}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Programme" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={ALL_FILTER_VALUE}>All programmes</SelectItem>
-                          {versionProgrammeOptions.map(programme => (
-                            <SelectItem key={programme} value={programme}>{programme}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Intake</Label>
-                      <Select value={versionIntakeFilter} onValueChange={setVersionIntakeFilter}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Intake" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={ALL_FILTER_VALUE}>All intakes</SelectItem>
-                          {versionIntakeOptions.map(intake => (
-                            <SelectItem key={intake} value={intake}>{intake}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Level</Label>
-                      <Select value={versionLevelFilter} onValueChange={setVersionLevelFilter}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Level" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={ALL_FILTER_VALUE}>All levels</SelectItem>
-                          {versionLevelOptions.map(level => (
-                            <SelectItem key={level} value={level}>{level}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
                       <Label>Semester</Label>
                       <Select
                         value={versionCourseTermFilter}
@@ -526,10 +508,54 @@ export function StudyPlansTabContent() {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="space-y-1">
+                      <Label className="invisible">More filters</Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full justify-center border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/40"
+                        onClick={() => setShowVersionAdvancedFilters(current => !current)}
+                      >
+                        <Filter className="mr-2 h-4 w-4" />
+                        More filters
+                      </Button>
+                    </div>
                   </div>
+                  {showVersionAdvancedFilters && (
+                    <div className="grid w-full min-w-0 gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label>Intake</Label>
+                        <Select value={versionIntakeFilter} onValueChange={setVersionIntakeFilter}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Intake" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={ALL_FILTER_VALUE}>All intakes</SelectItem>
+                            {versionIntakeOptions.map(intake => (
+                              <SelectItem key={intake} value={intake}>{intake}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Level</Label>
+                        <Select value={versionLevelFilter} onValueChange={setVersionLevelFilter}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Level" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={ALL_FILTER_VALUE}>All levels</SelectItem>
+                            {versionLevelOptions.map(level => (
+                              <SelectItem key={level} value={level}>{level}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardHeader>
-              <CardContent className="space-y-2">
+              <CardContent className="space-y-2 px-0 pb-0">
                 {versionCourses.length === 0 ? (
                   <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
                     No courses in this version yet.

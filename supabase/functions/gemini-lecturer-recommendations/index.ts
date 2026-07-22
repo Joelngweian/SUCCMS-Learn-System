@@ -76,6 +76,80 @@ const cleanNumber = (value: unknown, minimum = 0, maximum = 10000) => {
   return Math.min(maximum, Math.max(minimum, parsed));
 };
 
+const AI_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const AI_CACHE_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+const LECTURER_RECOMMENDATION_MODEL = "gemini-2.5-flash";
+
+type CacheClient = ReturnType<typeof createClient>;
+
+const sha256Hex = async (value: string) => {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readAiCache = async (
+  serviceClient: CacheClient,
+  cacheKey: string,
+) => {
+  try {
+    const { data, error } = await serviceClient
+      .from("shared_cache_entries")
+      .select("value, expires_at")
+      .eq("cache_key", cacheKey)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("Lecturer AI recommendations cache read failed:", error);
+      return null;
+    }
+
+    if (
+      !isRecord(data?.value) ||
+      !data?.expires_at ||
+      new Date(data.expires_at).getTime() <= Date.now()
+    ) {
+      return null;
+    }
+
+    return data.value;
+  } catch (error) {
+    console.warn("Lecturer AI recommendations cache read failed:", error);
+    return null;
+  }
+};
+
+const writeAiCache = async (
+  serviceClient: CacheClient,
+  cacheKey: string,
+  value: Record<string, unknown>,
+) => {
+  const now = Date.now();
+  const { error } = await serviceClient
+    .from("shared_cache_entries")
+    .upsert(
+      {
+        cache_key: cacheKey,
+        value,
+        expires_at: new Date(now + AI_CACHE_TTL_MS).toISOString(),
+        stale_until: new Date(now + AI_CACHE_STALE_MS).toISOString(),
+        refreshing_until: null,
+      },
+      { onConflict: "cache_key" },
+    );
+
+  if (error) {
+    console.warn("Lecturer AI recommendations cache write failed:", error);
+  }
+};
+
 type GeminiPayload = {
   candidates?: Array<{
     content?: { parts?: Array<{ text?: string }> };
@@ -289,7 +363,7 @@ const callGemini = async (
   requestBody: Record<string, unknown>,
 ) => {
   const response = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+    `https://generativelanguage.googleapis.com/v1beta/models/${LECTURER_RECOMMENDATION_MODEL}:generateContent`,
     {
       method: "POST",
       headers: {
@@ -328,10 +402,6 @@ Deno.serve(async (req) => {
     if (!supabaseUrl || !anonKey || !serviceRoleKey) {
       throw new Error("Supabase environment is not configured.");
     }
-    if (!geminiApiKey) {
-      throw new Error("GEMINI_API_KEY is not configured.");
-    }
-
     const authHeader = req.headers.get("Authorization") || "";
     const authClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
@@ -356,7 +426,26 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const courses = normalizeCourseContext(body);
     if (courses.length === 0) {
-      return jsonResponse({ recommendations: [], model: "gemini-2.5-flash" });
+      return jsonResponse({
+        recommendations: [],
+        model: LECTURER_RECOMMENDATION_MODEL,
+      });
+    }
+
+    const forceRefresh = isRecord(body) && body.forceRefresh === true;
+    const cacheKey = `ai:lecturer-recommendations:v1:${userData.user.id}:${LECTURER_RECOMMENDATION_MODEL}:${
+      await sha256Hex(JSON.stringify(courses))
+    }`;
+
+    if (!forceRefresh) {
+      const cached = await readAiCache(serviceClient, cacheKey);
+      if (cached) {
+        return jsonResponse({ ...cached, cached: true });
+      }
+    }
+
+    if (!geminiApiKey) {
+      throw new Error("GEMINI_API_KEY is not configured.");
     }
 
     const searchPrompt = [
@@ -491,11 +580,15 @@ Deno.serve(async (req) => {
       throw new Error("Gemini did not return any valid resource links.");
     }
 
-    return jsonResponse({
+    const result = {
       recommendations,
-      model: "gemini-2.5-flash",
+      model: LECTURER_RECOMMENDATION_MODEL,
       generatedAt: new Date().toISOString(),
-    });
+    };
+
+    await writeAiCache(serviceClient, cacheKey, result);
+
+    return jsonResponse(result);
   } catch (error) {
     console.error("Gemini lecturer recommendations error:", error);
     return jsonResponse(

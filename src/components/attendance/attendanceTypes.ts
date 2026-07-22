@@ -9,7 +9,9 @@ export type AttendanceSession =
 
 export type CourseStudent = {
   id: string;
+  email?: string | null;
   full_name: string | null;
+  username?: string | null;
   avatar_url: string | null;
   role: string | null;
 };
@@ -126,6 +128,9 @@ export interface SessionSummary {
   present: number;
   absent: number;
   total: number;
+  startsAt: string | null;
+  checkInWindowMinutes: number | null;
+  sessions: AttendanceSession[];
 }
 
 export interface StudentAttendanceSummary {

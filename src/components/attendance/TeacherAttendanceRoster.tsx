@@ -27,6 +27,68 @@ import {
   type CourseStudent,
 } from "./attendanceTypes";
 
+const STATUS_BADGE_CLASS_NAMES: Record<AttendanceStatus, string> = {
+  present:
+    "border-green-200 bg-green-50 text-green-700 dark:border-green-900/60 dark:bg-green-950/35 dark:text-green-300",
+  late:
+    "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/35 dark:text-amber-300",
+  absent:
+    "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/35 dark:text-red-300",
+  excused:
+    "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/35 dark:text-blue-300",
+};
+
+const STATUS_BUTTON_CLASS_NAMES: Record<
+  AttendanceStatus,
+  { idle: string; selected: string }
+> = {
+  present: {
+    idle:
+      "text-foreground hover:border-green-200 hover:bg-green-50 hover:text-green-700 dark:hover:border-green-900/60 dark:hover:bg-green-950/35 dark:hover:text-green-300",
+    selected:
+      "border-green-300 bg-green-50 text-green-700 hover:bg-green-50 dark:border-green-900/60 dark:bg-green-950/35 dark:text-green-300",
+  },
+  late: {
+    idle:
+      "text-foreground hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700 dark:hover:border-amber-900/60 dark:hover:bg-amber-950/35 dark:hover:text-amber-300",
+    selected:
+      "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/35 dark:text-amber-300",
+  },
+  absent: {
+    idle:
+      "text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:text-red-300 dark:hover:border-red-900/60 dark:hover:bg-red-950/35",
+    selected:
+      "border-red-300 bg-red-50 text-red-700 hover:bg-red-50 dark:border-red-900/60 dark:bg-red-950/35 dark:text-red-300",
+  },
+  excused: {
+    idle:
+      "text-blue-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:text-blue-300 dark:hover:border-blue-900/60 dark:hover:bg-blue-950/35",
+    selected:
+      "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-50 dark:border-blue-900/60 dark:bg-blue-950/35 dark:text-blue-300",
+  },
+};
+
+const getStatusButtonClassName = (
+  value: AttendanceStatus,
+  isSelected: boolean,
+) =>
+  [
+    "h-8 justify-center gap-1 overflow-hidden rounded-md border px-1.5 text-[11px] font-medium shadow-none xl:text-xs",
+    isSelected
+      ? STATUS_BUTTON_CLASS_NAMES[value].selected
+      : STATUS_BUTTON_CLASS_NAMES[value].idle,
+  ].join(" ");
+
+const getStudentIdentifier = (student: CourseStudent) => {
+  const emailPrefix = student.email?.split("@")[0]?.trim();
+  return emailPrefix ? emailPrefix.toUpperCase() : "—";
+};
+
+const getStatusLabel = (status: AttendanceStatus | null) =>
+  status
+    ? STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status
+    : "Not checked in";
+
 interface TeacherAttendanceRosterProps {
   students: CourseStudent[];
   filteredStudents: CourseStudent[];
@@ -72,80 +134,99 @@ export function TeacherAttendanceRoster({
   onStatusChange,
   onPageChange,
 }: TeacherAttendanceRosterProps) {
-  return (
-    <div className="rounded-lg border bg-card">
-      <div className="flex flex-col gap-2 border-b bg-muted/10 p-3 sm:p-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-1 flex-col gap-2 sm:flex-row">
-          <div className="relative max-w-md flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={searchQuery}
-              placeholder="Search students..."
-              className="h-9 pl-9"
-              onChange={(event) =>
-                onSearchQueryChange(event.target.value)
-              }
-            />
-          </div>
-          <Select
-            value={statusFilter}
-            onValueChange={(value) =>
-              onStatusFilterChange(value as AttendanceFilter)
-            }
-          >
-            <SelectTrigger className="h-9 w-full sm:w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Students</SelectItem>
-              <SelectItem value="unmarked">
-                Not Checked In ({unmarkedCount})
-              </SelectItem>
-              {STATUS_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+  const renderStatusButton = (
+    studentId: string,
+    option: (typeof STATUS_OPTIONS)[number],
+    status: AttendanceStatus | null,
+  ) => {
+    const isSelected = status === option.value;
 
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onMarkAllPresent}
-            disabled={students.length === 0 || isSaving}
-          >
-            <Check className="mr-2 h-4 w-4" />
-            All Present
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onMarkRemainingAbsent}
-            disabled={unmarkedCount === 0 || isSaving}
-          >
-            <UserX className="mr-2 h-4 w-4" />
-            Remaining Absent
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            className="hidden sm:inline-flex"
-            onClick={onSave}
-            disabled={dirtyCount === 0 || isSaving}
-          >
-            {isSaving ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="mr-2 h-4 w-4" />
-            )}
-            Save Changes
-          </Button>
+    return (
+      <Button
+        key={option.value}
+        type="button"
+        size="sm"
+        variant="outline"
+        className={getStatusButtonClassName(option.value, isSelected)}
+        disabled={isSaving}
+        onClick={() => onStatusChange(studentId, option.value)}
+      >
+      <span className="truncate">{option.label}</span>
+      {isSelected && <Check className="h-3 w-3 shrink-0" />}
+      </Button>
+    );
+  };
+
+  return (
+    <div className="rounded-xl border bg-card shadow-sm">
+      <div className="flex flex-wrap items-center gap-2 border-b bg-muted/10 p-3 sm:p-4">
+        <div className="relative min-w-[180px] flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            placeholder="Search students..."
+            className="h-9 pl-9"
+            onChange={(event) => onSearchQueryChange(event.target.value)}
+          />
         </div>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) =>
+            onStatusFilterChange(value as AttendanceFilter)
+          }
+        >
+          <SelectTrigger className="h-9 w-full sm:w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Students</SelectItem>
+            <SelectItem value="unmarked">
+              Not Checked In ({unmarkedCount})
+            </SelectItem>
+            {STATUS_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="flex-1 sm:flex-none"
+          onClick={onMarkAllPresent}
+          disabled={students.length === 0 || isSaving}
+        >
+          <Check className="mr-2 h-4 w-4" />
+          All Present
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="flex-1 sm:flex-none"
+          onClick={onMarkRemainingAbsent}
+          disabled={unmarkedCount === 0 || isSaving}
+        >
+          <UserX className="mr-2 h-4 w-4" />
+          Remaining Absent
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          className="hidden sm:inline-flex sm:flex-none"
+          onClick={onSave}
+          disabled={dirtyCount === 0 || isSaving}
+        >
+          {isSaving ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Save className="mr-2 h-4 w-4" />
+          )}
+          Save Changes
+        </Button>
       </div>
 
       {students.length === 0 ? (
@@ -166,26 +247,29 @@ export function TeacherAttendanceRoster({
         </div>
       ) : (
         <>
-          <div className="hidden grid-cols-[minmax(0,1fr)_180px] border-b bg-muted/30 px-4 py-3 text-xs font-medium text-muted-foreground sm:grid">
+          <div className="hidden grid-cols-[32px_minmax(130px,1fr)_88px_110px_minmax(220px,260px)] items-center gap-2 border-b bg-muted/30 px-4 py-3 text-xs font-medium text-muted-foreground lg:grid">
+            <span>#</span>
             <span>Student</span>
-            <span>Attendance Status</span>
+            <span>Student ID</span>
+            <span>Current Status</span>
+            <span>Mark Attendance</span>
           </div>
-          <div className="space-y-2 p-3 sm:space-y-0 sm:divide-y sm:p-0">
-            {paginatedStudents.map((student) => {
+          <div className="space-y-2 p-3 lg:space-y-0 lg:divide-y lg:p-0">
+            {paginatedStudents.map((student, index) => {
               const status = draft[student.id] ?? null;
               const record = selectedRecordsByStudent.get(student.id);
-              const statusLabel =
-                record?.check_in_method === "code" && record.check_in_at
+              const rowNumber = (currentPage - 1) * pageSize + index + 1;
+              const studentIdentifier = getStudentIdentifier(student);
+              const statusLabel = getStatusLabel(status);
+              const secondaryText =
+                student.email ||
+                (record?.check_in_method === "code" && record.check_in_at
                   ? `Self check-in at ${formatTime(record.check_in_at)}`
-                  : status
-                    ? STATUS_OPTIONS.find(
-                        (option) => option.value === status
-                      )?.label
-                    : "Not checked in";
+                  : studentIdentifier);
 
               return (
                 <div key={student.id}>
-                  <div className="rounded-lg border bg-muted/10 p-3 sm:hidden">
+                  <div className="rounded-lg border bg-muted/10 p-3 lg:hidden">
                     <div className="flex min-w-0 items-center gap-3">
                       <Avatar className="h-9 w-9 shrink-0">
                         <AvatarImage src={student.avatar_url || undefined} />
@@ -198,33 +282,22 @@ export function TeacherAttendanceRoster({
                           {student.full_name || "Unknown Student"}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {statusLabel}
+                          {studentIdentifier} · {statusLabel}
                         </p>
                       </div>
                     </div>
 
                     <div className="mt-3 grid grid-cols-4 gap-1.5">
-                      {STATUS_OPTIONS.map((option) => (
-                        <Button
-                          key={option.value}
-                          type="button"
-                          size="sm"
-                          variant={
-                            status === option.value ? "default" : "outline"
-                          }
-                          className="h-8 px-1 text-[11px]"
-                          disabled={isSaving}
-                          onClick={() =>
-                            onStatusChange(student.id, option.value)
-                          }
-                        >
-                          {option.label}
-                        </Button>
-                      ))}
+                      {STATUS_OPTIONS.map((option) =>
+                        renderStatusButton(student.id, option, status),
+                      )}
                     </div>
                   </div>
 
-                  <div className="hidden flex-col gap-3 px-4 py-3 sm:flex sm:flex-row sm:items-center sm:justify-between">
+                  <div className="hidden grid-cols-[32px_minmax(130px,1fr)_88px_110px_minmax(220px,260px)] items-center gap-2 px-4 py-3 lg:grid">
+                    <span className="text-sm text-muted-foreground">
+                      {rowNumber}
+                    </span>
                     <div className="flex min-w-0 items-center gap-3">
                       <Avatar className="h-9 w-9 shrink-0">
                         <AvatarImage src={student.avatar_url || undefined} />
@@ -236,35 +309,31 @@ export function TeacherAttendanceRoster({
                         <p className="truncate text-sm font-medium">
                           {student.full_name || "Unknown Student"}
                         </p>
-                        <p className="text-xs text-muted-foreground">
-                          {statusLabel}
+                        <p className="truncate text-xs text-muted-foreground">
+                          {secondaryText}
                         </p>
                       </div>
                     </div>
 
-                    <Select
-                      value={status || undefined}
-                      onValueChange={(value) =>
-                        onStatusChange(
-                          student.id,
-                          value as AttendanceStatus
-                        )
-                      }
+                    <span className="truncate text-sm text-muted-foreground">
+                      {studentIdentifier}
+                    </span>
+
+                    <span
+                      className={`w-fit rounded-full border px-2.5 py-1 text-xs font-medium ${
+                        status
+                          ? STATUS_BADGE_CLASS_NAMES[status]
+                          : "border-border bg-muted/30 text-muted-foreground"
+                      }`}
                     >
-                      <SelectTrigger className="w-full sm:w-44">
-                        <SelectValue placeholder="Set status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {STATUS_OPTIONS.map((option) => (
-                          <SelectItem
-                            key={option.value}
-                            value={option.value}
-                          >
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      {statusLabel}
+                    </span>
+
+                    <div className="grid min-w-0 grid-cols-4 gap-1.5">
+                      {STATUS_OPTIONS.map((option) =>
+                        renderStatusButton(student.id, option, status),
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -300,9 +369,7 @@ export function TeacherAttendanceRoster({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() =>
-                  onPageChange(Math.max(1, currentPage - 1))
-                }
+                onClick={() => onPageChange(Math.max(1, currentPage - 1))}
                 disabled={currentPage === 1}
               >
                 <ChevronLeft className="mr-1 h-4 w-4" />

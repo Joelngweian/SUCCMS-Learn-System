@@ -33,6 +33,7 @@ interface StoriesProps {
   targetUser?: StoryTargetUser | null;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  compact?: boolean;
 }
 
 export function Stories({
@@ -44,6 +45,7 @@ export function Stories({
   targetUser = null,
   open = false,
   onOpenChange,
+  compact = false,
 }: StoriesProps) {
   const { user } = useAuth();
   const [selectedUser, setSelectedUser] = useState<StoryUser | null>(null);
@@ -372,7 +374,11 @@ export function Stories({
       {/* Stories Carousel */}
       {mode === "carousel" && (
       <div className="relative">
-        <div className="flex gap-3 overflow-x-auto pb-3 scrollbar-hide px-1 sm:gap-4 sm:pb-4">
+        <div
+          className={`flex gap-3 overflow-x-auto scrollbar-hide px-1 sm:gap-4 ${
+            compact ? "pb-2 sm:pb-3" : "pb-3 sm:pb-4"
+          }`}
+        >
           {storyUsers.map((user, index) => {
             const isMe = index === 0;
 
@@ -387,7 +393,11 @@ export function Stories({
                     active={user.hasActiveStories}
                     viewed={user.viewed}
                   >
-                    <Avatar className="h-14 w-14 border-2 border-background sm:h-16 sm:w-16">
+                    <Avatar
+                      className={`border-2 border-background ${
+                        compact ? "h-12 w-12 sm:h-14 sm:w-14" : "h-14 w-14 sm:h-16 sm:w-16"
+                      }`}
+                    >
                       <AvatarImage src={user.avatar_url} className="object-cover" />
                       <AvatarFallback className="bg-blue-100 text-blue-700 font-bold">
                         {user.initials}
@@ -405,7 +415,11 @@ export function Stories({
                   )}
                 </div>
 
-                <span className="text-xs text-center max-w-[80px] truncate font-medium text-gray-700 dark:text-gray-300">
+                <span
+                  className={`text-center truncate font-medium text-gray-700 dark:text-gray-300 ${
+                    compact ? "max-w-[70px] text-[11px]" : "max-w-[80px] text-xs"
+                  }`}
+                >
                   {user.name.split(' ')[0]}
                 </span>
               </div>
