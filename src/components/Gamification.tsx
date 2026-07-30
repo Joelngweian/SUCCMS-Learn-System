@@ -96,6 +96,51 @@ type EffectiveGrade = Pick<
   "id" | "course_id" | "assignment_id" | "score" | "max_score" | "graded_at"
 >;
 
+type AttendanceProgressRecord = Pick<
+  Database["public"]["Tables"]["attendance"]["Row"],
+  "id" | "course_id" | "class_date" | "marked_present" | "status" | "session_id"
+>;
+
+type AttendanceProgressSession = Pick<
+  Database["public"]["Tables"]["attendance_sessions"]["Row"],
+  "id" | "status"
+>;
+
+const CREDITED_ATTENDANCE_STATUSES = new Set(["present", "late", "excused"]);
+const COMPLETED_ATTENDANCE_SESSION_STATUSES = new Set(["closed", "completed"]);
+
+const receivesAttendanceCredit = (record: AttendanceProgressRecord) => {
+  const status = record.status?.toLowerCase();
+  if (status) return CREDITED_ATTENDANCE_STATUSES.has(status);
+  return Boolean(record.marked_present);
+};
+
+const isCompletedAttendanceSession = (session: AttendanceProgressSession) =>
+  COMPLETED_ATTENDANCE_SESSION_STATUSES.has(session.status.toLowerCase());
+
+const calculateAttendanceProgress = (
+  attendanceRows: AttendanceProgressRecord[],
+  attendanceSessionRows: AttendanceProgressSession[],
+) => {
+  const completedSessionIds = new Set(
+    attendanceSessionRows.filter(isCompletedAttendanceSession).map((session) => session.id),
+  );
+
+  const hourlyRows = attendanceRows.filter(
+    (record) => record.session_id && completedSessionIds.has(record.session_id),
+  );
+  const legacyRows = attendanceRows.filter((record) => !record.session_id);
+  const creditedSlots =
+    hourlyRows.filter(receivesAttendanceCredit).length +
+    legacyRows.filter(receivesAttendanceCredit).length;
+  const totalSlots = completedSessionIds.size + legacyRows.length;
+
+  return {
+    creditedSlots,
+    attendanceRate: totalSlots > 0 ? (creditedSlots / totalSlots) * 100 : null,
+  };
+};
+
 const calculateStreak = (dates: string[]) => {
   const uniqueDays = Array.from(
     new Set(
@@ -204,7 +249,7 @@ export function Gamification() {
           .order("graded_at", { ascending: false }),
         supabase
           .from("attendance")
-          .select("id, course_id, class_date, marked_present")
+          .select("id, course_id, class_date, marked_present, status, session_id")
           .eq("student_id", userId)
           .order("class_date", { ascending: false }),
         supabase
@@ -293,12 +338,21 @@ export function Gamification() {
 
       const courseIds = enrollmentRows
         .map((row) => row.course_id)
-        .filter(Boolean);
+        .filter((courseId): courseId is string => Boolean(courseId));
 
       let assignmentRows: AssignmentRow[] = [];
       let submissionRows: SubmissionRow[] = [];
+      let attendanceSessionRows: AttendanceProgressSession[] = [];
 
       if (courseIds.length > 0) {
+        const attendanceSessionResult = await supabase
+          .from("attendance_sessions")
+          .select("id, status")
+          .in("course_id", courseIds);
+
+        if (attendanceSessionResult.error) throw attendanceSessionResult.error;
+        attendanceSessionRows = attendanceSessionResult.data || [];
+
         const assignmentResult = await supabase
           .from("assignments")
           .select("id, course_id, title, max_score")
@@ -367,12 +421,10 @@ export function Gamification() {
         const maxScore = Number(grade.max_score) || 100;
         return (Number(grade.score) / maxScore) * 100 >= 100;
       }).length;
-      const overallAttendance =
-        attendanceRows.length > 0
-          ? (attendanceRows.filter((record) => record.marked_present).length /
-              attendanceRows.length) *
-            100
-          : null;
+      const attendanceProgress = calculateAttendanceProgress(
+        attendanceRows,
+        attendanceSessionRows,
+      );
       const activityDates = [
         ...loginRows.map((row) => row.login_time),
         ...submissionRows.map((row) => row.submitted_at),
@@ -460,10 +512,10 @@ export function Gamification() {
         gradedAssignments: effectiveGradeRows.length,
         perfectScores,
         averageScore: overallAverage,
-        attendanceRate: overallAttendance,
+        attendanceRate: attendanceProgress.attendanceRate,
         discussionCount: threadRows.length + replyRows.length,
         replyCount: replyRows.length,
-        attendedClasses: attendanceRows.filter((record) => record.marked_present).length,
+        attendedClasses: attendanceProgress.creditedSlots,
         streak: calculateStreak(activityDates),
         rank:
           xpProgressRow?.weekly_rank == null

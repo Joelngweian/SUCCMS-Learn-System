@@ -8,11 +8,9 @@ import {
   FileText,
   GraduationCap,
   Loader2,
-  Minus,
   Plus,
   RotateCcw,
   Sparkles,
-  User,
   Users,
   X,
 } from "lucide-react";
@@ -71,6 +69,22 @@ type CourseAssignmentDetailDialogProps = {
   onSaveGrade: () => void;
 };
 
+const formatAssessmentDate = (value: string) =>
+  new Date(value).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+
+const formatAiConfidence = (value?: number | null) => {
+  if (value == null || Number.isNaN(value)) return "Not available";
+  const normalized = value <= 1 ? value * 100 : value;
+  return `${Math.round(normalized)}%`;
+};
+
+const getPrimarySubmissionFile = (files: SubmissionFile[]) =>
+  files.find(file => isWordSubmissionFile(file)) ?? files[0] ?? null;
+
 export function CourseAssignmentDetailDialog({
   assignment,
   isLecturer,
@@ -101,6 +115,7 @@ export function CourseAssignmentDetailDialog({
 }: CourseAssignmentDetailDialogProps) {
   const [wordPreviewFile, setWordPreviewFile] =
     useState<SubmissionFile | null>(null);
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   if (!assignment) return null;
 
   const mySubmission = mySubmissions.find(
@@ -110,6 +125,40 @@ export function CourseAssignmentDetailDialog({
     submission => submission.student_id === gradingStudentId
   );
   const gradingStudent = people.find(person => person.id === gradingStudentId);
+  const maxScore = getAssignmentMaxScore(assignment);
+  const gradingFiles = gradingSubmission?.files ?? [];
+  const primaryGradingFile = getPrimarySubmissionFile(gradingFiles);
+  const aiAnnotationCount = aiGradeDetails?.annotations?.length ?? 0;
+  const rubricMaxTotal =
+    rubricGrades.reduce((total, criterion) => total + criterion.maxScore, 0) ||
+    maxScore;
+  const rubricAiTotal = rubricGrades.reduce(
+    (total, criterion) => total + criterion.aiScore,
+    0,
+  );
+  const rubricFinalTotal = rubricGrades.reduce(
+    (total, criterion) => total + criterion.finalScore,
+    0,
+  );
+
+  const getRubricWeightLabel = (criterion: RubricGradeItem) => {
+    if (!rubricMaxTotal) return "-";
+    return `${Math.round((criterion.maxScore / rubricMaxTotal) * 100)}%`;
+  };
+
+  const updateRubricFinalScore = (
+    index: number,
+    criterion: RubricGradeItem,
+    value: string,
+  ) => {
+    const parsedScore = Number(value);
+    if (!Number.isFinite(parsedScore)) return;
+    const finalScore = Math.min(
+      criterion.maxScore,
+      Math.max(0, Math.round(parsedScore)),
+    );
+    onRubricAdjustmentChange(index, finalScore - criterion.aiScore);
+  };
 
   return (
     <Dialog open onOpenChange={open => !open && onClose()}>
@@ -133,9 +182,9 @@ export function CourseAssignmentDetailDialog({
                 {assignment.title}
               </h2>
               <p className="text-xs text-gray-500">
-                Due {new Date(assignment.due_date).toLocaleDateString()}
+                Due {formatAssessmentDate(assignment.due_date)}
                 {" | "}
-                {getAssignmentMaxScore(assignment)} Points
+                {maxScore} Points
               </p>
             </div>
           </div>
@@ -224,25 +273,67 @@ export function CourseAssignmentDetailDialog({
             )}
 
             {(!isLecturer || gradingStudentId) && (
-              <div className="space-y-8 max-w-4xl mx-auto">
+              <div
+                className={
+                  isLecturer && gradingStudentId
+                    ? "space-y-8 w-full"
+                    : "space-y-8 max-w-4xl mx-auto"
+                }
+              >
                 {isLecturer && gradingStudentId ? (
-                  <div className="pt-2">
-                    <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-gray-800">
-                      <User className="h-5 w-5" /> Student Submission
-                    </h3>
-                    {gradingSubmission?.files?.length > 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {gradingSubmission.files.map((file, index) => (
-                          <button
-                            key={`${file.path}-${index}`}
+                  <div className="assignment-review-workspace">
+                    <div className="assignment-review-hero">
+                      <div>
+                        <p className="assignment-review-eyebrow">
+                          Submission Review
+                        </p>
+                        <h3>
+                          {gradingStudent?.full_name || "Selected student"}
+                        </h3>
+                        <span>
+                          Review the submitted file, open AI highlights, then
+                          confirm the final grade.
+                        </span>
+                      </div>
+                      <Badge className="assignment-review-type-badge">
+                        {getAssessmentTypeLabel(assignment.assessment_type)}
+                      </Badge>
+                    </div>
+
+                    <div className="assignment-review-stat-grid">
+                      <div>
+                        <span>Max score</span>
+                        <strong>{maxScore}</strong>
+                      </div>
+                      <div>
+                        <span>AI confidence</span>
+                        <strong>{formatAiConfidence(aiGradeDetails?.confidence)}</strong>
+                      </div>
+                      <div>
+                        <span>AI highlights</span>
+                        <strong>{aiAnnotationCount}</strong>
+                      </div>
+                    </div>
+
+                    <section className="assignment-document-stage">
+                      <div className="assignment-document-stage-header">
+                        <div>
+                          <p>Document workspace</p>
+                          <h4>
+                            {primaryGradingFile?.name ||
+                              "No submission file attached"}
+                          </h4>
+                        </div>
+                        {primaryGradingFile && (
+                          <Button
                             type="button"
                             onClick={() => {
-                              if (isWordSubmissionFile(file)) {
-                                setWordPreviewFile(file);
+                              if (isWordSubmissionFile(primaryGradingFile)) {
+                                setWordPreviewFile(primaryGradingFile);
                                 return;
                               }
 
-                              void resolveSubmissionFileUrl(file)
+                              void resolveSubmissionFileUrl(primaryGradingFile)
                                 .then((url) =>
                                   window.open(url, "_blank", "noopener,noreferrer")
                                 )
@@ -253,26 +344,74 @@ export function CourseAssignmentDetailDialog({
                                   )
                                 );
                             }}
-                            className="flex items-center p-4 bg-white border-2 border-blue-100 rounded-xl hover:border-blue-500 hover:shadow-md transition-all group"
+                            className="assignment-open-review-button"
                           >
-                            <div className="bg-blue-100 p-3 rounded-lg mr-3 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                              <FileText className="h-6 w-6" />
-                            </div>
-                            <div className="flex-1 overflow-hidden">
-                              <p className="font-medium text-blue-900 truncate">
-                                {file.name}
-                              </p>
-                              <p className="text-xs text-blue-400">Click to view</p>
-                            </div>
-                            <Download className="h-5 w-5 text-gray-300 group-hover:text-blue-500" />
-                          </button>
-                        ))}
+                            <FileText className="h-4 w-4" />
+                            Open Review
+                          </Button>
+                        )}
                       </div>
-                    ) : (
-                      <div className="text-center p-8 bg-gray-50 rounded-xl border border-dashed border-gray-300 text-gray-400 italic">
-                        Student has not attached any files yet.
-                      </div>
-                    )}
+
+                      {gradingFiles.length > 0 ? (
+                        <>
+                          <div className="assignment-highlight-legend">
+                            <span className="assignment-legend-correct">
+                              Reviewed & Correct
+                            </span>
+                            <span className="assignment-legend-incorrect">
+                              Incorrect
+                            </span>
+                            <span className="assignment-legend-uncertain">
+                              Lecturer Check
+                            </span>
+                          </div>
+
+                          <div className="assignment-file-list">
+                            {gradingFiles.map((file, index) => (
+                              <button
+                                key={`${file.path}-${index}`}
+                                type="button"
+                                onClick={() => {
+                                  if (isWordSubmissionFile(file)) {
+                                    setWordPreviewFile(file);
+                                    return;
+                                  }
+
+                                  void resolveSubmissionFileUrl(file)
+                                    .then((url) =>
+                                      window.open(url, "_blank", "noopener,noreferrer")
+                                    )
+                                    .catch((error) =>
+                                      notify.error(
+                                        error,
+                                        "The submission file could not be opened.",
+                                      )
+                                    );
+                                }}
+                                className="assignment-review-file-button"
+                              >
+                                <span>
+                                  <FileText className="h-5 w-5" />
+                                </span>
+                                <div>
+                                  <strong>{file.name}</strong>
+                                  <small>
+                                    {isWordSubmissionFile(file)
+                                      ? "Open with AI highlight viewer"
+                                      : "Open submitted attachment"}
+                                  </small>
+                                </div>
+                                <Download className="h-4 w-4" />
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="assignment-review-empty">
+                          Student has not attached any files yet.
+                        </div>
+                      )}
+                    </section>
                   </div>
                 ) : (
                   <>
@@ -294,7 +433,7 @@ export function CourseAssignmentDetailDialog({
                           {mySubmission.grade}
                           <span className="text-lg font-medium text-gray-400">
                             {" / "}
-                            {getAssignmentMaxScore(assignment)}
+                            {maxScore}
                           </span>
                         </div>
                         {mySubmission.feedback && (
@@ -320,7 +459,7 @@ export function CourseAssignmentDetailDialog({
                 <div className="assignment-grading-panel">
                   <div className="assignment-grading-header border-b border-gray-200">
                     <h3 className="font-bold text-lg mb-1 text-gray-900">
-                      Grading
+                      Grading Workspace
                     </h3>
                     <p className="text-sm text-gray-500 flex items-center gap-2">
                       Student:
@@ -329,6 +468,30 @@ export function CourseAssignmentDetailDialog({
                       </span>
                     </p>
                   </div>
+
+                  <Card className="assignment-grading-card">
+                    <CardContent className="assignment-grading-card-content">
+                      <p className="assignment-grading-card-label">
+                        Assessment Details
+                      </p>
+                      <div className="assignment-detail-mini-grid">
+                        <div>
+                          <span>Type</span>
+                          <strong>
+                            {getAssessmentTypeLabel(assignment.assessment_type)}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Due</span>
+                          <strong>{formatAssessmentDate(assignment.due_date)}</strong>
+                        </div>
+                        <div>
+                          <span>Max</span>
+                          <strong>{maxScore} pts</strong>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
 
                   <Card className="assignment-ai-card bg-gradient-to-br from-indigo-50 to-white border-indigo-100 shadow-sm overflow-hidden">
                     <CardContent className="assignment-ai-card-content">
@@ -366,13 +529,56 @@ export function CourseAssignmentDetailDialog({
                     </CardContent>
                   </Card>
 
+                  {(aiGradeDetails || currentGrade) && (
+                    <Card className="assignment-ai-score-card">
+                      <CardContent className="assignment-ai-score-content">
+                        <div>
+                          <p className="assignment-ai-score-label">
+                            <Sparkles className="h-3.5 w-3.5" />
+                            AI Suggested Score
+                          </p>
+                          <strong>
+                            {currentGrade || "-"}
+                            <span>/ {maxScore}</span>
+                          </strong>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setIsFeedbackOpen(open => !open)}
+                          className="assignment-view-feedback-button"
+                        >
+                          <Sparkles className="h-3.5 w-3.5" />
+                          {isFeedbackOpen ? "Hide Feedback" : "View All Feedback"}
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  )}
+
                   <div className="assignment-grading-form">
+                    {isFeedbackOpen && (
+                      <div className="assignment-feedback-card">
+                        <Label className="text-gray-700 font-semibold">
+                          Feedback
+                        </Label>
+                        <Textarea
+                          value={currentFeedback}
+                          onChange={event => onFeedbackChange(event.target.value)}
+                          className="assignment-feedback-input bg-white text-base leading-relaxed"
+                          placeholder="Enter detailed feedback for the student..."
+                        />
+                      </div>
+                    )}
                     {rubricGrades.length > 0 && (
                       <div className="assignment-rubric-review">
                         <div className="assignment-rubric-review-header">
                           <div>
-                            <h4>Rubric score review</h4>
-                            <p>Adjust only the section that needs lecturer review.</p>
+                            <h4>Rubric / Marking Guide</h4>
+                            <p>
+                              Review the AI score, then adjust only the criteria
+                              that need lecturer changes.
+                            </p>
                           </div>
                           <Button
                             type="button"
@@ -386,125 +592,98 @@ export function CourseAssignmentDetailDialog({
                           </Button>
                         </div>
 
-                        <div className="assignment-rubric-items">
+                        <div className="assignment-rubric-table">
+                          <div className="assignment-rubric-table-head">
+                            <span>Criteria</span>
+                            <span>Weight</span>
+                            <span>AI Score</span>
+                            <span>Lecturer Score</span>
+                          </div>
                           {rubricGrades.map((criterion, index) => (
                             <div
-                              className="assignment-rubric-item"
+                              className="assignment-rubric-table-row"
                               key={`${criterion.name}-${index}`}
                             >
-                              <div className="assignment-rubric-item-heading">
-                                <div>
-                                  <strong>{criterion.name}</strong>
-                                  <span>
-                                    AI {criterion.aiScore}/{criterion.maxScore}
-                                  </span>
-                                </div>
-                                <b>
-                                  {criterion.finalScore}/{criterion.maxScore}
-                                </b>
+                              <div className="assignment-rubric-criteria">
+                                <strong>{criterion.name}</strong>
+                                {criterion.reason && (
+                                  <p>{criterion.reason}</p>
+                                )}
                               </div>
-                              {criterion.reason && <p>{criterion.reason}</p>}
-                              <div className="assignment-rubric-adjustment">
-                                <span>Lecturer adjustment</span>
-                                <div>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() =>
-                                      onRubricAdjustmentChange(
-                                        index,
-                                        criterion.adjustment - 1,
-                                      )
-                                    }
-                                    disabled={criterion.finalScore <= 0}
-                                    aria-label={`Deduct one mark from ${criterion.name}`}
-                                  >
-                                    <Minus className="h-3.5 w-3.5" />
-                                  </Button>
-                                  <Input
-                                    type="number"
-                                    min={-criterion.aiScore}
-                                    max={criterion.maxScore - criterion.aiScore}
-                                    step={1}
-                                    value={criterion.adjustment}
-                                    onChange={event =>
-                                      onRubricAdjustmentChange(
-                                        index,
-                                        Number(event.target.value || 0),
-                                      )
-                                    }
-                                    aria-label={`${criterion.name} lecturer adjustment`}
-                                  />
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() =>
-                                      onRubricAdjustmentChange(
-                                        index,
-                                        criterion.adjustment + 1,
-                                      )
-                                    }
-                                    disabled={
-                                      criterion.finalScore >= criterion.maxScore
-                                    }
-                                    aria-label={`Add one mark to ${criterion.name}`}
-                                  >
-                                    <Plus className="h-3.5 w-3.5" />
-                                  </Button>
-                                </div>
-                              </div>
+                              <span className="assignment-rubric-weight">
+                                {getRubricWeightLabel(criterion)}
+                              </span>
+                              <span className="assignment-rubric-ai-score">
+                                {criterion.aiScore} / {criterion.maxScore}
+                              </span>
+                              <Input
+                                type="number"
+                                min={0}
+                                max={criterion.maxScore}
+                                step={1}
+                                value={criterion.finalScore}
+                                onChange={event =>
+                                  updateRubricFinalScore(
+                                    index,
+                                    criterion,
+                                    event.target.value,
+                                  )
+                                }
+                                className="assignment-rubric-adjust-input"
+                                aria-label={`${criterion.name} lecturer score`}
+                              />
                             </div>
                           ))}
+                          <div className="assignment-rubric-total-row">
+                            <strong>Total</strong>
+                            <span>100%</span>
+                            <span>
+                              {rubricAiTotal} / {rubricMaxTotal}
+                            </span>
+                            <Input
+                              type="number"
+                              value={rubricFinalTotal}
+                              readOnly
+                              className="assignment-rubric-adjust-input"
+                              aria-label="Rubric final total"
+                            />
+                          </div>
                         </div>
                       </div>
                     )}
-                    <div className="assignment-grading-field">
-                      <Label className="text-gray-700 font-semibold">
-                        {rubricGrades.length > 0
-                          ? "Final score from rubric"
-                          : "Score"}
-                      </Label>
-                      <div className="assignment-score-row">
+                    <div className="assignment-finalize-card">
+                      <div className="assignment-final-score-header">
+                        <div>
+                          <h4>Final Score</h4>
+                          <span>Lecturer Confirmed</span>
+                        </div>
+                      </div>
+                      <div className="assignment-final-score-row">
                         <Input
                           type="number"
                           min={0}
-                          max={getAssignmentMaxScore(assignment)}
+                          max={maxScore}
                           value={currentGrade}
                           onChange={event => onGradeChange(event.target.value)}
                           readOnly={rubricGrades.length > 0}
-                          className="assignment-score-input text-2xl font-bold text-center bg-white"
+                          className="assignment-final-score-input"
                           placeholder="-"
                         />
-                        <span className="assignment-score-total text-gray-400 text-lg font-medium">
-                          / {getAssignmentMaxScore(assignment)}
-                        </span>
+                        <span>/ {maxScore}</span>
                       </div>
-                      {rubricGrades.length > 0 && (
-                        <p className="assignment-score-helper">
-                          Automatically calculated from the reviewed rubric
-                          sections above.
+                      <div className="assignment-final-actions">
+                        <p>
+                          Saving will publish the final grade to the gradebook.
                         </p>
-                      )}
+                        <Button
+                          onClick={onSaveGrade}
+                          className="assignment-save-grade-button"
+                        >
+                          <FileText className="h-4 w-4" />
+                          Save Grade
+                        </Button>
+                      </div>
                     </div>
-                    <div className="assignment-grading-field">
-                      <Label className="text-gray-700 font-semibold">
-                        Feedback
-                      </Label>
-                      <Textarea
-                        value={currentFeedback}
-                        onChange={event => onFeedbackChange(event.target.value)}
-                        className="assignment-feedback-input bg-white text-base leading-relaxed"
-                        placeholder="Enter detailed feedback for the student..."
-                      />
-                    </div>
-                    <Button
-                      onClick={onSaveGrade}
-                      className="assignment-save-grade-button text-lg shadow-lg hover:shadow-xl transition-all"
-                    >
-                      Save Grade & Return
-                    </Button>
                   </div>
                 </div>
               ) : (

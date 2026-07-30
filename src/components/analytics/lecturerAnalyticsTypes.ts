@@ -15,10 +15,6 @@ export type AnalyticsAssignment = Pick<
   TableRow<"assignments">,
   "id" | "course_id" | "title" | "due_date" | "max_score" | "created_at"
 >;
-export type AnalyticsAttendance = Pick<
-  TableRow<"attendance">,
-  "course_id" | "student_id" | "class_date" | "marked_present"
->;
 export type AnalyticsThread = Pick<
   TableRow<"forum_threads">,
   "id" | "course_id" | "author_id" | "created_at"

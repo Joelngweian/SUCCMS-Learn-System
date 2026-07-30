@@ -303,13 +303,8 @@ const parseSemester = (
   };
 };
 
-export async function parseAcademicCalendarPdf(file: File): Promise<ParsedAcademicCalendar> {
-  if (!/\.pdf$/i.test(file.name)) {
-    throw new Error("Only PDF academic calendar files are supported.");
-  }
-
-  const text = await extractPdfText(file);
-  const year = parseYear(file.name) || parseYear(text);
+export function parseAcademicCalendarText(fileName: string, text: string): ParsedAcademicCalendar {
+  const year = parseYear(fileName) || parseYear(text);
   if (!year) {
     throw new Error("Could not identify the academic calendar year from this PDF.");
   }
@@ -329,8 +324,17 @@ export async function parseAcademicCalendarPdf(file: File): Promise<ParsedAcadem
   for (const term of terms) warnings.push(...term.warnings);
 
   return {
-    fileName: file.name,
+    fileName,
     terms,
     warnings,
   };
+}
+
+export async function parseAcademicCalendarPdf(file: File): Promise<ParsedAcademicCalendar> {
+  if (!/\.pdf$/i.test(file.name)) {
+    throw new Error("Only PDF academic calendar files are supported.");
+  }
+
+  const text = await extractPdfText(file);
+  return parseAcademicCalendarText(file.name, text);
 }

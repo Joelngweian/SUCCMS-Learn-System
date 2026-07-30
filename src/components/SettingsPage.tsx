@@ -51,7 +51,6 @@ import {
   Trophy,
   Clock,
   Lock,
-  Smartphone,
   Download,
   Trash2,
   AlertTriangle,
@@ -698,20 +697,6 @@ const SecurityTab = memo(({ settings, updateSetting }: SettingsTabProps) => {
           </div>
 
           <Separator />
-
-          <div className="flex flex-col gap-4 rounded-xl border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="rounded-lg bg-background p-3 shadow-sm"><Smartphone className="h-5 w-5 text-primary" /></div>
-              <div>
-                <Label className="text-base font-semibold">Two-Factor Authentication (2FA)</Label>
-                <p className="mt-1 text-sm text-muted-foreground">TOTP setup can be added when Supabase MFA is enabled.</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">Coming soon</Badge>
-              <Button variant="outline" disabled>Setup 2FA</Button>
-            </div>
-          </div>
 
           <div className="space-y-3">
             <Label className="flex items-center gap-2 text-base font-semibold"><Clock className="h-4 w-4" /> Recent Login Activity</Label>

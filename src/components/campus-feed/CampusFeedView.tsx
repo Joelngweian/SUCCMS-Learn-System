@@ -550,7 +550,7 @@ export function CampusFeed() {
           onClick={() => void feed.refreshPosts()}
           className="w-full rounded-full border bg-primary/5 px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
         >
-          New campus posts are available 鈥?show latest
+          New campus posts are available. Show latest
         </button>
       )}
 

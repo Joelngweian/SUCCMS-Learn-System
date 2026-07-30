@@ -214,7 +214,7 @@ export function StudentDashboardRightRail({
   upcomingAssignments: DashboardAssignment[];
 }) {
   return (
-    <aside className="space-y-3 2xl:sticky 2xl:top-24 2xl:self-start">
+    <aside className="space-y-3">
       <div className="flex items-center gap-2 px-1">
         <Sparkles className="h-4 w-4 text-purple-500" />
         <h2 className="text-base font-semibold tracking-tight">

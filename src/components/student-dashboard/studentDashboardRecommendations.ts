@@ -137,6 +137,7 @@ const RESOURCE_TAGS: Record<string, string[]> = {
 };
 
 const tagsForResource = (resource: Recommendation) => RESOURCE_TAGS[resource.id] || [];
+const CREDITED_ATTENDANCE_STATUSES = new Set(["present", "late", "excused"]);
 
 export const getMotivationPicks = () =>
   KNOWLEDGE_BASE.filter(
@@ -231,7 +232,9 @@ export const buildRuleBasedInsights = (
       b.classDate.localeCompare(a.classDate),
     );
     if (attendance.length >= 2) {
-      const credited = attendance.filter(record => record.status !== "absent").length;
+      const credited = attendance.filter(record =>
+        CREDITED_ATTENDANCE_STATUSES.has(record.status),
+      ).length;
       const attendanceRate = Math.round((credited / attendance.length) * 100);
       const consecutiveConcern = attendance
         .slice(0, 3)

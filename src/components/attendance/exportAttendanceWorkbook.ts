@@ -71,9 +71,6 @@ const safeFilePart = (value: string | null | undefined, fallback: string) => {
 
 const toDateCell = (date: string) => new Date(`${date}T00:00:00`);
 
-const isAttendedStatus = (status: string | null) =>
-  status === "present" || status === "late";
-
 export async function exportAttendanceWorkbook({
   courseCode,
   courseName,
@@ -154,7 +151,9 @@ export async function exportAttendanceWorkbook({
     const statuses = studentRecords.map((record) =>
       record ? getRecordStatus(record) : null,
     );
-    const attended = statuses.filter(isAttendedStatus).length;
+    const attended = statuses.filter((status) =>
+      status ? receivesAttendanceCredit(status) : false
+    ).length;
     const totalSlots = attendanceColumns.length;
     const missed = totalSlots - attended;
     const attendanceRate =
@@ -173,7 +172,7 @@ export async function exportAttendanceWorkbook({
         format: "0%",
       },
       ...statuses.map((status) =>
-        isAttendedStatus(status)
+        status && receivesAttendanceCredit(status)
           ? { value: "✓", ...ATTENDED_CELL }
           : { value: "✗", ...MISSED_CELL },
       ),

@@ -354,7 +354,7 @@ function LecturerRightRail({
 
   return (
     <>
-      <aside className="space-y-4 2xl:sticky 2xl:top-24 2xl:max-h-[calc(100vh-7rem)] 2xl:self-start 2xl:overflow-y-auto 2xl:pr-1">
+      <aside className="space-y-4">
       <div className="flex items-center gap-2 px-1">
         <Sparkles className="h-4 w-4 text-purple-500" />
         <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground">
@@ -619,7 +619,7 @@ export function LecturerDashboardView({
   );
 
   return (
-    <div className="grid animate-in grid-cols-1 items-start gap-8 fade-in duration-500 2xl:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid animate-in grid-cols-1 items-start gap-8 fade-in duration-500 xl:pr-[384px]">
       <div className="min-w-0 space-y-8">
         <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
           <div>
@@ -640,7 +640,7 @@ export function LecturerDashboardView({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="2xl:hidden"
+                className="xl:hidden"
               >
                 <Sparkles className="h-4 w-4 text-purple-500" />
                 Teaching Panel
@@ -688,7 +688,9 @@ export function LecturerDashboardView({
         </main>
       </div>
 
-      <div className="hidden 2xl:block">{teachingPanel}</div>
+      <div className="hidden xl:fixed xl:right-8 xl:top-24 xl:z-20 xl:block xl:max-h-[calc(100dvh-7rem)] xl:w-[360px] xl:overflow-y-auto xl:overscroll-contain xl:pr-1 xl:[-ms-overflow-style:none] xl:[scrollbar-width:none] xl:[&::-webkit-scrollbar]:hidden">
+        {teachingPanel}
+      </div>
     </div>
   );
 }

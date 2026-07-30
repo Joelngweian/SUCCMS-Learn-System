@@ -18,7 +18,7 @@ export function AaroDashboardHome() {
 
   return (
     <div className="mx-auto w-full max-w-[1460px] px-4 py-6 sm:px-6 lg:px-8">
-      <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid gap-7 xl:pr-[384px]">
         <main className="min-w-0 space-y-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
@@ -40,8 +40,8 @@ export function AaroDashboardHome() {
 
           <CampusFeed />
         </main>
-        <aside className="hidden xl:block">
-          <div className="sticky top-6">
+        <aside className="hidden xl:fixed xl:right-8 xl:top-24 xl:z-20 xl:block xl:max-h-[calc(100dvh-7rem)] xl:w-[360px] xl:overflow-y-auto xl:overscroll-contain xl:pr-1 xl:[-ms-overflow-style:none] xl:[scrollbar-width:none] xl:[&::-webkit-scrollbar]:hidden">
+          <div>
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Quick Tasks</CardTitle>

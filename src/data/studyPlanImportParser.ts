@@ -377,6 +377,7 @@ const parseStudyPlanRows = ({
 
         if (!courseName && !courseCode) continue;
         if (!courseName || courseName.length <= 1) continue;
+        if (/^requirements?$/i.test(courseName)) continue;
         if (!courseCode && /^\d+(?:\.\d+)?$/.test(courseName)) continue;
 
         const courseChoices = expandChoiceCourses(courseCode, courseName);

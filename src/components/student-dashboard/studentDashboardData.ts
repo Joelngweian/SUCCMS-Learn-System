@@ -86,7 +86,7 @@ export type GradeRow = Pick<
 
 export type AttendanceRow = Pick<
   Database["public"]["Tables"]["attendance"]["Row"],
-  "course_id" | "class_date" | "status" | "marked_present"
+  "course_id" | "class_date" | "status" | "marked_present" | "session_id"
 >;
 
 export type InstructorRow = {

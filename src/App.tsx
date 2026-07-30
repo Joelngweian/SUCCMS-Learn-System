@@ -11,6 +11,7 @@ import { useOnlinePresence } from "@/hooks/useOnlinePresence";
 import { Login } from "./components/Login";
 import { NotificationButton } from "./components/NotificationButton";
 import { TopBarSearch } from "./components/TopBarSearch";
+import { CurrentSemesterBadge } from "./components/CurrentSemesterBadge";
 import { Button } from "./components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./components/ui/avatar";
 import { Badge } from "./components/ui/badge";
@@ -442,6 +443,7 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-3">
+                <CurrentSemesterBadge />
                 <NotificationButton />
                 <Button variant="ghost" size="sm" onClick={toggleTheme}>{isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</Button>
                 <div className="hidden sm:flex items-center gap-2 text-sm text-muted-foreground"><span className="truncate max-w-[150px]">{userData?.name}</span></div>

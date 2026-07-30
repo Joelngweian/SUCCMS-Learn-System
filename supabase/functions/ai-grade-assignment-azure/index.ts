@@ -1,3 +1,4 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { strFromU8, unzipSync } from "npm:fflate@0.8.2";
 
@@ -16,36 +17,33 @@ const jsonResponse = (body: Record<string, unknown>, status = 200) =>
 const gradingSchema = {
   type: "object",
   properties: {
-    suggestedScore: { type: "number", minimum: 0 },
+    suggestedScore: { type: "number" },
     feedback: { type: "string" },
-    confidence: { type: "integer", minimum: 0, maximum: 100 },
+    confidence: { type: "integer" },
     criteria: {
       type: "array",
-      maxItems: 20,
       items: {
         type: "object",
         properties: {
           name: { type: "string" },
-          score: { type: "number", minimum: 0 },
-          maxScore: { type: "number", minimum: 0 },
+          score: { type: "number" },
+          maxScore: { type: "number" },
           reason: { type: "string" },
         },
         required: ["name", "score", "maxScore", "reason"],
+        additionalProperties: false,
       },
     },
     warnings: {
       type: "array",
-      maxItems: 4,
       items: { type: "string" },
     },
     annotations: {
       type: "array",
-      maxItems: 24,
       items: {
         type: "object",
         properties: {
           fileName: { type: "string" },
-          page: { type: "integer", minimum: 1 },
           status: {
             type: "string",
             enum: ["correct", "incorrect", "uncertain"],
@@ -54,6 +52,7 @@ const gradingSchema = {
           comment: { type: "string" },
         },
         required: ["fileName", "status", "excerpt", "comment"],
+        additionalProperties: false,
       },
     },
   },
@@ -65,6 +64,7 @@ const gradingSchema = {
     "warnings",
     "annotations",
   ],
+  additionalProperties: false,
 };
 
 type StoredFile = {
@@ -95,6 +95,13 @@ const LEGACY_OFFICE_MIME_TYPES = new Set([
   "application/vnd.ms-excel",
 ]);
 
+const SUPPORTED_AZURE_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
+
 const cleanText = (value: unknown, fallback = "", maxLength = 12000) =>
   typeof value === "string" ? value.trim().slice(0, maxLength) : fallback;
 
@@ -104,51 +111,24 @@ const cleanNumber = (value: unknown, minimum: number, maximum: number) => {
   return Math.min(maximum, Math.max(minimum, parsed));
 };
 
-type SupabaseServiceClient = ReturnType<typeof createClient>;
+const getResponseText = (payload: any) => {
+  if (typeof payload?.output_text === "string") {
+    return payload.output_text.trim();
+  }
 
-type GeminiPayload = {
-  candidates?: Array<{
-    content?: { parts?: Array<{ text?: string }> };
-    finishReason?: string;
-  }>;
-  error?: { message?: string };
+  return Array.isArray(payload?.output)
+    ? payload.output
+        .flatMap((item: any) =>
+          Array.isArray(item?.content) ? item.content : [],
+        )
+        .filter((part: any) => part?.type === "output_text")
+        .map((part: any) => part?.text || "")
+        .join("")
+        .trim()
+    : "";
 };
 
-type ParsedGradingCriterion = {
-  maxScore?: unknown;
-  name?: unknown;
-  reason?: unknown;
-  score?: unknown;
-};
-
-type ParsedGradingAnnotation = {
-  comment?: unknown;
-  excerpt?: unknown;
-  fileName?: unknown;
-  page?: unknown;
-  status?: unknown;
-};
-
-type ParsedGradingResponse = {
-  annotations?: ParsedGradingAnnotation[];
-  confidence?: unknown;
-  criteria?: ParsedGradingCriterion[];
-  feedback?: unknown;
-  suggestedScore?: unknown;
-  warnings?: unknown[];
-};
-
-type StoredFileInput = Record<string, unknown>;
-
-const getResponseText = (payload: unknown) =>
-  (payload as GeminiPayload)
-    ?.candidates?.[0]?.content?.parts
-    ?.map((part) => part?.text || "")
-    .join("")
-    .trim() || "";
-
-const parseGeminiJson = (payload: unknown): ParsedGradingResponse => {
-  const geminiPayload = payload as GeminiPayload;
+const parseAzureJson = (payload: any) => {
   const responseText = getResponseText(payload);
   if (!responseText) {
     throw new Error("EMPTY_GRADING_RESPONSE");
@@ -167,11 +147,11 @@ const parseGeminiJson = (payload: unknown): ParsedGradingResponse => {
       : normalizedText;
 
   try {
-    return JSON.parse(jsonText) as ParsedGradingResponse;
+    return JSON.parse(jsonText);
   } catch {
-    const finishReason = geminiPayload?.candidates?.[0]?.finishReason || "";
-    console.error("Invalid Gemini grading JSON", {
-      finishReason,
+    console.error("Invalid Azure OpenAI grading JSON", {
+      responseId: cleanText(payload?.id, "", 160),
+      status: cleanText(payload?.status, "", 80),
       responseLength: responseText.length,
     });
     throw new Error("INVALID_GRADING_RESPONSE");
@@ -400,6 +380,7 @@ const inferMimeType = (name: string, configuredType = "") => {
     jpeg: "image/jpeg",
     png: "image/png",
     webp: "image/webp",
+    gif: "image/gif",
     heic: "image/heic",
     doc: "application/msword",
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -416,7 +397,7 @@ const normalizeFiles = (value: unknown): StoredFile[] => {
   if (!Array.isArray(value)) return [];
 
   return value
-    .map((file: StoredFileInput) => ({
+    .map((file: any) => ({
       bucket: cleanText(file?.bucket, "", 120) || undefined,
       name: cleanText(file?.name, "Attached file", 240),
       path: cleanText(file?.path || file?.url, "", 1800),
@@ -427,26 +408,28 @@ const normalizeFiles = (value: unknown): StoredFile[] => {
     .slice(0, MAX_FILES);
 };
 
-const parseGuideResource = (value: unknown) => {
-  const guide = cleanText(value, "", 50000);
-  if (!guide) return { text: "", files: [] as StoredFile[] };
+const parseRubric = (value: unknown) => {
+  const rubric = cleanText(value, "", 50000);
+  if (!rubric) return { text: "", files: [] as StoredFile[] };
 
   try {
-    const parsed = JSON.parse(guide);
+    const parsed = JSON.parse(rubric);
     if (Array.isArray(parsed)) {
       return { text: "", files: normalizeFiles(parsed) };
     }
   } catch {
-    // A plain-text guide is valid.
+    // A plain-text rubric is valid.
   }
 
-  return { text: guide, files: [] as StoredFile[] };
+  return { text: rubric, files: [] as StoredFile[] };
 };
+
+const parseGuideResource = parseRubric;
 
 const resolveFileUrl = async (
   file: StoredFile,
   supabaseUrl: string,
-  serviceClient: SupabaseServiceClient,
+  serviceClient: any,
 ) => {
   if (/^https?:\/\//i.test(file.path)) {
     const parsed = new URL(file.path);
@@ -478,7 +461,7 @@ const loadFileParts = async (
   files: StoredFile[],
   label: string,
   supabaseUrl: string,
-  serviceClient: SupabaseServiceClient,
+  serviceClient: any,
 ) => {
   const parts: Array<Record<string, unknown>> = [];
   let totalBytes = 0;
@@ -514,7 +497,7 @@ const loadFileParts = async (
 
     if (mimeType === "application/octet-stream") {
       throw new Error(
-        `"${file.name}" uses a file type that Gemini cannot grade safely.`,
+        `"${file.name}" uses a file type that Azure OpenAI cannot grade safely.`,
       );
     }
 
@@ -550,6 +533,7 @@ const loadFileParts = async (
       const limitedText = extractedText.trim().slice(0, remainingChars);
       totalExtractedChars += limitedText.length;
       parts.push({
+        type: "input_text",
         text: `${label}: ${file.name}\n${limitedText || "[No readable text found]"}`,
       });
       if (isModernOfficeFile) {
@@ -560,24 +544,40 @@ const loadFileParts = async (
         );
         embeddedImages.forEach((image, index) => {
           parts.push({
+            type: "input_text",
             text: `${label}: embedded image ${index + 1} from ${file.name} (${image.name})`,
           });
           parts.push({
-            inlineData: {
-              mimeType: image.mimeType,
-              data: bytesToBase64(image.bytes),
-            },
+            type: "input_image",
+            image_url: `data:${image.mimeType};base64,${bytesToBase64(image.bytes)}`,
+            detail: "high",
           });
         });
       }
-    } else if (mimeType === "application/pdf" || mimeType.startsWith("image/")) {
-      parts.push({ text: `${label}: ${file.name}` });
+    } else if (mimeType === "application/pdf") {
       parts.push({
-        inlineData: {
-          mimeType,
-          data: arrayBufferToBase64(buffer),
-        },
+        type: "input_text",
+        text: `${label}: ${file.name}`,
       });
+      parts.push({
+        type: "input_file",
+        filename: file.name,
+        file_data: `data:application/pdf;base64,${arrayBufferToBase64(buffer)}`,
+      });
+    } else if (SUPPORTED_AZURE_IMAGE_TYPES.has(mimeType)) {
+      parts.push({
+        type: "input_text",
+        text: `${label}: ${file.name}`,
+      });
+      parts.push({
+        type: "input_image",
+        image_url: `data:${mimeType};base64,${arrayBufferToBase64(buffer)}`,
+        detail: "high",
+      });
+    } else if (mimeType.startsWith("image/")) {
+      throw new Error(
+        `"${file.name}" must be converted to JPEG, PNG, WEBP, or GIF before Azure OpenAI grading.`,
+      );
     } else {
       throw new Error(
         `"${file.name}" is not a supported AI grading file type.`,
@@ -588,56 +588,61 @@ const loadFileParts = async (
   return parts;
 };
 
-const callGemini = async (
+const getAzureResponsesUrl = (endpoint: string) => {
+  const normalized = endpoint.trim().replace(/\/+$/, "");
+  return /\/openai\/v1$/i.test(normalized)
+    ? `${normalized}/responses`
+    : `${normalized}/openai/v1/responses`;
+};
+
+const callAzureOpenAI = async (
+  endpoint: string,
   apiKey: string,
-  model: string,
   requestBody: Record<string, unknown>,
 ) => {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify(requestBody),
+    const response = await fetch(getAzureResponsesUrl(endpoint), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": apiKey,
       },
-    );
+      body: JSON.stringify(requestBody),
+    });
 
-    const payload = await response.json();
+    const responseText = await response.text();
+    let payload: any = {};
+    try {
+      payload = responseText ? JSON.parse(responseText) : {};
+    } catch {
+      payload = {};
+    }
+
     if (response.ok) return payload;
 
     const retryable = response.status === 429 || response.status >= 500;
     if (retryable && attempt < 2) {
-      const retryAfterHeader = Number(response.headers.get("retry-after"));
-      const retryAfterMessage = Number(
-        String(payload?.error?.message || "").match(
-          /retry in\s+([\d.]+)s/i,
-        )?.[1],
-      );
-      const retryAfterSeconds = Number.isFinite(retryAfterHeader)
-        ? retryAfterHeader
-        : Number.isFinite(retryAfterMessage)
-          ? retryAfterMessage
-          : 0;
-      const retryDelay = Math.min(
-        30000,
-        Math.max(750 * 2 ** attempt, retryAfterSeconds * 1000 + 500),
-      );
-      await new Promise(resolve =>
-        setTimeout(resolve, retryDelay),
+      await new Promise((resolve) =>
+        setTimeout(resolve, 750 * 2 ** attempt),
       );
       continue;
     }
 
+    console.error("Azure OpenAI grading request failed", {
+      status: response.status,
+      requestId: response.headers.get("apim-request-id"),
+      responseLength: responseText.length,
+    });
     throw new Error(
-      payload?.error?.message || "Gemini could not grade the submission.",
+      cleanText(
+        payload?.error?.message,
+        "Azure OpenAI could not grade the submission.",
+        1000,
+      ),
     );
   }
 
-  throw new Error("Gemini could not grade the submission.");
+  throw new Error("Azure OpenAI could not grade the submission.");
 };
 
 type AiGradingJob = {
@@ -661,14 +666,16 @@ const gradeJob = async ({
   job,
   supabaseUrl,
   serviceClient,
-  geminiApiKey,
-  model,
+  azureEndpoint,
+  azureApiKey,
+  deployment,
 }: {
   job: AiGradingJob;
   supabaseUrl: string;
-  serviceClient: SupabaseServiceClient;
-  geminiApiKey: string;
-  model: string;
+  serviceClient: any;
+  azureEndpoint: string;
+  azureApiKey: string;
+  deployment: string;
 }) => {
   const { data: profile, error: profileError } = await serviceClient
     .from("user_profiles")
@@ -686,9 +693,7 @@ const gradeJob = async ({
 
   const { data: assignment, error: assignmentError } = await serviceClient
     .from("assignments")
-    .select(
-      "id, course_id, assessment_type, title, description, max_score, rubric",
-    )
+    .select("id, course_id, title, description, max_score, rubric, assessment_type")
     .eq("id", job.assignment_id)
     .single();
 
@@ -751,6 +756,7 @@ const gradeJob = async ({
   const maxScore = cleanNumber(assignment.max_score ?? 100, 1, 100000);
   const promptParts: Array<Record<string, unknown>> = [
     {
+      type: "input_text",
       text: [
         "You are an assessment assistant for a college lecturer.",
         "Treat the lecturer-uploaded marking scheme, answer script, answer key, marking guide, and rubric as the authority for this grading run.",
@@ -834,7 +840,7 @@ const gradeJob = async ({
     )),
   );
 
-  let parsed: ParsedGradingResponse | null = null;
+  let parsed: any = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const attemptParts =
       attempt === 0
@@ -842,27 +848,37 @@ const gradeJob = async ({
         : [
             ...promptParts,
             {
+              type: "input_text",
               text: [
                 "Return a shorter grading response.",
                 "Use at most 100 words for feedback and one short sentence per rubric criterion reason.",
-                "Keep one criteria entry for every rubric section even in this shorter response.",
+                "Keep one criteria entry for every rubric, guide, or answer scheme section even in this shorter response.",
                 "Return at most 10 annotations, with excerpts below 30 words and comments below 18 words.",
                 "Return complete valid JSON only.",
               ].join("\n"),
             },
           ];
-    const payload = await callGemini(geminiApiKey, model, {
-      contents: [{ role: "user", parts: attemptParts }],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: attempt === 0 ? 8192 : 4096,
-        responseMimeType: "application/json",
-        responseSchema: gradingSchema,
+    const payload = await callAzureOpenAI(
+      azureEndpoint,
+      azureApiKey,
+      {
+        model: deployment,
+        input: [{ role: "user", content: attemptParts }],
+        max_output_tokens: attempt === 0 ? 8192 : 4096,
+        store: false,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "succms_grading_result",
+            strict: true,
+            schema: gradingSchema,
+          },
+        },
       },
-    });
+    );
 
     try {
-      parsed = parseGeminiJson(payload);
+      parsed = parseAzureJson(payload);
       break;
     } catch (error) {
       if (
@@ -875,17 +891,18 @@ const gradeJob = async ({
         continue;
       }
       throw new Error(
-        "Gemini returned incomplete grading data. Please try again.",
+        "Azure OpenAI returned incomplete grading data. Please try again.",
       );
     }
   }
 
   if (!parsed) {
-    throw new Error("Gemini returned incomplete grading data. Please try again.");
+    throw new Error("Azure OpenAI returned incomplete grading data. Please try again.");
   }
 
+  const suggestedScore = cleanNumber(parsed?.suggestedScore, 0, maxScore);
   const criteria = Array.isArray(parsed?.criteria)
-    ? parsed.criteria.slice(0, 20).map((criterion) => {
+    ? parsed.criteria.slice(0, 20).map((criterion: any) => {
         const criterionMax = cleanNumber(criterion?.maxScore, 0, maxScore);
         return {
           name: cleanText(criterion?.name, "Criterion", 160),
@@ -894,23 +911,18 @@ const gradeJob = async ({
           reason: cleanText(criterion?.reason, "", 360),
         };
       })
-      : [];
+    : [];
   const criteriaScoreTotal = criteria.reduce(
     (total: number, criterion: { score: number }) => total + criterion.score,
     0,
   );
-  const criteriaMaxTotal = criteria.reduce(
-    (total: number, criterion: { maxScore: number }) =>
-      total + criterion.maxScore,
-    0,
-  );
-  const suggestedScore = criteria.length > 0
+  const normalizedSuggestedScore = criteria.length > 0
     ? cleanNumber(criteriaScoreTotal, 0, maxScore)
-    : cleanNumber(parsed?.suggestedScore, 0, maxScore);
+    : suggestedScore;
   const annotations = Array.isArray(parsed?.annotations)
     ? parsed.annotations
         .slice(0, 24)
-        .map((annotation) => {
+        .map((annotation: any) => {
           const rawStatus = String(annotation?.status);
           const status = ["correct", "incorrect", "uncertain"].includes(rawStatus)
             ? rawStatus
@@ -924,30 +936,24 @@ const gradeJob = async ({
             comment: cleanText(annotation?.comment, "", 500),
           };
         })
-        .filter((annotation) => annotation.excerpt)
+        .filter((annotation: { excerpt: string }) => annotation.excerpt)
     : [];
 
   return {
-    suggestedScore,
+    suggestedScore: normalizedSuggestedScore,
     maxScore,
     feedback: cleanText(parsed?.feedback, "No feedback was generated.", 1800),
     confidence: Math.round(cleanNumber(parsed?.confidence, 0, 100)),
     criteria,
-    warnings: [
-      ...(Array.isArray(parsed?.warnings)
-        ? parsed.warnings
+    warnings: Array.isArray(parsed?.warnings)
+      ? parsed.warnings
           .slice(0, 4)
           .map((warning: unknown) => cleanText(warning, "", 240))
           .filter(Boolean)
-        : []),
-      ...(criteria.length > 0 && Math.abs(criteriaMaxTotal - maxScore) > 0.01
-        ? [
-            `Rubric sections total ${criteriaMaxTotal} marks, but the assessment maximum is ${maxScore}. Lecturer review is required.`,
-          ]
-        : []),
-    ].slice(0, 5),
+      : [],
     annotations,
-    model,
+    model: deployment,
+    provider: "azure-openai",
   };
 };
 
@@ -962,12 +968,30 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
-  const model =
-    Deno.env.get("AI_GRADING_MODEL") || "gemini-3.1-flash-lite";
+  const workerEnabled =
+    Deno.env.get("AZURE_OPENAI_WORKER_ENABLED")?.toLowerCase() === "true";
+  const azureEndpoint = Deno.env.get("AZURE_OPENAI_ENDPOINT");
+  const azureApiKey = Deno.env.get("AZURE_OPENAI_API_KEY");
+  const deployment = Deno.env.get("AZURE_OPENAI_GRADING_DEPLOYMENT");
 
-  if (!supabaseUrl || !serviceRoleKey || !geminiApiKey) {
-    return jsonResponse({ error: "AI grading worker is not configured." }, 500);
+  if (!workerEnabled) {
+    return jsonResponse(
+      { error: "Azure OpenAI grading worker is disabled." },
+      503,
+    );
+  }
+
+  if (
+    !supabaseUrl ||
+    !serviceRoleKey ||
+    !azureEndpoint ||
+    !azureApiKey ||
+    !deployment
+  ) {
+    return jsonResponse(
+      { error: "Azure OpenAI grading worker is not configured." },
+      500,
+    );
   }
 
   if (req.headers.get("Authorization") !== `Bearer ${serviceRoleKey}`) {
@@ -1058,8 +1082,9 @@ Deno.serve(async (req) => {
           job: { ...job, status: "processing", attempts: nextAttempt },
           supabaseUrl,
           serviceClient,
-          geminiApiKey,
-          model,
+          azureEndpoint,
+          azureApiKey,
+          deployment,
         });
 
         const { error: completeError } = await serviceClient
@@ -1067,7 +1092,7 @@ Deno.serve(async (req) => {
           .update({
             status: "completed",
             result,
-            model,
+            model: deployment,
             error_message: null,
             completed_at: new Date().toISOString(),
           })

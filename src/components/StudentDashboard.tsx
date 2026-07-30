@@ -62,6 +62,66 @@ import {
   SheetTrigger,
 } from "./ui/sheet";
 
+type AttendanceSessionRow = {
+  id: string;
+  course_id: string;
+  class_date: string;
+  status: string;
+  slot_no: number;
+};
+
+const COMPLETED_ATTENDANCE_SESSION_STATUSES = new Set(["closed", "completed"]);
+const CREDITED_ATTENDANCE_STATUSES = new Set(["present", "late", "excused"]);
+
+const getAttendanceStatus = (record?: AttendanceRow) => {
+  if (!record) return "absent";
+  const status = record.status?.toLowerCase();
+  if (
+    status === "present" ||
+    status === "late" ||
+    status === "absent" ||
+    status === "excused"
+  ) {
+    return status;
+  }
+  return record.marked_present ? "present" : "absent";
+};
+
+const buildHourlyAttendanceRows = (
+  sessions: AttendanceSessionRow[],
+  records: AttendanceRow[],
+): AttendanceRow[] => {
+  const recordsBySession = new Map(
+    records
+      .filter((record) => Boolean(record.session_id))
+      .map((record) => [record.session_id, record])
+  );
+  const legacyRows = records.filter((record) => !record.session_id);
+
+  const hourlyRows = sessions
+    .filter((session) =>
+      COMPLETED_ATTENDANCE_SESSION_STATUSES.has(session.status.toLowerCase())
+    )
+    .sort((a, b) => {
+      const dateOrder = b.class_date.localeCompare(a.class_date);
+      return dateOrder || b.slot_no - a.slot_no;
+    })
+    .map((session) => {
+      const record = recordsBySession.get(session.id);
+      const status = getAttendanceStatus(record);
+
+      return {
+        course_id: session.course_id,
+        class_date: session.class_date,
+        session_id: session.id,
+        status,
+        marked_present: CREDITED_ATTENDANCE_STATUSES.has(status),
+      };
+    });
+
+  return [...hourlyRows, ...legacyRows];
+};
+
 export function StudentDashboard() {
   const { user, profile } = useAuth();
   const userId = user?.id;
@@ -402,6 +462,7 @@ export function StudentDashboard() {
           assignmentResult,
           gradeResult,
           attendanceResult,
+          attendanceSessionResult,
         ] = await Promise.all([
           supabase
             .from("course_instructors")
@@ -423,10 +484,17 @@ export function StudentDashboard() {
             .in("course_id", courseIds),
           supabase
             .from("attendance")
-            .select("course_id, class_date, status, marked_present")
+            .select("course_id, class_date, status, marked_present, session_id")
             .eq("student_id", userId)
             .in("course_id", courseIds)
             .order("class_date", { ascending: false }),
+          supabase
+            .from("attendance_sessions")
+            .select("id, course_id, class_date, status, slot_no")
+            .in("course_id", courseIds)
+            .in("status", Array.from(COMPLETED_ATTENDANCE_SESSION_STATUSES))
+            .order("class_date", { ascending: false })
+            .order("slot_no", { ascending: false }),
         ]);
 
         if (instructorResult.error) throw instructorResult.error;
@@ -435,9 +503,10 @@ export function StudentDashboard() {
         instructorRows = instructorResult.data || [];
         assignmentRows = assignmentResult.data || [];
         gradeRows = gradeResult.data || [];
-        attendanceRows = attendanceResult.error
-          ? []
-          : attendanceResult.data || [];
+        attendanceRows = buildHourlyAttendanceRows(
+          attendanceSessionResult.error ? [] : attendanceSessionResult.data || [],
+          attendanceResult.error ? [] : attendanceResult.data || [],
+        );
 
         const assignmentIds = assignmentRows.map((assignment) => assignment.id);
         if (assignmentIds.length > 0) {
@@ -596,9 +665,7 @@ export function StudentDashboard() {
           }),
           attendance: (attendanceByCourse.get(course.id) || []).map(
             (record) => ({
-              status:
-                record.status ||
-                (record.marked_present ? "present" : "absent"),
+              status: getAttendanceStatus(record),
               classDate: record.class_date,
             })
           ),
@@ -731,7 +798,7 @@ export function StudentDashboard() {
   );
 
   return (
-    <div className="mx-auto grid w-full max-w-[1320px] grid-cols-1 gap-6 animate-in fade-in duration-500 2xl:grid-cols-[minmax(0,1fr)_360px] 2xl:items-start">
+    <div className="mx-auto grid w-full max-w-[1320px] grid-cols-1 gap-6 animate-in fade-in duration-500 xl:pr-[384px]">
       <div className="min-w-0 space-y-6">
         <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
           <div>
@@ -752,7 +819,7 @@ export function StudentDashboard() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="2xl:hidden"
+                  className="xl:hidden"
                 >
                   <Sparkles className="h-4 w-4 text-primary" />
                   Study Panel
@@ -811,7 +878,9 @@ export function StudentDashboard() {
         </main>
       </div>
 
-      <div className="hidden 2xl:block">{studyPanel}</div>
+      <div className="hidden xl:fixed xl:right-8 xl:top-24 xl:z-20 xl:block xl:max-h-[calc(100dvh-7rem)] xl:w-[360px] xl:overflow-y-auto xl:overscroll-contain xl:pr-1 xl:[-ms-overflow-style:none] xl:[scrollbar-width:none] xl:[&::-webkit-scrollbar]:hidden">
+        {studyPanel}
+      </div>
     </div>
   );
 }
