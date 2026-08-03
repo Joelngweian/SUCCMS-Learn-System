@@ -48,6 +48,12 @@ import {
   getBroadcastNewRecord,
   subscribeToPrivateBroadcast,
 } from "@/lib/realtime";
+import {
+  ASSESSMENT_RESOURCE_BLOCKED_EXTENSIONS,
+  SUBMISSION_FILE_BLOCKED_EXTENSIONS,
+  describeBlockedExtensions,
+  getBlockedFileNames,
+} from "./courseUploadFormats";
 import type { AssessmentDraft } from "@/lib/assessmentTypes";
 import { usesAiMarkingGuideFile } from "@/lib/assessmentTypes";
 import type { Json } from "@/lib/database.types";
@@ -699,10 +705,21 @@ export function useCourseAssignments({
     event: ChangeEvent<HTMLInputElement>,
     bucket: string,
     getFilePath: (file: File) => string,
+    blockedExtensions: readonly string[],
   ): Promise<CourseResourceFile[]> => {
     const files = Array.from(event.target.files || []);
     event.target.value = "";
     if (files.length === 0) return [];
+    const blockedFileNames = getBlockedFileNames(
+      files,
+      blockedExtensions,
+    );
+    if (blockedFileNames.length > 0) {
+      notify.error(
+        `These file formats are not allowed: ${describeBlockedExtensions(blockedExtensions)}. Blocked: ${blockedFileNames.join(", ")}.`,
+      );
+      return [];
+    }
     if (files.some(file => file.size > MAX_ASSIGNMENT_FILE_SIZE)) {
       notify.error("Each assignment file must be 8 MB or smaller.");
       return [];
@@ -759,6 +776,7 @@ export function useCourseAssignments({
         return courseId + "/assignments/drafts/" + userId + "/"
           + crypto.randomUUID() + "_" + safeName;
       },
+      ASSESSMENT_RESOURCE_BLOCKED_EXTENSIONS,
     );
     uploadedFiles.forEach(file => assignmentDraftPathsRef.current.add(
       getCourseContentStoragePath(file) || file.path,
@@ -785,6 +803,7 @@ export function useCourseAssignments({
         return userId + "/" + selectedAssignment.id + "/"
           + crypto.randomUUID() + "_" + safeName;
       },
+      SUBMISSION_FILE_BLOCKED_EXTENSIONS,
     );
     if (uploadedFiles.length > 0) {
       setSubmissionFiles(current => [...current, ...uploadedFiles]);

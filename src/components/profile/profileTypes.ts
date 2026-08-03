@@ -14,9 +14,10 @@ export type ProfileData = Omit<
 
 export type ProfileCourse = NormalizedCourseOffering;
 
-export type ProfilePost = TableRow<"course_posts"> & {
-  courses: NormalizedCourseOffering;
-};
+export type ProfilePost = Pick<
+  TableRow<"campus_posts">,
+  "id" | "author_id" | "content" | "attachments" | "created_at" | "updated_at"
+>;
 
 export type ConnectedProfile = {
   user_id: string;

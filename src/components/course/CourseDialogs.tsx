@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import {
   BookOpenCheck,
   Calculator,
@@ -36,6 +36,7 @@ import type {
   CoursePerson,
   CourseResourceFile,
 } from "./coursePageTypes";
+import { ASSESSMENT_RESOURCE_ACCEPT } from "./courseUploadFormats";
 
 type AddStudentDialogProps = {
   open: boolean;
@@ -188,6 +189,9 @@ export function CreateAssessmentDialog({
 }: CreateAssessmentDialogProps) {
   const [selectedGroupId, setSelectedGroupId] =
     useState<AssessmentTypeGroupId | null>(null);
+  const markingGuideInputRef = useRef<HTMLInputElement | null>(null);
+  const rubricInputRef = useRef<HTMLInputElement | null>(null);
+  const materialInputRef = useRef<HTMLInputElement | null>(null);
   const shouldUseMarkingGuide = usesAiMarkingGuideFile(
     assignment.assessment_type,
   );
@@ -375,17 +379,17 @@ export function CreateAssessmentDialog({
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() =>
-                    document.getElementById("marking-guide-upload")?.click()
-                  }
+                  onClick={() => markingGuideInputRef.current?.click()}
                   disabled={isUploading}
                   className="bg-white dark:bg-zinc-950"
                 >
                   <Paperclip className="h-4 w-4 mr-2" /> Add Marking Guide
                 </Button>
-                <Input
+                <input
+                  ref={markingGuideInputRef}
                   id="marking-guide-upload"
                   type="file"
+                  accept={ASSESSMENT_RESOURCE_ACCEPT}
                   className="hidden"
                   onChange={onMarkingGuideUpload}
                   disabled={isUploading}
@@ -419,15 +423,17 @@ export function CreateAssessmentDialog({
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => document.getElementById("rubric-upload")?.click()}
+                  onClick={() => rubricInputRef.current?.click()}
                   disabled={isUploading}
                   className="bg-white dark:bg-zinc-950"
                 >
                   <Paperclip className="h-4 w-4 mr-2" /> Add Rubric
                 </Button>
-                <Input
+                <input
+                  ref={rubricInputRef}
                   id="rubric-upload"
                   type="file"
+                  accept={ASSESSMENT_RESOURCE_ACCEPT}
                   className="hidden"
                   onChange={onRubricUpload}
                   disabled={isUploading}
@@ -472,15 +478,17 @@ export function CreateAssessmentDialog({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => document.getElementById("materials-upload")?.click()}
+                onClick={() => materialInputRef.current?.click()}
                 disabled={isUploading}
                 className="bg-white dark:bg-zinc-950"
               >
                 <Paperclip className="h-4 w-4 mr-2" /> Add Materials
               </Button>
-              <Input
+              <input
+                ref={materialInputRef}
                 id="materials-upload"
                 type="file"
+                accept={ASSESSMENT_RESOURCE_ACCEPT}
                 className="hidden"
                 onChange={onMaterialUpload}
                 disabled={isUploading}

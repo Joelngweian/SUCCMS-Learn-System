@@ -172,6 +172,7 @@ export default function App() {
   const userRole = (profile?.role as UserRole) || 'student';
   const isStudyPlanManagement =
     userRole === 'staff' && location.pathname === '/study-plan-management';
+  const isProfilePage = location.pathname.startsWith('/profile/');
   const isWideDashboard =
     ((userRole === 'student' || userRole === 'lecturer') &&
       location.pathname === '/') ||
@@ -457,7 +458,7 @@ export default function App() {
 
           <main
             className={`mx-auto w-full min-w-0 p-4 sm:p-6 lg:p-8 ${
-          isStudyPlanManagement ? 'max-w-none' : isWideDashboard ? 'max-w-[1600px]' : 'max-w-7xl'
+          isStudyPlanManagement || isProfilePage ? 'max-w-none' : isWideDashboard ? 'max-w-[1600px]' : 'max-w-7xl'
             }`}
           >
             <Suspense fallback={<PageLoadingFallback />}>

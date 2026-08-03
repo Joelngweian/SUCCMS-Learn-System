@@ -1,0 +1,1495 @@
+import {
+  type ButtonHTMLAttributes,
+  forwardRef,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  Camera,
+  CameraOff,
+  ChevronDown,
+  CheckCircle2,
+  Headphones,
+  Hand,
+  LayoutGrid,
+  MessageCircle,
+  Mic,
+  MicOff,
+  PhoneOff,
+  ScreenShare,
+  ScreenShareOff,
+  Send,
+  ShieldCheck,
+  SmilePlus,
+  Users,
+  Volume2,
+} from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
+import { RadioGroup, RadioGroupItem } from "../ui/radio-group";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "../ui/sheet";
+import { Switch } from "../ui/switch";
+import { Textarea } from "../ui/textarea";
+import type {
+  StudyGroupMember,
+  StudyGroupSummary,
+  StudySession,
+} from "./StudyGroupTypes";
+
+type StudyGroupMeetingRoomPreviewProps = {
+  group: StudyGroupSummary;
+  members: StudyGroupMember[];
+  sessions: StudySession[];
+  isLoadingMembers: boolean;
+  onBack: () => void;
+};
+
+const getInitials = (name: string) =>
+  name
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "U";
+
+const formatSessionTime = (value: string) =>
+  new Date(value).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+type AudioMode = "computer" | "room" | "none";
+
+type ActiveRoomPanel = "chat" | "people" | null;
+
+type ViewMode = "focus" | "gallery";
+
+const meetingReactions = [
+  "\u{1F44D}",
+  "\u{1F44F}",
+  "\u{1F389}",
+  "\u{1F602}",
+  "\u{2764}\u{FE0F}",
+  "\u{2705}",
+];
+
+type MediaDeviceOption = {
+  id: string;
+  label: string;
+};
+
+const defaultMicrophoneDevices: MediaDeviceOption[] = [
+  { id: "default-microphone", label: "Default microphone" },
+];
+
+const defaultSpeakerDevices: MediaDeviceOption[] = [
+  { id: "default-speaker", label: "Default speaker" },
+];
+
+const toDeviceOptions = (
+  devices: MediaDeviceInfo[],
+  kind: MediaDeviceKind,
+  fallbackLabel: string,
+) =>
+  devices
+    .filter((device) => device.kind === kind)
+    .map((device, index) => ({
+      id: device.deviceId || `${kind}-${index}`,
+      label: device.label || `${fallbackLabel} ${index + 1}`,
+    }));
+
+const AUDIO_LEVEL_BAR_COUNT = 18;
+const audioLevelBars = Array.from(
+  { length: AUDIO_LEVEL_BAR_COUNT },
+  (_, index) => index,
+);
+
+const shouldUseDefaultAudioDevice = (deviceId: string) =>
+  deviceId === "default" ||
+  deviceId.startsWith("default-") ||
+  deviceId.startsWith("audioinput-");
+
+type MediaDevicesWithDisplayMedia = MediaDevices & {
+  getDisplayMedia?: (constraints?: MediaStreamConstraints) => Promise<MediaStream>;
+};
+
+type BrowserWindowWithAudioContext = Window &
+  typeof globalThis & {
+    webkitAudioContext?: typeof AudioContext;
+  };
+
+type AudioLevelMeterProps = {
+  activeBars: number;
+  isEnabled: boolean;
+};
+
+function AudioLevelMeter({ activeBars, isEnabled }: AudioLevelMeterProps) {
+  return (
+    <div
+      className="flex h-7 items-end gap-1"
+      aria-label="Microphone input level"
+    >
+      {audioLevelBars.map((barIndex) => (
+        <span
+          key={barIndex}
+          className={
+            isEnabled && barIndex < activeBars
+              ? "w-1 rounded-full bg-blue-500 transition-colors"
+              : "w-1 rounded-full bg-muted-foreground/30 transition-colors"
+          }
+          style={{ height: `${8 + ((barIndex * 5) % 18)}px` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+type AudioDevicePickerProps = {
+  title: string;
+  devices: MediaDeviceOption[];
+  selectedDeviceId: string;
+  onSelectedDeviceIdChange: (value: string) => void;
+  disabled: boolean;
+  icon: ReactNode;
+  onOpen: () => void;
+  onOpenAudioSettings: () => void;
+  children?: ReactNode;
+  contentClassName?: string;
+};
+
+function AudioDevicePicker({
+  title,
+  devices,
+  selectedDeviceId,
+  onSelectedDeviceIdChange,
+  disabled,
+  icon,
+  onOpen,
+  onOpenAudioSettings,
+  children,
+  contentClassName = "w-80",
+}: AudioDevicePickerProps) {
+  const selectedDevice =
+    devices.find((device) => device.id === selectedDeviceId) ?? devices[0];
+
+  return (
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open) {
+          onOpen();
+        }
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-semibold text-blue-700 transition hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:text-blue-200"
+        >
+          <span className="min-w-0 truncate">
+            {selectedDevice?.label ?? `Default ${title.toLowerCase()}`}
+          </span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        sideOffset={12}
+        className={`${contentClassName} p-4 shadow-2xl`}
+      >
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+          <span className="text-muted-foreground">{icon}</span>
+          <span>{title}</span>
+        </div>
+        <DropdownMenuRadioGroup
+          value={selectedDeviceId}
+          onValueChange={onSelectedDeviceIdChange}
+        >
+          {devices.map((device) => (
+            <DropdownMenuRadioItem
+              key={device.id}
+              value={device.id}
+              className="mb-1 rounded-md border border-transparent py-2 pr-3 pl-8 text-sm focus:bg-accent focus:text-accent-foreground data-[state=checked]:border-blue-200 data-[state=checked]:bg-blue-50 dark:data-[state=checked]:border-blue-900 dark:data-[state=checked]:bg-blue-950/40"
+            >
+              <span className="truncate">{device.label}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        {children && <div className="mt-4">{children}</div>}
+        <DropdownMenuSeparator className="my-4" />
+        <button
+          type="button"
+          className="text-sm text-muted-foreground transition hover:text-foreground"
+          onClick={onOpenAudioSettings}
+        >
+          More audio settings
+        </button>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+type AudioSettingsSectionProps = {
+  title: string;
+  devices: MediaDeviceOption[];
+  selectedDeviceId: string;
+  onSelectedDeviceIdChange: (value: string) => void;
+  icon: ReactNode;
+  children?: ReactNode;
+};
+
+function AudioSettingsSection({
+  title,
+  devices,
+  selectedDeviceId,
+  onSelectedDeviceIdChange,
+  icon,
+  children,
+}: AudioSettingsSectionProps) {
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm font-semibold">
+        <ChevronDown className="h-3.5 w-3.5" />
+        <span>{title}</span>
+      </div>
+      <RadioGroup
+        value={selectedDeviceId}
+        onValueChange={onSelectedDeviceIdChange}
+        className="gap-1"
+      >
+        {devices.map((device) => (
+          <label
+            key={device.id}
+            className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm transition hover:bg-accent"
+          >
+            <RadioGroupItem value={device.id} />
+            <span className="min-w-0 flex-1 truncate">{device.label}</span>
+          </label>
+        ))}
+      </RadioGroup>
+      {children && (
+        <div className="flex items-center gap-3 px-2 text-muted-foreground">
+          {icon}
+          <div className="min-w-0 flex-1">{children}</div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+type RoomToolbarButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  label: string;
+  icon: ReactNode;
+  active?: boolean;
+  danger?: boolean;
+};
+
+const RoomToolbarButton = forwardRef<HTMLButtonElement, RoomToolbarButtonProps>(
+  (
+    {
+      label,
+      icon,
+      active = false,
+      danger = false,
+      className = "",
+      ...props
+    },
+    ref,
+  ) => {
+    const toneClass = danger
+      ? "text-red-300 hover:bg-red-500/15 hover:text-red-200"
+      : active
+        ? "bg-white/10 text-white ring-1 ring-white/25 hover:bg-white/15"
+        : "text-white/75 hover:bg-white/10 hover:text-white";
+
+    return (
+      <button
+        ref={ref}
+        type="button"
+        className={`flex h-14 min-w-[62px] flex-col items-center justify-center gap-1 rounded-lg px-2 transition ${toneClass} ${className}`}
+        {...props}
+      >
+        <span className="flex h-5 items-center">{icon}</span>
+        <span className="text-[11px] font-medium leading-none">{label}</span>
+      </button>
+    );
+  },
+);
+
+RoomToolbarButton.displayName = "RoomToolbarButton";
+
+export function StudyGroupMeetingRoomPreview({
+  group,
+  members,
+  sessions,
+  isLoadingMembers,
+  onBack,
+}: StudyGroupMeetingRoomPreviewProps) {
+  const [hasJoinedPreview, setHasJoinedPreview] = useState(false);
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [isMicOn, setIsMicOn] = useState(true);
+  const [audioMode, setAudioMode] = useState<AudioMode>("computer");
+  const [microphoneDevices, setMicrophoneDevices] = useState(
+    defaultMicrophoneDevices,
+  );
+  const [speakerDevices, setSpeakerDevices] = useState(defaultSpeakerDevices);
+  const [selectedMicrophoneId, setSelectedMicrophoneId] = useState(
+    defaultMicrophoneDevices[0].id,
+  );
+  const [selectedSpeakerId, setSelectedSpeakerId] = useState(
+    defaultSpeakerDevices[0].id,
+  );
+  const [deviceMessage, setDeviceMessage] = useState<string | null>(null);
+  const [speakerVolume, setSpeakerVolume] = useState(80);
+  const [isAudioSettingsOpen, setIsAudioSettingsOpen] = useState(false);
+  const [activeMicrophoneBars, setActiveMicrophoneBars] = useState(0);
+  const [activeRoomPanel, setActiveRoomPanel] =
+    useState<ActiveRoomPanel>(null);
+  const [isHandRaised, setIsHandRaised] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("focus");
+  const [isSharingScreen, setIsSharingScreen] = useState(false);
+  const [selectedReaction, setSelectedReaction] = useState<string | null>(null);
+  const [roomChatMessage, setRoomChatMessage] = useState("");
+  const [roomChatMessages, setRoomChatMessages] = useState([
+    {
+      id: "welcome",
+      author: "SUCCMS Room",
+      message: "Meeting chat preview is ready.",
+    },
+  ]);
+  const activeMicrophoneBarsRef = useRef(0);
+  const cameraPreviewRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const screenPreviewRef = useRef<HTMLVideoElement | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [screenShareError, setScreenShareError] = useState<string | null>(null);
+
+  const loadMediaDevices = useCallback(async (requestPermission = false) => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setDeviceMessage("This browser does not support media device selection.");
+      return;
+    }
+
+    try {
+      if (requestPermission && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
+        stream.getTracks().forEach((track) => track.stop());
+      }
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const microphones = toDeviceOptions(
+        devices,
+        "audioinput",
+        "Microphone",
+      );
+      const speakers = toDeviceOptions(devices, "audiooutput", "Speaker");
+
+      const nextMicrophones =
+        microphones.length > 0 ? microphones : defaultMicrophoneDevices;
+      const nextSpeakers =
+        speakers.length > 0 ? speakers : defaultSpeakerDevices;
+
+      setMicrophoneDevices(nextMicrophones);
+      setSpeakerDevices(nextSpeakers);
+      setSelectedMicrophoneId((current) =>
+        nextMicrophones.some((device) => device.id === current)
+          ? current
+          : nextMicrophones[0].id,
+      );
+      setSelectedSpeakerId((current) =>
+        nextSpeakers.some((device) => device.id === current)
+          ? current
+          : nextSpeakers[0].id,
+      );
+      setDeviceMessage(
+        speakers.length > 0
+          ? null
+          : "Speaker selection depends on browser support. Chrome and Edge usually support output devices.",
+      );
+    } catch (error) {
+      setDeviceMessage(
+        "Device names may be hidden until the browser is allowed to use the microphone.",
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadMediaDevices(true);
+
+    const handleDeviceChange = () => {
+      void loadMediaDevices();
+    };
+
+    navigator.mediaDevices?.addEventListener?.(
+      "devicechange",
+      handleDeviceChange,
+    );
+
+    return () => {
+      navigator.mediaDevices?.removeEventListener?.(
+        "devicechange",
+        handleDeviceChange,
+      );
+    };
+  }, [loadMediaDevices]);
+
+  useEffect(() => {
+    const setBars = (nextBars: number) => {
+      if (activeMicrophoneBarsRef.current === nextBars) {
+        return;
+      }
+
+      activeMicrophoneBarsRef.current = nextBars;
+      setActiveMicrophoneBars(nextBars);
+    };
+
+    const resetBars = () => setBars(0);
+
+    if (!isMicOn || audioMode !== "computer") {
+      resetBars();
+      return;
+    }
+
+    let isCancelled = false;
+    let animationFrameId = 0;
+    let stream: MediaStream | null = null;
+    let audioContext: AudioContext | null = null;
+
+    const startMeter = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        resetBars();
+        return;
+      }
+
+      try {
+        const audioConstraint: boolean | MediaTrackConstraints =
+          shouldUseDefaultAudioDevice(selectedMicrophoneId)
+            ? true
+            : { deviceId: { exact: selectedMicrophoneId } };
+
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: audioConstraint,
+          video: false,
+        });
+
+        if (isCancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        const AudioContextConstructor =
+          window.AudioContext ??
+          (window as BrowserWindowWithAudioContext).webkitAudioContext;
+
+        if (!AudioContextConstructor) {
+          resetBars();
+          return;
+        }
+
+        audioContext = new AudioContextConstructor();
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+
+        const samples = new Uint8Array(analyser.frequencyBinCount);
+
+        const tick = () => {
+          analyser.getByteTimeDomainData(samples);
+
+          let sumSquares = 0;
+          samples.forEach((sample) => {
+            const normalized = (sample - 128) / 128;
+            sumSquares += normalized * normalized;
+          });
+
+          const rms = Math.sqrt(sumSquares / samples.length);
+          const nextBars = Math.min(
+            AUDIO_LEVEL_BAR_COUNT,
+            Math.round(Math.min(1, rms * 7) * AUDIO_LEVEL_BAR_COUNT),
+          );
+
+          if (!isCancelled) {
+            setBars(nextBars);
+            animationFrameId = window.requestAnimationFrame(tick);
+          }
+        };
+
+        tick();
+      } catch {
+        resetBars();
+      }
+    };
+
+    void startMeter();
+
+    return () => {
+      isCancelled = true;
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      stream?.getTracks().forEach((track) => track.stop());
+      void audioContext?.close();
+    };
+  }, [audioMode, isMicOn, selectedMicrophoneId]);
+
+  useEffect(() => {
+    if (!selectedReaction) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSelectedReaction(null);
+    }, 1600);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [selectedReaction]);
+
+  const stopCameraPreview = useCallback(() => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+
+    if (cameraPreviewRef.current) {
+      cameraPreviewRef.current.srcObject = null;
+    }
+  }, []);
+
+  const stopScreenShare = useCallback(() => {
+    screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+    screenStreamRef.current = null;
+
+    if (screenPreviewRef.current) {
+      screenPreviewRef.current.srcObject = null;
+    }
+
+    setIsSharingScreen(false);
+  }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (!isCameraOn) {
+      stopCameraPreview();
+      setCameraError(null);
+      return;
+    }
+
+    const startCameraPreview = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError("Camera preview is not supported in this browser.");
+        setIsCameraOn(false);
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+
+        if (isCancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        cameraStreamRef.current = stream;
+        setCameraError(null);
+
+        if (cameraPreviewRef.current) {
+          cameraPreviewRef.current.srcObject = stream;
+        }
+      } catch {
+        if (!isCancelled) {
+          stopCameraPreview();
+          setCameraError("Camera permission was denied or no camera is available.");
+          setIsCameraOn(false);
+        }
+      }
+    };
+
+    void startCameraPreview();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isCameraOn, stopCameraPreview]);
+
+  useEffect(() => {
+    if (isCameraOn && cameraPreviewRef.current && cameraStreamRef.current) {
+      cameraPreviewRef.current.srcObject = cameraStreamRef.current;
+    }
+  }, [hasJoinedPreview, isCameraOn, viewMode]);
+
+  useEffect(() => {
+    if (isSharingScreen && screenPreviewRef.current && screenStreamRef.current) {
+      screenPreviewRef.current.srcObject = screenStreamRef.current;
+    }
+  }, [isSharingScreen, activeRoomPanel]);
+
+  useEffect(() => {
+    const screenPreview = screenPreviewRef.current;
+
+    return () => {
+      stopCameraPreview();
+      screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current = null;
+      if (screenPreview) {
+        screenPreview.srcObject = null;
+      }
+    };
+  }, [stopCameraPreview]);
+
+  const participants =
+    members.length > 0
+      ? members
+      : [
+          {
+            id: group.creator_id,
+            joined_at: group.created_at,
+            role: "owner",
+            user_id: group.creator_id,
+            profile: {
+              id: group.creator_id,
+              avatar_url: group.creator_avatar_url,
+              full_name: group.creator_name,
+            },
+          },
+        ];
+  const nextSession = sessions[0];
+  const hostParticipant = participants[0];
+  const roomTitle = group.name || group.course_name;
+  const handleSendRoomMessage = () => {
+    const trimmedMessage = roomChatMessage.trim();
+
+    if (!trimmedMessage) {
+      return;
+    }
+
+    setRoomChatMessages((currentMessages) => [
+      ...currentMessages,
+      {
+        id: `message-${Date.now()}`,
+        author: hostParticipant.profile.full_name,
+        message: trimmedMessage,
+      },
+    ]);
+    setRoomChatMessage("");
+  };
+  const handleToggleRaiseHand = () => {
+    const nextIsRaised = !isHandRaised;
+
+    setIsHandRaised(nextIsRaised);
+
+    if (nextIsRaised) {
+      setActiveRoomPanel("people");
+    }
+  };
+  const handleToggleScreenShare = async () => {
+    setScreenShareError(null);
+
+    if (isSharingScreen) {
+      stopScreenShare();
+      return;
+    }
+
+    const mediaDevices = navigator.mediaDevices as
+      | MediaDevicesWithDisplayMedia
+      | undefined;
+
+    if (!mediaDevices?.getDisplayMedia) {
+      setScreenShareError("Screen sharing is not supported in this browser.");
+      return;
+    }
+
+    try {
+      const stream = await mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
+
+      screenStreamRef.current = stream;
+      setIsSharingScreen(true);
+      setViewMode("focus");
+
+      if (screenPreviewRef.current) {
+        screenPreviewRef.current.srcObject = stream;
+      }
+
+      stream.getVideoTracks()[0]?.addEventListener(
+        "ended",
+        () => {
+          stopScreenShare();
+        },
+        { once: true },
+      );
+    } catch {
+      setScreenShareError("Screen sharing was cancelled.");
+    }
+  };
+  const handleLeaveRoom = () => {
+    stopScreenShare();
+    stopCameraPreview();
+    onBack();
+  };
+
+  if (!hasJoinedPreview) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-2xl border bg-card p-5 shadow-sm">
+          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <Badge className="bg-blue-600 text-white hover:bg-blue-600">
+                  {group.course_code}
+                </Badge>
+                <Badge variant="outline">{group.course_name}</Badge>
+                <Badge className="border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+                  Preview setup
+                </Badge>
+              </div>
+              <h1 className="text-2xl font-semibold tracking-tight">
+                Join {group.name}
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Choose your camera and audio settings before entering the study
+                room preview.
+              </p>
+            </div>
+            <Button variant="outline" className="gap-2">
+              <Users className="h-4 w-4" />
+              {participants.length}/{group.max_members} members
+            </Button>
+          </div>
+
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_420px]">
+            <Card className="overflow-hidden">
+              <CardContent className="p-0">
+                <div className="flex min-h-[360px] items-center justify-center bg-slate-950 text-white">
+                  {isCameraOn ? (
+                    <div className="relative h-[360px] w-full bg-black">
+                      <video
+                        ref={cameraPreviewRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        className="h-full w-full object-cover"
+                      />
+                      {cameraError && (
+                        <div className="absolute inset-x-4 bottom-4 rounded-xl bg-red-500/90 px-4 py-3 text-sm text-white shadow-lg">
+                          {cameraError}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center">
+                      <CameraOff className="mx-auto mb-4 h-10 w-10 text-white/60" />
+                      <p className="font-semibold">Your camera is turned off</p>
+                      <p className="mt-1 text-xs text-white/60">
+                        You can still join the room without video.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-4 border-t bg-muted/30 p-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2"
+                    onClick={() => setIsCameraOn((current) => !current)}
+                  >
+                    {isCameraOn ? (
+                      <Camera className="h-4 w-4" />
+                    ) : (
+                      <CameraOff className="h-4 w-4" />
+                    )}
+                    Camera {isCameraOn ? "on" : "off"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2"
+                    onClick={() => setIsMicOn((current) => !current)}
+                  >
+                    {isMicOn ? (
+                      <Mic className="h-4 w-4" />
+                    ) : (
+                      <MicOff className="h-4 w-4" />
+                    )}
+                    Mic {isMicOn ? "on" : "off"}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Background effects will be available after ACS integration.
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="border-b">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Headphones className="h-4 w-4 text-blue-600" />
+                  Audio settings
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <RadioGroup
+                  value={audioMode}
+                  onValueChange={(value) => setAudioMode(value as AudioMode)}
+                  className="gap-3"
+                >
+                  <label className="flex cursor-pointer items-center gap-3 rounded-xl border bg-card p-4 transition-colors hover:bg-accent">
+                    <RadioGroupItem value="computer" />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold">Computer audio</p>
+                      <p className="text-xs text-muted-foreground">
+                        Use your device microphone and speaker.
+                      </p>
+                    </div>
+                    {audioMode === "computer" && (
+                      <CheckCircle2 className="h-5 w-5 text-blue-600" />
+                    )}
+                  </label>
+
+                  <label className="flex cursor-pointer items-center gap-3 rounded-xl border bg-card p-4 transition-colors hover:bg-accent">
+                    <RadioGroupItem value="room" />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold">Room audio</p>
+                      <p className="text-xs text-muted-foreground">
+                        Use classroom or shared room audio later.
+                      </p>
+                    </div>
+                    {audioMode === "room" && (
+                      <CheckCircle2 className="h-5 w-5 text-blue-600" />
+                    )}
+                  </label>
+
+                  <label className="flex cursor-pointer items-center gap-3 rounded-xl border bg-card p-4 transition-colors hover:bg-accent">
+                    <RadioGroupItem value="none" />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold">Do not use audio</p>
+                      <p className="text-xs text-muted-foreground">
+                        Join silently and use chat only.
+                      </p>
+                    </div>
+                    {audioMode === "none" && (
+                      <CheckCircle2 className="h-5 w-5 text-blue-600" />
+                    )}
+                  </label>
+                </RadioGroup>
+
+                {audioMode === "computer" && (
+                  <div className="overflow-hidden rounded-xl border bg-muted/20">
+                    <div className="flex items-center gap-4 border-b p-4">
+                      <Mic className="h-5 w-5 shrink-0 text-muted-foreground" />
+                      <AudioDevicePicker
+                        title="Microphone"
+                        devices={microphoneDevices}
+                        selectedDeviceId={selectedMicrophoneId}
+                        onSelectedDeviceIdChange={setSelectedMicrophoneId}
+                        disabled={false}
+                        icon={<Mic className="h-4 w-4" />}
+                        onOpen={() => void loadMediaDevices(true)}
+                        onOpenAudioSettings={() => setIsAudioSettingsOpen(true)}
+                      >
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          {isMicOn ? (
+                            <Mic className="h-4 w-4 shrink-0" />
+                          ) : (
+                            <MicOff className="h-4 w-4 shrink-0" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <AudioLevelMeter
+                              activeBars={activeMicrophoneBars}
+                              isEnabled={isMicOn && audioMode === "computer"}
+                            />
+                          </div>
+                        </div>
+                      </AudioDevicePicker>
+                      <Switch checked={isMicOn} onCheckedChange={setIsMicOn} />
+                    </div>
+
+                    <div className="flex items-center gap-4 p-4">
+                      <Volume2 className="h-5 w-5 shrink-0 text-muted-foreground" />
+                      <AudioDevicePicker
+                        title="Speaker"
+                        devices={speakerDevices}
+                        selectedDeviceId={selectedSpeakerId}
+                        onSelectedDeviceIdChange={setSelectedSpeakerId}
+                        disabled={false}
+                        icon={<Volume2 className="h-4 w-4" />}
+                        onOpen={() => void loadMediaDevices(true)}
+                        onOpenAudioSettings={() => setIsAudioSettingsOpen(true)}
+                        contentClassName="w-96"
+                      >
+                        <div className="flex items-center gap-3 text-muted-foreground">
+                          <Volume2 className="h-4 w-4 shrink-0" />
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={speakerVolume}
+                            className="h-1 flex-1 accent-blue-600"
+                            aria-label="Speaker volume"
+                            onChange={(event) =>
+                              setSpeakerVolume(Number(event.target.value))
+                            }
+                          />
+                        </div>
+                      </AudioDevicePicker>
+                    </div>
+                  </div>
+                )}
+
+                {audioMode === "none" && (
+                  <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">
+                    Audio is disabled. You can still join and use chat.
+                  </div>
+                )}
+
+                {deviceMessage && audioMode !== "none" && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    {deviceMessage}
+                  </p>
+                )}
+
+                <div className="rounded-xl border bg-muted/30 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">Camera</p>
+                      <p className="text-xs text-muted-foreground">
+                        Start with camera {isCameraOn ? "enabled" : "off"}.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={isCameraOn}
+                      onCheckedChange={setIsCameraOn}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    variant="outline"
+                    onClick={onBack}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    className="bg-blue-600 px-6 hover:bg-blue-700"
+                    onClick={() => setHasJoinedPreview(true)}
+                  >
+                    Join preview room
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Sheet
+            open={isAudioSettingsOpen}
+            onOpenChange={setIsAudioSettingsOpen}
+          >
+            <SheetContent
+              side="right"
+              className="w-full border-l p-0 data-[state=closed]:duration-200 data-[state=open]:duration-300 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right"
+              style={{ maxWidth: "480px" }}
+            >
+              <SheetHeader className="border-b px-5 py-4">
+                <SheetTitle>Audio settings</SheetTitle>
+                <SheetDescription>
+                  Choose the microphone and speaker used before joining the
+                  study room.
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="space-y-7 overflow-y-auto px-5 py-5">
+                <AudioSettingsSection
+                  title="Speaker"
+                  devices={speakerDevices}
+                  selectedDeviceId={selectedSpeakerId}
+                  onSelectedDeviceIdChange={setSelectedSpeakerId}
+                  icon={<Volume2 className="h-4 w-4 shrink-0" />}
+                >
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={speakerVolume}
+                    className="h-1 w-full accent-blue-600"
+                    aria-label="Speaker volume"
+                    onChange={(event) =>
+                      setSpeakerVolume(Number(event.target.value))
+                    }
+                  />
+                </AudioSettingsSection>
+
+                <AudioSettingsSection
+                  title="Microphone"
+                  devices={microphoneDevices}
+                  selectedDeviceId={selectedMicrophoneId}
+                  onSelectedDeviceIdChange={setSelectedMicrophoneId}
+                  icon={
+                    isMicOn ? (
+                      <Mic className="h-4 w-4 shrink-0" />
+                    ) : (
+                      <MicOff className="h-4 w-4 shrink-0" />
+                    )
+                  }
+                >
+                  <AudioLevelMeter
+                    activeBars={activeMicrophoneBars}
+                    isEnabled={isMicOn && audioMode === "computer"}
+                  />
+                </AudioSettingsSection>
+
+                {deviceMessage && audioMode !== "none" && (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+                    {deviceMessage}
+                  </p>
+                )}
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+      </div>
+    );
+  }
+
+  const toolbarButtonBase =
+    "flex min-w-[58px] flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs text-white/85 transition hover:bg-white/10 hover:text-white";
+  const toolbarButtonActive = "bg-white/15 text-white";
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-[#1f1f1f] text-white">
+      <section className="flex h-screen w-screen flex-col overflow-hidden bg-[#1f1f1f] text-white">
+        <header className="flex flex-col gap-3 border-b border-white/10 bg-[#242424] px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-blue-300" />
+              <Badge className="bg-blue-600 text-white hover:bg-blue-600">
+                {group.course_code}
+              </Badge>
+              <Badge className="border-white/15 bg-white/10 text-white hover:bg-white/10">
+                {group.course_name}
+              </Badge>
+              <span className="text-xs text-white/55">
+                {nextSession
+                  ? formatSessionTime(nextSession.starts_at)
+                  : "Preview room"}
+              </span>
+            </div>
+            <h1 className="truncate text-lg font-semibold">{roomTitle}</h1>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1">
+            <button
+              type="button"
+              className={`${toolbarButtonBase} ${
+                activeRoomPanel === "chat" ? toolbarButtonActive : ""
+              }`}
+              onClick={() =>
+                setActiveRoomPanel((panel) => (panel === "chat" ? null : "chat"))
+              }
+            >
+              <MessageCircle className="h-5 w-5" />
+              Chat
+            </button>
+            <button
+              type="button"
+              className={`${toolbarButtonBase} ${
+                activeRoomPanel === "people" ? toolbarButtonActive : ""
+              }`}
+              onClick={() =>
+                setActiveRoomPanel((panel) =>
+                  panel === "people" ? null : "people",
+                )
+              }
+            >
+              <span className="relative">
+                <Users className="h-5 w-5" />
+                {isHandRaised && (
+                  <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-bold text-slate-950">
+                    1
+                  </span>
+                )}
+              </span>
+              People
+            </button>
+            <button
+              type="button"
+              className={`${toolbarButtonBase} ${
+                isHandRaised ? toolbarButtonActive : ""
+              }`}
+              onClick={handleToggleRaiseHand}
+            >
+              <Hand className="h-5 w-5" />
+              Raise
+            </button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className={toolbarButtonBase}>
+                  <SmilePlus className="h-5 w-5" />
+                  React
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="grid min-w-[220px] grid-cols-6 gap-1 p-2"
+              >
+                {meetingReactions.map((reaction) => (
+                  <button
+                    key={reaction}
+                    type="button"
+                    className="rounded-lg p-2 text-xl transition hover:bg-accent"
+                    title={reaction}
+                    onClick={() => setSelectedReaction(reaction)}
+                  >
+                    {reaction}
+                  </button>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={`${toolbarButtonBase} ${
+                    viewMode === "gallery" ? toolbarButtonActive : ""
+                  }`}
+                >
+                  <LayoutGrid className="h-5 w-5" />
+                  View
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuRadioGroup
+                  value={viewMode}
+                  onValueChange={(value) => setViewMode(value as ViewMode)}
+                >
+                  <DropdownMenuRadioItem value="focus">
+                    Focus view
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="gallery">
+                    Gallery view
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <div className="mx-2 hidden h-8 w-px bg-white/20 lg:block" />
+
+            <button
+              type="button"
+              className={`${toolbarButtonBase} ${
+                !isCameraOn ? toolbarButtonActive : ""
+              }`}
+              onClick={() => setIsCameraOn((value) => !value)}
+            >
+              {isCameraOn ? (
+                <Camera className="h-5 w-5" />
+              ) : (
+                <CameraOff className="h-5 w-5" />
+              )}
+              Camera
+            </button>
+            <button
+              type="button"
+              className={`${toolbarButtonBase} ${
+                !isMicOn ? toolbarButtonActive : ""
+              }`}
+              onClick={() => setIsMicOn((value) => !value)}
+            >
+              {isMicOn ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+              Mic
+            </button>
+            <button
+              type="button"
+              className={`${toolbarButtonBase} ${
+                isSharingScreen ? toolbarButtonActive : ""
+              }`}
+              onClick={() => void handleToggleScreenShare()}
+            >
+              {isSharingScreen ? (
+                <ScreenShareOff className="h-5 w-5" />
+              ) : (
+                <ScreenShare className="h-5 w-5" />
+              )}
+              Share
+            </button>
+            <button
+              type="button"
+              className="flex min-w-[58px] flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs text-red-300 transition hover:bg-red-500/15 hover:text-red-200"
+              onClick={handleLeaveRoom}
+            >
+              <PhoneOff className="h-5 w-5" />
+              Leave
+            </button>
+          </div>
+        </header>
+
+        <div
+          className={`grid min-h-0 flex-1 ${
+            activeRoomPanel ? "xl:grid-cols-[minmax(0,1fr)_360px]" : ""
+          }`}
+        >
+          <main className="relative flex min-h-0 items-center justify-center overflow-hidden bg-[#1f1f1f] p-6">
+            {selectedReaction && (
+              <div className="absolute right-8 top-8 z-10 rounded-full bg-black/45 px-5 py-3 text-5xl shadow-lg">
+                {selectedReaction}
+              </div>
+            )}
+
+            {screenShareError && (
+              <div className="absolute left-8 top-8 z-10 rounded-xl bg-red-500/90 px-4 py-3 text-sm text-white shadow-lg">
+                {screenShareError}
+              </div>
+            )}
+
+            {isSharingScreen ? (
+              <div className="relative mx-auto flex aspect-video w-full max-w-6xl items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
+                <video
+                  ref={screenPreviewRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="h-full w-full object-contain"
+                />
+                <div className="absolute left-4 top-4 rounded-xl bg-black/60 px-3 py-2 text-left shadow-lg backdrop-blur">
+                  <p className="text-sm font-semibold text-white">
+                    Screen sharing preview
+                  </p>
+                  <p className="text-xs text-white/60">
+                    Other users will see this after ACS integration.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="absolute right-4 top-4 border-white/20 bg-black/60 text-white hover:bg-white/10 hover:text-white"
+                  onClick={stopScreenShare}
+                >
+                  Stop sharing
+                </Button>
+              </div>
+            ) : viewMode === "gallery" ? (
+              <div className="grid w-full max-w-5xl gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {participants.slice(0, 9).map((member, index) => (
+                  <div
+                    key={member.id}
+                    className={`flex min-h-[180px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 p-5 ${
+                      index === 0 ? "ring-2 ring-blue-400" : ""
+                    }`}
+                  >
+                    {index === 0 && isCameraOn ? (
+                      <div className="flex aspect-video w-full max-w-xs items-center justify-center overflow-hidden rounded-xl bg-black">
+                        <video
+                          ref={cameraPreviewRef}
+                          autoPlay
+                          muted
+                          playsInline
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <Avatar className="h-20 w-20">
+                        <AvatarImage src={member.profile.avatar_url || undefined} />
+                        <AvatarFallback className="bg-blue-600 text-xl text-white">
+                          {getInitials(member.profile.full_name)}
+                        </AvatarFallback>
+                      </Avatar>
+                    )}
+                    <p className="mt-3 max-w-full truncate text-sm font-semibold">
+                      {member.profile.full_name}
+                    </p>
+                    <p className="text-xs text-white/55">
+                      {index === 0
+                        ? isCameraOn
+                          ? "Host - camera on"
+                          : "Host"
+                        : member.role}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center text-center">
+                {isCameraOn ? (
+                  <div className="flex aspect-video w-full max-w-3xl items-center justify-center overflow-hidden rounded-3xl border border-white/10 bg-black shadow-2xl">
+                    <video
+                      ref={cameraPreviewRef}
+                      autoPlay
+                      muted
+                      playsInline
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
+                ) : (
+                  <Avatar className="h-44 w-44 border-4 border-white/10">
+                    <AvatarImage src={hostParticipant?.profile.avatar_url || undefined} />
+                    <AvatarFallback className="bg-pink-200 text-6xl font-semibold text-pink-900">
+                      {getInitials(hostParticipant?.profile.full_name || group.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                )}
+                <h2 className="mt-8 text-2xl font-semibold">
+                  Invite people to join you
+                </h2>
+                <p className="mt-2 max-w-md text-sm text-white/60">
+                  This is the SUCCMS meeting room preview. Chat, people,
+                  reactions, camera, microphone, and screen sharing controls are
+                  ready for the future Azure Communication Services connection.
+                </p>
+                <div className="mt-5 flex flex-wrap justify-center gap-2">
+                  <Badge className="bg-white/10 text-white hover:bg-white/10">
+                    {participants.length}/{group.max_members} people
+                  </Badge>
+                  {isHandRaised && (
+                    <Badge className="bg-amber-400/20 text-amber-100 hover:bg-amber-400/20">
+                      Hand raised
+                    </Badge>
+                  )}
+                  {!isMicOn && (
+                    <Badge className="bg-white/10 text-white hover:bg-white/10">
+                      Mic muted
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            )}
+          </main>
+
+          {activeRoomPanel && (
+            <aside className="min-h-0 border-l border-white/10 bg-[#252525] text-white">
+              {activeRoomPanel === "chat" ? (
+                <div className="flex h-full min-h-0 flex-col">
+                  <div className="border-b border-white/10 px-4 py-4">
+                    <h2 className="font-semibold">Meeting chat</h2>
+                    <p className="text-xs text-white/55">
+                      Preview messages are local only.
+                    </p>
+                  </div>
+                  <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+                    {roomChatMessages.map((message) => (
+                      <div
+                        key={message.id}
+                        className="rounded-2xl bg-white/8 px-3 py-2 text-sm"
+                      >
+                        <div className="flex items-center justify-between gap-2 text-xs text-white/50">
+                          <span>{message.author}</span>
+                          <span>Now</span>
+                        </div>
+                        <p className="mt-1 text-white/90">{message.message}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="border-t border-white/10 p-4">
+                    <Textarea
+                      rows={3}
+                      value={roomChatMessage}
+                      onChange={(event) => setRoomChatMessage(event.target.value)}
+                      placeholder="Type a message..."
+                      className="border-white/10 bg-white/10 text-white placeholder:text-white/45"
+                    />
+                    <Button
+                      className="mt-3 w-full gap-2 bg-blue-600 hover:bg-blue-700"
+                      onClick={handleSendRoomMessage}
+                    >
+                      <Send className="h-4 w-4" />
+                      Send
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-full min-h-0 flex-col">
+                  <div className="border-b border-white/10 px-4 py-4">
+                    <h2 className="font-semibold">People</h2>
+                    <p className="text-xs text-white/55">
+                      {participants.length} room member
+                      {participants.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+                    {isLoadingMembers && (
+                      <p className="text-sm text-white/55">
+                        Loading group members...
+                      </p>
+                    )}
+                    {participants.map((member, index) => (
+                      <div
+                        key={member.id}
+                        className="flex items-center gap-3 rounded-xl bg-white/6 p-3"
+                      >
+                        <Avatar className="h-10 w-10">
+                          <AvatarImage src={member.profile.avatar_url || undefined} />
+                          <AvatarFallback className="bg-blue-600 text-white">
+                            {getInitials(member.profile.full_name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">
+                            {member.profile.full_name}
+                          </p>
+                          <p className="text-xs text-white/50">
+                            {index === 0
+                              ? "Host"
+                              : member.role === "owner"
+                                ? "Group owner"
+                                : "Member"}
+                          </p>
+                        </div>
+                        {index === 0 ? (
+                          <div className="flex items-center gap-2">
+                            {isHandRaised && (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-md bg-amber-400/15 px-2 py-1 text-xs font-semibold text-amber-200"
+                                title={`${member.profile.full_name} raised a hand`}
+                              >
+                                1 <span aria-hidden="true">👋</span>
+                              </span>
+                            )}
+                            <Volume2 className="h-4 w-4 text-blue-300" />
+                          </div>
+                        ) : (
+                          <Mic className="h-4 w-4 text-white/45" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </aside>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}

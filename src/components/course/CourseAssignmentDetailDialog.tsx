@@ -39,6 +39,7 @@ import {
 import { notify } from "@/lib/notify";
 import { getAssessmentTypeLabel } from "@/lib/assessmentTypes";
 import { WordSubmissionViewer } from "./WordSubmissionViewer";
+import { SUBMISSION_FILE_ACCEPT } from "./courseUploadFormats";
 
 type CourseAssignmentDetailDialogProps = {
   assignment: CourseAssignment | null;
@@ -756,6 +757,7 @@ export function CourseAssignmentDetailDialog({
                         <div className="relative group">
                           <Input
                             type="file"
+                            accept={SUBMISSION_FILE_ACCEPT}
                             className="absolute inset-0 opacity-0 cursor-pointer z-10"
                             onChange={onUploadSubmissionFile}
                             disabled={isUploading}

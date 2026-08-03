@@ -54,6 +54,7 @@ type StudyGroupDetailsDialogProps = {
   onJoinGroup: (group: StudyGroupSummary) => void;
   onLeaveGroup: (group: StudyGroupSummary) => void;
   onOpenChange: (open: boolean) => void;
+  onOpenMeetingRoom: (group: StudyGroupSummary) => void;
   onOpenSessionDialog: () => void;
   onPostContentChange: (value: string) => void;
   onPostFileChange: (file: File | null) => void;
@@ -90,6 +91,7 @@ export function StudyGroupDetailsDialog({
   onJoinGroup,
   onLeaveGroup,
   onOpenChange,
+  onOpenMeetingRoom,
   onOpenSessionDialog,
   onPostContentChange,
   onPostFileChange,
@@ -188,12 +190,22 @@ export function StudyGroupDetailsDialog({
                     Plan focused online or in-person study time.
                   </p>
                 </div>
-                {selectedGroup.is_owner && (
-                  <Button onClick={onOpenSessionDialog}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    New Session
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950/30"
+                    onClick={() => onOpenMeetingRoom(selectedGroup)}
+                  >
+                    <Video className="h-4 w-4" />
+                    Open Meeting Room
                   </Button>
-                )}
+                  {selectedGroup.is_owner && (
+                    <Button onClick={onOpenSessionDialog}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      New Session
+                    </Button>
+                  )}
+                </div>
               </div>
 
               {sessions.length > 0 ? (

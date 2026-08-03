@@ -1,17 +1,20 @@
-import { Users } from "lucide-react";
+import { Users, Video } from "lucide-react";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import type { StudyGroupSummary } from "./StudyGroupTypes";
 
 interface StudyGroupCardProps {
   group: StudyGroupSummary;
   onOpen: (group: StudyGroupSummary) => void;
+  onOpenRoom: (group: StudyGroupSummary) => void;
   formatDateTime: (value: string) => string;
 }
 
 export function StudyGroupCard({
   group,
   onOpen,
+  onOpenRoom,
   formatDateTime,
 }: StudyGroupCardProps) {
   return (
@@ -53,6 +56,20 @@ export function StudyGroupCard({
               {formatDateTime(group.next_session_start)}
             </p>
           </div>
+        )}
+        {group.is_member && (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full justify-center gap-2 border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950/30"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenRoom(group);
+            }}
+          >
+            <Video className="h-4 w-4" />
+            Open Room Preview
+          </Button>
         )}
       </CardContent>
     </Card>

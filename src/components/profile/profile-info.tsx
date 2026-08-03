@@ -14,11 +14,10 @@ interface ProfileInfoProps {
 
 export function ProfileInfo({ bio, email, faculty, programme, isEditing = false, draftBio = "", onBioChange }: ProfileInfoProps) {
   return (
-    <div className="grid gap-6 md:grid-cols-2">
-      {/* Bio Section */}
-      <Card className="md:col-span-2">
-        <CardHeader>
-          <CardTitle>About</CardTitle>
+    <div className="space-y-5">
+      <Card className="min-h-[176px] rounded-2xl border-slate-200/80 shadow-sm dark:border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">About</CardTitle>
         </CardHeader>
         <CardContent>
           {isEditing ? (
@@ -36,51 +35,62 @@ export function ProfileInfo({ bio, email, faculty, programme, isEditing = false,
                 maxLength={750}
                 className="resize-none"
               />
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="mt-2 text-xs text-muted-foreground">
                 {draftBio.split(/\s+/).filter(w => w.length > 0).length} / 150 words
               </p>
             </div>
           ) : (
-            <p className="text-sm leading-relaxed text-muted-foreground text-pretty">{bio || "No bio provided yet."}</p>
+            <p className="text-sm leading-relaxed text-muted-foreground text-pretty">
+              {bio || "No bio provided yet."}
+            </p>
           )}
         </CardContent>
       </Card>
 
       {email && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Contact Information</CardTitle>
+        <Card className="min-h-[150px] rounded-2xl border-slate-200/80 shadow-sm dark:border-border">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Contact Information</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-start gap-3">
-              <Mail className="mt-0.5 h-5 w-5 text-muted-foreground" />
-              <div>
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                <Mail className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
                 <p className="text-sm font-medium">Email</p>
-                <p className="text-sm text-muted-foreground">{email}</p>
+                <p className="break-all text-sm text-muted-foreground">{email}</p>
               </div>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Academic Information */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Academic Information</CardTitle>
+      <Card className="min-h-[150px] rounded-2xl border-slate-200/80 shadow-sm dark:border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Academic Information</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-start gap-3">
-            <Building2 className="mt-0.5 h-5 w-5 text-muted-foreground" />
-            <div>
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+              <Building2 className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
               <p className="text-sm font-medium">Faculty</p>
-              <p className="text-sm text-muted-foreground">{faculty}</p>
+              <p className="text-sm text-muted-foreground">
+                {faculty || "Not provided"}
+              </p>
             </div>
           </div>
           <div className="flex items-start gap-3">
-            <GraduationCap className="mt-0.5 h-5 w-5 text-muted-foreground" />
-            <div>
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-purple-600">
+              <GraduationCap className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
               <p className="text-sm font-medium">Programme</p>
-              <p className="text-sm text-muted-foreground">{programme}</p>
+              <p className="text-sm text-muted-foreground">
+                {programme || "Not provided"}
+              </p>
             </div>
           </div>
         </CardContent>

@@ -68,6 +68,7 @@ export function useUserProfileData({
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [courses, setCourses] = useState<ProfileCourse[]>([]);
   const [posts, setPosts] = useState<ProfilePost[]>([]);
+  const [postsCount, setPostsCount] = useState(0);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -157,6 +158,7 @@ export function useUserProfileData({
           setProfileData({ ...visibleProfile, _isPrivate: true });
           setCourses([]);
           setPosts([]);
+          setPostsCount(0);
           setFollowers([]);
           setFollowing([]);
           setFollowersCount(0);
@@ -183,10 +185,13 @@ export function useUserProfileData({
         await Promise.all([
           courseQuery,
           supabase
-            .from("course_posts")
-            .select(`*, course_offerings(${COURSE_OFFERING_SELECT})`)
+            .from("campus_posts")
+            .select("id, author_id, content, attachments, created_at, updated_at", {
+              count: "exact",
+            })
             .eq("author_id", viewId)
-            .order("created_at", { ascending: false }),
+            .order("created_at", { ascending: false })
+            .limit(3),
         ]);
 
       if (courseError) throw courseError;
@@ -197,12 +202,8 @@ export function useUserProfileData({
           .map(row => normalizeCourseOffering(row.course_offerings))
           .filter(course => Boolean(course.id)),
       );
-      setPosts(
-        (postResult.data || []).map(post => ({
-          ...post,
-          courses: normalizeCourseOffering(post.course_offerings),
-        })),
-      );
+      setPosts(postResult.data || []);
+      setPostsCount(postResult.count ?? postResult.data?.length ?? 0);
       await fetchFollowData();
     } catch (error) {
       console.error("Error fetching profile", error);
@@ -234,6 +235,7 @@ export function useUserProfileData({
     isFollowing,
     isLoading,
     posts,
+    postsCount,
     profileData,
     setProfileData,
   };

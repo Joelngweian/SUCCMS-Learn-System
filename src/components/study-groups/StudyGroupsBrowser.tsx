@@ -35,6 +35,7 @@ type StudyGroupsBrowserProps = {
     cursor: { createdAt: string; id: string } | null,
   ) => void;
   onOpen: (group: StudyGroupSummary) => void;
+  onOpenRoom: (group: StudyGroupSummary) => void;
   formatDateTime: (value: string) => string;
 };
 
@@ -55,6 +56,7 @@ export function StudyGroupsBrowser({
   onCreate,
   onLoadMore,
   onOpen,
+  onOpenRoom,
   formatDateTime,
 }: StudyGroupsBrowserProps) {
   return (
@@ -124,6 +126,7 @@ export function StudyGroupsBrowser({
               key={group.id}
               group={group}
               onOpen={onOpen}
+              onOpenRoom={onOpenRoom}
               formatDateTime={formatDateTime}
             />
           ))}

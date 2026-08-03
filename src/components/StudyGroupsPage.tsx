@@ -42,6 +42,12 @@ const StudyGroupDetailsDialog = lazy(() =>
   })),
 );
 
+const StudyGroupMeetingRoomPreview = lazy(() =>
+  import("./study-groups/StudyGroupMeetingRoomPreview").then(module => ({
+    default: module.StudyGroupMeetingRoomPreview,
+  })),
+);
+
 const formatDateTime = (value: string) =>
   new Date(value).toLocaleString([], {
     year: "numeric",
@@ -91,6 +97,8 @@ export function StudyGroupsPage() {
   });
 
   const [selectedGroup, setSelectedGroup] =
+    useState<StudyGroupSummary | null>(null);
+  const [meetingRoomGroup, setMeetingRoomGroup] =
     useState<StudyGroupSummary | null>(null);
   const [members, setMembers] = useState<StudyGroupMember[]>([]);
   const [sessions, setSessions] = useState<StudySession[]>([]);
@@ -151,6 +159,14 @@ export function StudyGroupsPage() {
 
   const openGroup = (group: StudyGroupSummary) => {
     setSelectedGroup(group);
+    void loadGroupDetails(group);
+  };
+
+  const openMeetingRoom = (group: StudyGroupSummary) => {
+    if (!group.is_member) return;
+
+    setSelectedGroup(null);
+    setMeetingRoomGroup(group);
     void loadGroupDetails(group);
   };
 
@@ -479,6 +495,20 @@ export function StudyGroupsPage() {
     notify.success("Group post deleted.");
   };
 
+  if (meetingRoomGroup) {
+    return (
+      <Suspense fallback={null}>
+        <StudyGroupMeetingRoomPreview
+          group={meetingRoomGroup}
+          members={members}
+          sessions={sessions}
+          isLoadingMembers={isLoadingDetails}
+          onBack={() => setMeetingRoomGroup(null)}
+        />
+      </Suspense>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <StudyGroupsBrowser
@@ -498,6 +528,7 @@ export function StudyGroupsPage() {
         onCreate={() => setIsCreateOpen(true)}
         onLoadMore={(nextCursor) => void loadGroups(nextCursor, true)}
         onOpen={openGroup}
+        onOpenRoom={openMeetingRoom}
         formatDateTime={formatDateTime}
       />
 
@@ -552,6 +583,7 @@ export function StudyGroupsPage() {
             onPostFileChange={setPostFile}
             onCreatePost={() => void handleCreatePost()}
             onDeletePost={(post) => void handleDeletePost(post)}
+            onOpenMeetingRoom={openMeetingRoom}
           />
         </Suspense>
       )}

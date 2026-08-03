@@ -8,7 +8,7 @@ import { ProfileTabs } from "./profile/profile-tags";
 import { ProfileReportDialog } from "./profile/ProfileReportDialog";
 import { useUserProfileData } from "./profile/useUserProfileData";
 import { Button } from "./ui/button";
-import { Flag, Loader2, Pencil, Save } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { Stories } from "./Stories";
 import { useActiveStoryStatus } from "./stories/useActiveStoryStatus";
 
@@ -38,6 +38,7 @@ export const UserProfile = () => {
     isFollowing,
     isLoading,
     posts,
+    postsCount,
     profileData,
     setProfileData,
   } = useUserProfileData({
@@ -332,124 +333,81 @@ export const UserProfile = () => {
     name: course.name,
     code: course.course_code,
   }));
+  const profileRole = String(profileData.role || "");
+  const headerRole =
+    profileRole === "lecturer" ||
+    profileRole === "admin" ||
+    profileRole === "staff"
+      ? (profileRole as "lecturer" | "admin" | "staff")
+      : "student";
 
   return (
-    <div className="min-h-screen bg-muted/30">
-      <div className="mx-auto max-w-4xl px-3 sm:px-0">
-        <div className="hidden pb-2 pt-4 sm:block">
-          <Button variant="ghost" onClick={() => navigate(-1)}>
+    <div className="min-h-screen bg-background">
+      <div className="w-full max-w-[1500px] px-4 py-6 sm:px-6 lg:px-10 xl:px-12 2xl:px-14">
+        <div className="mb-4 hidden sm:block">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-2 h-9 gap-2 px-2 text-muted-foreground hover:text-foreground"
+            onClick={() => navigate(-1)}
+          >
+            <ArrowLeft className="h-4 w-4" />
             Back
           </Button>
         </div>
 
         <ProfileHeader
           name={profileData.full_name || profileData.email}
-          role={
-            profileData.role === "lecturer" || profileData.role === "admin"
-              ? profileData.role
-              : "student"
-          }
+          role={headerRole}
           profileImage={getDisplayUrl(previewAvatar)}
           backgroundImage={getDisplayUrl(previewCover)}
           bio={profileData.bio || ""}
+          faculty={profileData.faculty || ""}
+          programme={profileData.programme || ""}
           stats={{
-            posts: posts.length,
+            posts: postsCount,
             followers: followersCount,
             following: followingCount,
+            courses: courses.length,
           }}
           isEditing={isEditing}
+          isOwnProfile={isOwnProfile}
+          isSaving={isSaving}
+          isFollowing={isFollowing}
+          isFollowLoading={isFollowLoading}
           onAvatarChange={handleAvatarSelect}
           onCoverChange={handleCoverSelect}
           onAvatarRemove={handleRemoveAvatar}
           onCoverRemove={handleRemoveCover}
+          onEditClick={() => setIsEditing(true)}
+          onCancelEdit={handleCancelEdit}
+          onSaveClick={handleSaveProfile}
+          onFollowClick={handleFollowToggle}
+          onReportClick={
+            !isOwnProfile && profileData.role !== "admin"
+              ? () => setShowReportDialog(true)
+              : undefined
+          }
           hasActiveStory={Boolean(viewId && activeStoryUserIds.has(viewId))}
           onStoryClick={() => setStoryViewerOpen(true)}
         />
 
-        <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:py-4">
-          <div className="min-h-0 sm:min-h-5">
-            {isEditing && (
-              <p className="text-sm text-muted-foreground">
-                Hover over your avatar or cover image to change it
-              </p>
-            )}
-          </div>
-          <div className="flex gap-2">
-            {isOwnProfile ? (
-              isEditing ? (
-                <>
-                  <Button
-                    variant="ghost"
-                    onClick={handleCancelEdit}
-                    className="flex-1 sm:flex-none"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleSaveProfile}
-                    disabled={isSaving}
-                    className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 sm:flex-none"
-                  >
-                    {isSaving ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Save className="mr-2 h-4 w-4" />
-                    )}
-                    Save Changes
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  variant="outline"
-                  onClick={() => setIsEditing(true)}
-                  className="w-full sm:w-auto"
-                >
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Edit Profile
-                </Button>
-              )
-            ) : (
-              profileData.role !== "admin" && (
-                <>
-                  <Button
-                    variant={isFollowing ? "outline" : "default"}
-                    onClick={handleFollowToggle}
-                    disabled={isFollowLoading}
-                    aria-pressed={isFollowing}
-                    className="flex-1 sm:flex-none"
-                  >
-                    {isFollowLoading && (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    )}
-                    {isFollowing ? "Following" : "Follow"}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setShowReportDialog(true)}
-                    title="Report user"
-                  >
-                    <Flag className="h-4 w-4" />
-                  </Button>
-                </>
-              )
-            )}
-          </div>
+        <div className="mt-5">
+          <ProfileTabs
+            bio={profileData.bio || ""}
+            email={profileData.email || ""}
+            faculty={profileData.faculty || ""}
+            programme={profileData.programme || ""}
+            courses={coursesProps}
+            posts={posts}
+            followers={followers}
+            following={following}
+            onUserSelect={userId => navigate(`/profile/${userId}`)}
+            isEditing={isEditing}
+            draftBio={draftBio}
+            onBioChange={setDraftBio}
+          />
         </div>
-
-        <ProfileTabs
-          bio={profileData.bio || ""}
-          email={profileData.email || ""}
-          faculty={profileData.faculty || ""}
-          programme={profileData.programme || ""}
-          courses={coursesProps}
-          followers={followers}
-          following={following}
-          onUserSelect={userId => navigate(`/profile/${userId}`)}
-          isEditing={isEditing}
-          draftBio={draftBio}
-          onBioChange={setDraftBio}
-        />
 
         <ProfileReportDialog
           open={showReportDialog}
