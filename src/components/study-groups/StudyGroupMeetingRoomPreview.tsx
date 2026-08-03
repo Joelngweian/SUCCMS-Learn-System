@@ -217,7 +217,7 @@ function AudioDevicePicker({
       <DropdownMenuContent
         align="start"
         sideOffset={12}
-        className={`${contentClassName} p-4 shadow-2xl`}
+        className={`z-[130] ${contentClassName} p-4 shadow-2xl`}
       >
         <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
           <span className="text-muted-foreground">{icon}</span>
@@ -376,7 +376,7 @@ export function StudyGroupMeetingRoomPreview({
     {
       id: "welcome",
       author: "SUCCMS Room",
-      message: "Meeting chat preview is ready.",
+      message: "Meeting chat is ready.",
     },
   ]);
   const activeMicrophoneBarsRef = useRef(0);
@@ -644,7 +644,7 @@ export function StudyGroupMeetingRoomPreview({
     if (isCameraOn && cameraPreviewRef.current && cameraStreamRef.current) {
       cameraPreviewRef.current.srcObject = cameraStreamRef.current;
     }
-  }, [hasJoinedPreview, isCameraOn, viewMode]);
+  }, [hasJoinedPreview, isCameraOn, isSharingScreen, viewMode]);
 
   useEffect(() => {
     if (isSharingScreen && screenPreviewRef.current && screenStreamRef.current) {
@@ -684,6 +684,18 @@ export function StudyGroupMeetingRoomPreview({
   const nextSession = sessions[0];
   const hostParticipant = participants[0];
   const roomTitle = group.name || group.course_name;
+  const galleryParticipants = participants.slice(0, 9);
+  const galleryGridClass =
+    galleryParticipants.length === 1
+      ? "max-w-md grid-cols-1"
+      : galleryParticipants.length === 2
+        ? "max-w-3xl grid-cols-1 sm:grid-cols-2"
+        : "max-w-5xl grid-cols-1 sm:grid-cols-2 xl:grid-cols-3";
+  const sharingParticipants = participants.slice(0, 4);
+  const additionalSharingParticipantCount = Math.max(
+    participants.length - sharingParticipants.length,
+    0,
+  );
   const handleSendRoomMessage = () => {
     const trimmedMessage = roomChatMessage.trim();
 
@@ -770,7 +782,7 @@ export function StudyGroupMeetingRoomPreview({
                 </Badge>
                 <Badge variant="outline">{group.course_name}</Badge>
                 <Badge className="border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
-                  Preview setup
+                  Meeting setup
                 </Badge>
               </div>
               <h1 className="text-2xl font-semibold tracking-tight">
@@ -778,7 +790,7 @@ export function StudyGroupMeetingRoomPreview({
               </h1>
               <p className="mt-1 text-sm text-muted-foreground">
                 Choose your camera and audio settings before entering the study
-                room preview.
+                meeting room.
               </p>
             </div>
             <Button variant="outline" className="gap-2">
@@ -844,9 +856,6 @@ export function StudyGroupMeetingRoomPreview({
                     )}
                     Mic {isMicOn ? "on" : "off"}
                   </Button>
-                  <span className="text-xs text-muted-foreground">
-                    Background effects will be available after ACS integration.
-                  </span>
                 </div>
               </CardContent>
             </Card>
@@ -1005,7 +1014,7 @@ export function StudyGroupMeetingRoomPreview({
                     className="bg-blue-600 px-6 hover:bg-blue-700"
                     onClick={() => setHasJoinedPreview(true)}
                   >
-                    Join preview room
+                    Join room
                   </Button>
                 </div>
               </CardContent>
@@ -1102,7 +1111,7 @@ export function StudyGroupMeetingRoomPreview({
               <span className="text-xs text-white/55">
                 {nextSession
                   ? formatSessionTime(nextSession.starts_at)
-                  : "Preview room"}
+                  : "Meeting room"}
               </span>
             </div>
             <h1 className="truncate text-lg font-semibold">{roomTitle}</h1>
@@ -1162,7 +1171,7 @@ export function StudyGroupMeetingRoomPreview({
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
-                className="grid min-w-[220px] grid-cols-6 gap-1 p-2"
+                className="z-[130] grid min-w-[220px] grid-cols-6 gap-1 p-2"
               >
                 {meetingReactions.map((reaction) => (
                   <button
@@ -1190,7 +1199,7 @@ export function StudyGroupMeetingRoomPreview({
                   View
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuContent align="end" className="z-[130] w-44">
                 <DropdownMenuRadioGroup
                   value={viewMode}
                   onValueChange={(value) => setViewMode(value as ViewMode)}
@@ -1261,7 +1270,13 @@ export function StudyGroupMeetingRoomPreview({
             activeRoomPanel ? "xl:grid-cols-[minmax(0,1fr)_360px]" : ""
           }`}
         >
-          <main className="relative flex min-h-0 items-center justify-center overflow-hidden bg-[#1f1f1f] p-6">
+          <main
+            className={`relative flex min-h-0 overflow-hidden bg-[#1f1f1f] ${
+              isSharingScreen
+                ? "items-stretch justify-stretch p-3 sm:p-4 lg:p-5"
+                : "items-center justify-center p-6"
+            }`}
+          >
             {selectedReaction && (
               <div className="absolute right-8 top-8 z-10 rounded-full bg-black/45 px-5 py-3 text-5xl shadow-lg">
                 {selectedReaction}
@@ -1275,34 +1290,88 @@ export function StudyGroupMeetingRoomPreview({
             )}
 
             {isSharingScreen ? (
-              <div className="relative mx-auto flex aspect-video w-full max-w-6xl items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
-                <video
-                  ref={screenPreviewRef}
-                  autoPlay
-                  muted
-                  playsInline
-                  className="h-full w-full object-contain"
-                />
-                <div className="absolute left-4 top-4 rounded-xl bg-black/60 px-3 py-2 text-left shadow-lg backdrop-blur">
-                  <p className="text-sm font-semibold text-white">
-                    Screen sharing preview
-                  </p>
-                  <p className="text-xs text-white/60">
-                    Other users will see this after ACS integration.
-                  </p>
+              <div className="grid h-full w-full min-h-0 grid-cols-[minmax(0,1fr)_104px] grid-rows-[minmax(0,1fr)_72px] gap-3">
+                <div className="relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black shadow-2xl">
+                  <video
+                    ref={screenPreviewRef}
+                    autoPlay
+                    muted
+                    playsInline
+                    className="h-full w-full object-contain"
+                  />
+                  <div className="absolute left-4 top-4 rounded-xl bg-black/60 px-3 py-2 text-left shadow-lg backdrop-blur">
+                    <p className="text-sm font-semibold text-white">
+                      You are presenting
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="absolute right-4 top-4 border-white/20 bg-black/60 text-white hover:bg-white/10 hover:text-white"
+                    onClick={stopScreenShare}
+                  >
+                    Stop sharing
+                  </Button>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="absolute right-4 top-4 border-white/20 bg-black/60 text-white hover:bg-white/10 hover:text-white"
-                  onClick={stopScreenShare}
-                >
-                  Stop sharing
-                </Button>
+
+                <div className="flex min-h-0 flex-col gap-2">
+                  {sharingParticipants.map((member, index) => (
+                    <div
+                      key={member.id}
+                      className="flex h-24 flex-col items-center justify-center rounded-xl border border-white/10 bg-white/5 px-2 text-center"
+                    >
+                      {index === 0 && isCameraOn ? (
+                        <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg bg-black">
+                          <video
+                            ref={cameraPreviewRef}
+                            autoPlay
+                            muted
+                            playsInline
+                            className="h-full w-full object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <Avatar className="h-10 w-10">
+                          <AvatarImage src={member.profile.avatar_url || undefined} />
+                          <AvatarFallback className="bg-blue-600 text-xs text-white">
+                            {getInitials(member.profile.full_name)}
+                          </AvatarFallback>
+                        </Avatar>
+                      )}
+                      <p className="mt-2 w-full truncate text-xs font-medium text-white/90">
+                        {index === 0 ? "You" : member.profile.full_name}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-white">
+                      {roomTitle}
+                    </p>
+                    <p className="text-xs text-white/55">
+                      {participants.length}/{group.max_members} people
+                    </p>
+                  </div>
+                  {additionalSharingParticipantCount > 0 && (
+                    <Badge className="bg-white/10 text-white hover:bg-white/10">
+                      +{additionalSharingParticipantCount}
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/5 text-white/65">
+                  {isCameraOn ? (
+                    <Camera className="h-4 w-4" />
+                  ) : (
+                    <CameraOff className="h-4 w-4" />
+                  )}
+                  {isMicOn ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+                </div>
               </div>
             ) : viewMode === "gallery" ? (
-              <div className="grid w-full max-w-5xl gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {participants.slice(0, 9).map((member, index) => (
+              <div className={`grid w-full gap-4 ${galleryGridClass}`}>
+                {galleryParticipants.map((member, index) => (
                   <div
                     key={member.id}
                     className={`flex min-h-[180px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 p-5 ${
@@ -1361,13 +1430,8 @@ export function StudyGroupMeetingRoomPreview({
                   </Avatar>
                 )}
                 <h2 className="mt-8 text-2xl font-semibold">
-                  Invite people to join you
+                  Waiting for classmates
                 </h2>
-                <p className="mt-2 max-w-md text-sm text-white/60">
-                  This is the SUCCMS meeting room preview. Chat, people,
-                  reactions, camera, microphone, and screen sharing controls are
-                  ready for the future Azure Communication Services connection.
-                </p>
                 <div className="mt-5 flex flex-wrap justify-center gap-2">
                   <Badge className="bg-white/10 text-white hover:bg-white/10">
                     {participants.length}/{group.max_members} people

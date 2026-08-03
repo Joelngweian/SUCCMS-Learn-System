@@ -5,6 +5,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import type {
   EnrolledCourse,
+  StudyGroupMemberCandidate,
   StudyGroupMember,
   StudyGroupPost,
   StudyGroupSummary,
@@ -152,6 +153,46 @@ export async function removeStudyGroupMember({
   userId: string;
 }) {
   const { error } = await supabase.rpc("remove_study_group_member", {
+    p_group_id: groupId,
+    p_user_id: userId,
+  });
+  if (error) throw error;
+}
+
+export async function loadStudyGroupMemberCandidates({
+  groupId,
+  search,
+}: {
+  groupId: string;
+  search: string;
+}): Promise<StudyGroupMemberCandidate[]> {
+  const { data, error } = await supabase.rpc(
+    "get_study_group_member_candidates",
+    {
+      p_group_id: groupId,
+      p_search: search,
+      p_limit: 8,
+    },
+  );
+
+  if (error) throw error;
+
+  return (data || []).map((row) => ({
+    user_id: row.user_id,
+    full_name: getString(row.full_name, "Unknown User"),
+    avatar_url: getNullableString(row.avatar_url),
+    role: getString(row.role, "student"),
+  }));
+}
+
+export async function addStudyGroupMember({
+  groupId,
+  userId,
+}: {
+  groupId: string;
+  userId: string;
+}) {
+  const { error } = await supabase.rpc("add_study_group_member", {
     p_group_id: groupId,
     p_user_id: userId,
   });

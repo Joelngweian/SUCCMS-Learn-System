@@ -36,6 +36,13 @@ export interface StudyGroupMember {
   };
 }
 
+export interface StudyGroupMemberCandidate {
+  user_id: string;
+  full_name: string;
+  avatar_url: string | null;
+  role: string;
+}
+
 export interface StudySession {
   id: string;
   group_id: string;

@@ -1,3 +1,4 @@
+import { useMemo, useRef } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -12,41 +13,111 @@ import {
 import { Input } from "../ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Textarea } from "../ui/textarea";
+import { cn } from "../ui/utils";
 import {
-  BookOpen,
   CalendarDays,
   Crown,
   ExternalLink,
   FileText,
-  Link2,
+  Image,
   Loader2,
   LogOut,
   MapPin,
   MessageCircle,
   Paperclip,
   Plus,
+  Send,
   Trash2,
   UserMinus,
   UserPlus,
   Video,
+  X,
 } from "lucide-react";
 import type {
   StudyGroupMember,
+  StudyGroupMemberCandidate,
   StudyGroupPost,
   StudyGroupSummary,
   StudySession,
 } from "./StudyGroupTypes";
 
-type StudyGroupPostType = "discussion" | "resource";
+type StudyGroupDetailTab = "sessions" | "discussion" | "members";
+
+const getInitials = (name: string) =>
+  name
+    .split(" ")
+    .map(part => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const getActiveMentionQuery = (value: string) => {
+  const match = value.match(/(^|\s)@([^\s@]*)$/);
+  return match ? match[2].toLowerCase() : null;
+};
+
+const isImageAttachment = (post: StudyGroupPost) =>
+  Boolean(post.downloadUrl && post.attachment_type?.startsWith("image/"));
+
+const renderMessageContent = (
+  content: string,
+  members: StudyGroupMember[],
+  isOwnPost: boolean,
+) => {
+  const mentionLabels = [
+    "@everyone",
+    ...members.map((member) => `@${member.profile.full_name}`),
+  ].sort((first, second) => second.length - first.length);
+
+  if (!content || mentionLabels.length === 0) return content;
+
+  const matcher = new RegExp(
+    `(${mentionLabels.map(escapeRegExp).join("|")})`,
+    "gi",
+  );
+
+  return content.split(matcher).map((part, index) => {
+    const isMention = mentionLabels.some(
+      (label) => label.toLowerCase() === part.toLowerCase(),
+    );
+
+    return isMention ? (
+      <span
+        key={`${part}-${index}`}
+        className={cn(
+          "rounded px-1 font-semibold",
+          isOwnPost
+            ? "bg-primary-foreground/20 text-primary-foreground"
+            : "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-200",
+        )}
+      >
+        {part}
+      </span>
+    ) : (
+      part
+    );
+  });
+};
 
 type StudyGroupDetailsDialogProps = {
+  activeTab: StudyGroupDetailTab;
   detailError: string;
   formatDateTime: (value: string) => string;
   formatFileSize: (value: number | null) => string;
+  addMemberCandidates: StudyGroupMemberCandidate[];
+  addMemberError: string;
+  addMemberSearch: string;
   isGroupActionLoading: boolean;
+  isAddingMemberId: string | null;
+  isLoadingMemberCandidates: boolean;
   isLoadingDetails: boolean;
   isSavingPost: boolean;
   members: StudyGroupMember[];
+  onAddMember: (candidate: StudyGroupMemberCandidate) => void;
+  onAddMemberSearchChange: (value: string) => void;
   onCreatePost: () => void;
   onDeleteGroup: (group: StudyGroupSummary) => void;
   onDeletePost: (post: StudyGroupPost) => void;
@@ -56,34 +127,37 @@ type StudyGroupDetailsDialogProps = {
   onOpenChange: (open: boolean) => void;
   onOpenMeetingRoom: (group: StudyGroupSummary) => void;
   onOpenSessionDialog: () => void;
-  onPostContentChange: (value: string) => void;
+  onActiveTabChange: (value: StudyGroupDetailTab) => void;
   onPostFileChange: (file: File | null) => void;
-  onPostTitleChange: (value: string) => void;
-  onPostTypeChange: (value: StudyGroupPostType) => void;
+  onPostContentChange: (value: string) => void;
   onRemoveMember: (member: StudyGroupMember) => void;
-  onResourceUrlChange: (value: string) => void;
   onToggleSessionAttendance: (session: StudySession) => void;
   open: boolean;
   postContent: string;
   postError: string;
   postFile: File | null;
   posts: StudyGroupPost[];
-  postTitle: string;
-  postType: StudyGroupPostType;
-  resourceUrl: string;
   selectedGroup: StudyGroupSummary;
   sessions: StudySession[];
   userId?: string;
 };
 
 export function StudyGroupDetailsDialog({
+  activeTab,
+  addMemberCandidates,
+  addMemberError,
+  addMemberSearch,
   detailError,
   formatDateTime,
   formatFileSize,
+  isAddingMemberId,
   isGroupActionLoading,
+  isLoadingMemberCandidates,
   isLoadingDetails,
   isSavingPost,
   members,
+  onAddMember,
+  onAddMemberSearchChange,
   onCreatePost,
   onDeleteGroup,
   onDeletePost,
@@ -93,25 +167,63 @@ export function StudyGroupDetailsDialog({
   onOpenChange,
   onOpenMeetingRoom,
   onOpenSessionDialog,
-  onPostContentChange,
+  onActiveTabChange,
   onPostFileChange,
-  onPostTitleChange,
-  onPostTypeChange,
+  onPostContentChange,
   onRemoveMember,
-  onResourceUrlChange,
   onToggleSessionAttendance,
   open,
   postContent,
   postError,
   postFile,
   posts,
-  postTitle,
-  postType,
-  resourceUrl,
   selectedGroup,
   sessions,
   userId,
 }: StudyGroupDetailsDialogProps) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const orderedPosts = [...posts].sort(
+    (first, second) =>
+      new Date(first.created_at).getTime() - new Date(second.created_at).getTime(),
+  );
+  const canSubmitPost = Boolean(postContent.trim() || postFile);
+  const canAddMembers = selectedGroup.member_count < selectedGroup.max_members;
+  const shouldShowMemberCandidates =
+    selectedGroup.is_owner && addMemberSearch.trim().length >= 2 && canAddMembers;
+  const mentionQuery = getActiveMentionQuery(postContent);
+  const mentionSuggestions = useMemo(() => {
+    if (mentionQuery === null) return [];
+
+    const options = [
+      {
+        id: "everyone",
+        label: "everyone",
+        name: "Everyone",
+        avatar_url: null,
+        description: `${members.length} members`,
+      },
+      ...members.map((member) => ({
+        id: member.user_id,
+        label: member.profile.full_name,
+        name: member.profile.full_name,
+        avatar_url: member.profile.avatar_url,
+        description: member.role,
+      })),
+    ];
+
+    return options
+      .filter((option) =>
+        option.label.toLowerCase().includes(mentionQuery),
+      )
+      .slice(0, 6);
+  }, [members, mentionQuery]);
+
+  const insertMention = (label: string) => {
+    onPostContentChange(
+      postContent.replace(/(^|\s)@([^\s@]*)$/, `$1@${label} `),
+    );
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-5xl">
@@ -175,7 +287,13 @@ export function StudyGroupDetailsDialog({
             <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <Tabs defaultValue="sessions" className="min-h-96">
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) =>
+              onActiveTabChange(value as StudyGroupDetailTab)
+            }
+            className="min-h-96"
+          >
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="sessions">Sessions</TabsTrigger>
               <TabsTrigger value="discussion">Discussion</TabsTrigger>
@@ -283,152 +401,300 @@ export function StudyGroupDetailsDialog({
               )}
             </TabsContent>
 
-            <TabsContent value="discussion" className="space-y-5 pt-4">
-              <Card>
-                <CardContent className="space-y-4 p-4">
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={postType === "discussion" ? "default" : "outline"}
-                      onClick={() => {
-                        onPostTypeChange("discussion");
-                        onResourceUrlChange("");
-                        onPostFileChange(null);
-                      }}
-                    >
-                      <MessageCircle className="mr-2 h-4 w-4" />
-                      Discussion
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={postType === "resource" ? "default" : "outline"}
-                      onClick={() => onPostTypeChange("resource")}
-                    >
-                      <BookOpen className="mr-2 h-4 w-4" />
-                      Resource
-                    </Button>
+            <TabsContent value="discussion" className="pt-4">
+              <div className="flex h-[560px] max-h-[62vh] flex-col overflow-hidden rounded-md border bg-background">
+                <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
+                  <div>
+                    <h3 className="font-semibold">Group Chat</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {members.length} members in this study group
+                    </p>
                   </div>
-                  <Input
-                    value={postTitle}
-                    onChange={(event) => onPostTitleChange(event.target.value)}
-                    placeholder={
-                      postType === "resource"
-                        ? "Resource title"
-                        : "Discussion title (optional)"
-                    }
-                  />
-                  <Textarea
-                    value={postContent}
-                    onChange={(event) => onPostContentChange(event.target.value)}
-                    placeholder="Write a message for your group..."
-                  />
-                  {postType === "resource" && (
-                    <div className="space-y-3">
-                      <div className="relative">
-                        <Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          value={resourceUrl}
-                          onChange={(event) => onResourceUrlChange(event.target.value)}
-                          placeholder="https://..."
-                          className="pl-9"
-                        />
-                      </div>
-                      <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed p-3 text-sm hover:bg-muted/40">
-                        <Paperclip className="h-4 w-4" />
-                        {postFile ? postFile.name : "Attach a file (maximum 20 MB)"}
-                        <input
-                          type="file"
-                          className="hidden"
-                          onChange={(event) => onPostFileChange(event.target.files?.[0] || null)}
-                        />
-                      </label>
-                    </div>
-                  )}
-                  {postError && <p className="text-sm text-red-600">{postError}</p>}
-                  <div className="flex justify-end">
-                    <Button disabled={isSavingPost} onClick={onCreatePost}>
-                      {isSavingPost && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      Post
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+                </div>
 
-              {posts.length > 0 ? (
-                <div className="space-y-3">
-                  {posts.map((post) => (
-                    <Card key={post.id}>
-                      <CardContent className="space-y-3 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-9 w-9">
+                <div className="flex-1 space-y-4 overflow-y-auto bg-muted/20 p-4">
+                  {orderedPosts.length > 0 ? (
+                    orderedPosts.map((post) => {
+                      const isOwnPost = post.author_id === userId;
+                      const isResourcePost =
+                        post.post_type === "resource" || Boolean(post.resource_url);
+                      const hasImageAttachment = isImageAttachment(post);
+                      const hasFileAttachment =
+                        Boolean(post.downloadUrl) && !hasImageAttachment;
+                      const isImageOnlyPost =
+                        hasImageAttachment &&
+                        !post.content &&
+                        !post.title &&
+                        !post.resource_url;
+
+                      return (
+                        <div
+                          key={post.id}
+                          className={cn(
+                            "flex items-end gap-2",
+                            isOwnPost && "justify-end",
+                          )}
+                        >
+                          {!isOwnPost && (
+                            <Avatar className="h-8 w-8">
                               <AvatarImage src={post.author.avatar_url || undefined} />
                               <AvatarFallback>
-                                {post.author.full_name
-                                  .split(" ")
-                                  .map((part) => part[0])
-                                  .join("")
-                                  .slice(0, 2)}
+                                {getInitials(post.author.full_name)}
                               </AvatarFallback>
                             </Avatar>
-                            <div>
-                              <p className="text-sm font-semibold">{post.author.full_name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {formatDateTime(post.created_at)}
-                              </p>
+                          )}
+                          <div
+                            className={cn(
+                              "flex max-w-[78%] flex-col space-y-1",
+                              isOwnPost && "items-end",
+                            )}
+                          >
+                            <div
+                              className={cn(
+                                "flex items-center gap-2 text-xs text-muted-foreground",
+                                isOwnPost && "justify-end",
+                              )}
+                            >
+                              <span>{isOwnPost ? "You" : post.author.full_name}</span>
+                              <span>{formatDateTime(post.created_at)}</span>
+                              {(isOwnPost || selectedGroup.is_owner) && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0 opacity-70 hover:opacity-100"
+                                  title="Delete message"
+                                  onClick={() => onDeletePost(post)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                                </Button>
+                              )}
+                            </div>
+                            <div
+                              className={cn(
+                                "rounded-2xl text-sm",
+                                isImageOnlyPost
+                                  ? "overflow-hidden"
+                                  : "px-4 py-3 shadow-sm",
+                                isOwnPost && !isImageOnlyPost
+                                  ? "rounded-br-sm bg-primary text-primary-foreground"
+                                  : "rounded-bl-sm border bg-background",
+                                isOwnPost && isImageOnlyPost && "rounded-br-sm",
+                              )}
+                            >
+                              {isResourcePost && (
+                                <div
+                                  className={cn(
+                                    "mb-2 flex items-center gap-2 text-xs font-medium",
+                                    isOwnPost
+                                      ? "text-primary-foreground/80"
+                                      : "text-muted-foreground",
+                                  )}
+                                >
+                                  <FileText className="h-3.5 w-3.5" />
+                                  Resource
+                                </div>
+                              )}
+                              {post.title && (
+                                <p className="mb-1 font-semibold">{post.title}</p>
+                              )}
+                              {post.content && (
+                                <p className="whitespace-pre-wrap leading-5">
+                                  {renderMessageContent(
+                                    post.content,
+                                    members,
+                                    isOwnPost,
+                                  )}
+                                </p>
+                              )}
+                              {hasImageAttachment && post.downloadUrl && (
+                                <a
+                                  href={post.downloadUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className={cn(
+                                    "block",
+                                    !isImageOnlyPost && "mt-3",
+                                  )}
+                                >
+                                  <img
+                                    src={post.downloadUrl}
+                                    alt={post.attachment_name || "Image attachment"}
+                                    className={cn(
+                                      "max-h-64 w-full object-cover",
+                                      !isImageOnlyPost && "rounded-md",
+                                    )}
+                                  />
+                                </a>
+                              )}
+                              {(post.resource_url || hasFileAttachment) && (
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {post.resource_url && (
+                                    <Button variant="secondary" size="sm" asChild>
+                                      <a
+                                        href={post.resource_url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        <ExternalLink className="mr-2 h-4 w-4" />
+                                        Open Resource
+                                      </a>
+                                    </Button>
+                                  )}
+                                  {post.downloadUrl && hasFileAttachment && (
+                                    <Button variant="secondary" size="sm" asChild>
+                                      <a
+                                        href={post.downloadUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        <FileText className="mr-2 h-4 w-4" />
+                                        {post.attachment_name || "Download File"}
+                                        {post.attachment_size
+                                          ? ` - ${formatFileSize(post.attachment_size)}`
+                                          : ""}
+                                      </a>
+                                    </Button>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           </div>
-                          {(post.author_id === userId || selectedGroup.is_owner) && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => onDeletePost(post)}
-                            >
-                              <Trash2 className="h-4 w-4 text-red-500" />
-                            </Button>
-                          )}
                         </div>
-                        <div>
-                          {post.title && <p className="font-semibold">{post.title}</p>}
-                          {post.content && (
-                            <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
-                              {post.content}
+                      );
+                    })
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center text-center">
+                      <MessageCircle className="mb-3 h-9 w-9 text-muted-foreground/40" />
+                      <p className="font-medium">No messages yet</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Start the group conversation.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3 border-t bg-background p-4">
+                  {mentionSuggestions.length > 0 && (
+                    <div className="max-h-48 overflow-y-auto rounded-md border bg-background shadow-sm">
+                      {mentionSuggestions.map((suggestion) => (
+                        <button
+                          key={suggestion.id}
+                          type="button"
+                          className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-muted"
+                          onClick={() => insertMention(suggestion.label)}
+                        >
+                          <Avatar className="h-8 w-8">
+                            <AvatarImage src={suggestion.avatar_url || undefined} />
+                            <AvatarFallback>
+                              {suggestion.id === "everyone"
+                                ? "@"
+                                : getInitials(suggestion.name)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium">
+                              @{suggestion.label}
                             </p>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {post.resource_url && (
-                            <Button variant="outline" size="sm" asChild>
-                              <a href={post.resource_url} target="_blank" rel="noreferrer">
-                                <ExternalLink className="mr-2 h-4 w-4" />
-                                Open Resource
-                              </a>
-                            </Button>
-                          )}
-                          {post.downloadUrl && (
-                            <Button variant="outline" size="sm" asChild>
-                              <a href={post.downloadUrl} target="_blank" rel="noreferrer">
-                                <FileText className="mr-2 h-4 w-4" />
-                                {post.attachment_name || "Download File"}
-                                {post.attachment_size
-                                  ? ` · ${formatFileSize(post.attachment_size)}`
-                                  : ""}
-                              </a>
-                            </Button>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                            <p className="text-xs capitalize text-muted-foreground">
+                              {suggestion.description}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {postFile && (
+                    <div className="flex items-center gap-3 rounded-md border bg-muted/30 p-3">
+                      {postFile.type.startsWith("image/") ? (
+                        <Image className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">
+                          {postFile.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatFileSize(postFile.size)}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        aria-label="Remove attachment"
+                        onClick={() => {
+                          if (fileInputRef.current) {
+                            fileInputRef.current.value = "";
+                          }
+                          onPostFileChange(null);
+                        }}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                  <div className="flex items-end gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      onChange={(event) =>
+                        onPostFileChange(event.target.files?.[0] || null)
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 px-3"
+                      disabled={isSavingPost}
+                      aria-label="Attach file"
+                      onClick={() => {
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = "";
+                          fileInputRef.current.click();
+                        }
+                      }}
+                    >
+                      <Paperclip className="h-4 w-4" />
+                    </Button>
+                    <Textarea
+                      value={postContent}
+                      onChange={(event) => onPostContentChange(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === "Enter" &&
+                          !event.shiftKey &&
+                          !event.nativeEvent.isComposing &&
+                          canSubmitPost &&
+                          !isSavingPost
+                        ) {
+                          event.preventDefault();
+                          onCreatePost();
+                        }
+                      }}
+                      placeholder="Message this study group..."
+                      className="min-h-11 resize-none"
+                    />
+                    <Button
+                      type="button"
+                      className="h-11 px-3"
+                      disabled={isSavingPost || !canSubmitPost}
+                      aria-label="Send message"
+                      onClick={onCreatePost}
+                    >
+                      {isSavingPost ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                  {postError && <p className="text-sm text-red-600">{postError}</p>}
                 </div>
-              ) : (
-                <div className="rounded-md border border-dashed py-12 text-center">
-                  <MessageCircle className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
-                  <p className="font-medium">No group posts yet</p>
-                </div>
-              )}
+              </div>
             </TabsContent>
 
             <TabsContent value="members" className="space-y-4 pt-4">
@@ -461,6 +727,96 @@ export function StudyGroupDetailsDialog({
                   </Button>
                 )}
               </div>
+
+              {selectedGroup.is_owner && (
+                <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold">Add Member</h4>
+                      <p className="text-xs text-muted-foreground">
+                        Search students enrolled in {selectedGroup.course_code}.
+                      </p>
+                    </div>
+                    <Badge variant="outline">
+                      {selectedGroup.member_count}/{selectedGroup.max_members}
+                    </Badge>
+                  </div>
+                  <div className="relative">
+                    <Input
+                      value={addMemberSearch}
+                      onChange={(event) =>
+                        onAddMemberSearchChange(event.target.value)
+                      }
+                      placeholder="Search by name or username..."
+                      disabled={!canAddMembers}
+                      className="pr-9"
+                    />
+                    {isLoadingMemberCandidates && (
+                      <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
+                    )}
+                  </div>
+                  {addMemberError && (
+                    <p className="text-sm text-red-600">{addMemberError}</p>
+                  )}
+                  {!canAddMembers ? (
+                    <p className="text-sm text-muted-foreground">
+                      This study group is full.
+                    </p>
+                  ) : shouldShowMemberCandidates ? (
+                    addMemberCandidates.length > 0 ? (
+                      <div className="divide-y rounded-md border bg-background">
+                        {addMemberCandidates.map((candidate) => (
+                          <div
+                            key={candidate.user_id}
+                            className="flex items-center gap-3 p-3"
+                          >
+                            <Avatar className="h-9 w-9">
+                              <AvatarImage
+                                src={candidate.avatar_url || undefined}
+                              />
+                              <AvatarFallback>
+                                {getInitials(candidate.full_name)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium">
+                                {candidate.full_name}
+                              </p>
+                              <p className="text-xs capitalize text-muted-foreground">
+                                {candidate.role}
+                              </p>
+                            </div>
+                            <Button
+                              size="sm"
+                              className="gap-2"
+                              disabled={Boolean(isAddingMemberId)}
+                              onClick={() => onAddMember(candidate)}
+                            >
+                              {isAddingMemberId === candidate.user_id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <UserPlus className="h-4 w-4" />
+                              )}
+                              Add
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      !isLoadingMemberCandidates && (
+                        <p className="text-sm text-muted-foreground">
+                          No available students found.
+                        </p>
+                      )
+                    )
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Type at least 2 characters to search.
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="divide-y rounded-md border">
                 {members.map((member) => (
                   <div key={member.id} className="flex items-center gap-3 p-3">

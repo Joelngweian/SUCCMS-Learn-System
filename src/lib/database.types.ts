@@ -1926,6 +1926,19 @@ export type Database = {
           next_session_title: string | null
         }[]
       }
+      get_study_group_member_candidates: {
+        Args: {
+          p_group_id: string
+          p_search?: string | null
+          p_limit?: number
+        }
+        Returns: {
+          user_id: string
+          full_name: string
+          avatar_url: string | null
+          role: string
+        }[]
+      }
       get_my_upcoming_study_sessions: {
         Args: { p_limit?: number }
         Returns: {
@@ -2033,6 +2046,10 @@ export type Database = {
       }
       is_study_group_owner: {
         Args: { target_group_id: string; target_user_id?: string }
+        Returns: boolean
+      }
+      add_study_group_member: {
+        Args: { p_group_id: string; p_user_id: string }
         Returns: boolean
       }
       join_study_group: {

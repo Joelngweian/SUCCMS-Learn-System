@@ -1,15 +1,17 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getNotifyMessage, notify } from "@/lib/notify";
 import { confirmAction } from "@/lib/confirm";
 import { StudyGroupsBrowser } from "./study-groups/StudyGroupsBrowser";
 import type {
   StudyGroupMember,
+  StudyGroupMemberCandidate,
   StudyGroupPost,
   StudyGroupSummary,
   StudySession,
 } from "./study-groups/StudyGroupTypes";
 import {
+  addStudyGroupMember,
   createStudyGroup,
   createStudyGroupPost,
   createStudySession,
@@ -19,6 +21,7 @@ import {
   joinStudyGroup,
   leaveStudyGroup,
   loadStudyGroupDetails as loadStudyGroupDetailsData,
+  loadStudyGroupMemberCandidates,
   removeStudyGroupMember,
   setStudySessionAttendance,
 } from "./study-groups/studyGroupData";
@@ -63,6 +66,9 @@ const formatFileSize = (value: number | null) => {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+type StudyGroupDetailTab = "sessions" | "discussion" | "members";
+const CHAT_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+
 export function StudyGroupsPage() {
   const { user } = useAuth();
   const userId = user?.id;
@@ -103,6 +109,8 @@ export function StudyGroupsPage() {
   const [members, setMembers] = useState<StudyGroupMember[]>([]);
   const [sessions, setSessions] = useState<StudySession[]>([]);
   const [posts, setPosts] = useState<StudyGroupPost[]>([]);
+  const [activeDetailTab, setActiveDetailTab] =
+    useState<StudyGroupDetailTab>("sessions");
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [isGroupActionLoading, setIsGroupActionLoading] = useState(false);
@@ -121,17 +129,100 @@ export function StudyGroupsPage() {
     maxAttendees: "",
   });
 
-  const [postType, setPostType] = useState<"discussion" | "resource">(
-    "discussion"
-  );
-  const [postTitle, setPostTitle] = useState("");
   const [postContent, setPostContent] = useState("");
-  const [resourceUrl, setResourceUrl] = useState("");
   const [postFile, setPostFile] = useState<File | null>(null);
   const [isSavingPost, setIsSavingPost] = useState(false);
   const [postError, setPostError] = useState("");
+  const [addMemberSearch, setAddMemberSearch] = useState("");
+  const [memberCandidates, setMemberCandidates] = useState<
+    StudyGroupMemberCandidate[]
+  >([]);
+  const [isLoadingMemberCandidates, setIsLoadingMemberCandidates] =
+    useState(false);
+  const [isAddingMemberId, setIsAddingMemberId] = useState<string | null>(null);
+  const [addMemberError, setAddMemberError] = useState("");
+  const selectedGroupId = selectedGroup?.id;
+  const selectedGroupIsOwner = selectedGroup?.is_owner;
+  const selectedGroupMemberCount = selectedGroup?.member_count;
+  const selectedGroupMaxMembers = selectedGroup?.max_members;
 
-  const loadGroupDetails = async (group: StudyGroupSummary) => {
+  useEffect(() => {
+    const query = addMemberSearch.trim();
+    const shouldSearch =
+      selectedGroupIsOwner &&
+      activeDetailTab === "members" &&
+      selectedGroupMemberCount !== undefined &&
+      selectedGroupMaxMembers !== undefined &&
+      selectedGroupMemberCount < selectedGroupMaxMembers &&
+      query.length >= 2;
+
+    if (!selectedGroupId || !shouldSearch) {
+      setMemberCandidates([]);
+      setIsLoadingMemberCandidates(false);
+      return;
+    }
+
+    let isCurrent = true;
+    const timer = window.setTimeout(async () => {
+      setIsLoadingMemberCandidates(true);
+      setAddMemberError("");
+
+      try {
+        const candidates = await loadStudyGroupMemberCandidates({
+          groupId: selectedGroupId,
+          search: query,
+        });
+
+        if (isCurrent) {
+          setMemberCandidates(candidates);
+        }
+      } catch (error: unknown) {
+        if (isCurrent) {
+          setAddMemberError(
+            getNotifyMessage(error, "Failed to load available members."),
+          );
+          setMemberCandidates([]);
+        }
+      } finally {
+        if (isCurrent) {
+          setIsLoadingMemberCandidates(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      isCurrent = false;
+      window.clearTimeout(timer);
+    };
+  }, [
+    activeDetailTab,
+    addMemberSearch,
+    selectedGroupId,
+    selectedGroupIsOwner,
+    selectedGroupMaxMembers,
+    selectedGroupMemberCount,
+  ]);
+
+  const resetAddMemberSearch = () => {
+    setAddMemberSearch("");
+    setMemberCandidates([]);
+    setAddMemberError("");
+    setIsLoadingMemberCandidates(false);
+    setIsAddingMemberId(null);
+  };
+
+  const resetPostComposer = () => {
+    setPostContent("");
+    setPostFile(null);
+    setPostError("");
+  };
+
+  const loadGroupDetails = async (
+    group: StudyGroupSummary,
+    options: { showLoading?: boolean } = {},
+  ) => {
+    const showLoading = options.showLoading ?? true;
+
     if (!group.is_member || !user) {
       setMembers([]);
       setSessions([]);
@@ -139,7 +230,9 @@ export function StudyGroupsPage() {
       return;
     }
 
-    setIsLoadingDetails(true);
+    if (showLoading) {
+      setIsLoadingDetails(true);
+    }
     setDetailError("");
 
     try {
@@ -153,11 +246,16 @@ export function StudyGroupsPage() {
         getNotifyMessage(error, "Study group details could not be loaded."),
       );
     } finally {
-      setIsLoadingDetails(false);
+      if (showLoading) {
+        setIsLoadingDetails(false);
+      }
     }
   };
 
   const openGroup = (group: StudyGroupSummary) => {
+    setActiveDetailTab("sessions");
+    resetAddMemberSearch();
+    resetPostComposer();
     setSelectedGroup(group);
     void loadGroupDetails(group);
   };
@@ -308,6 +406,44 @@ export function StudyGroupsPage() {
     notify.success(`${member.profile.full_name} was removed from the group.`);
   };
 
+  const handleAddMember = async (candidate: StudyGroupMemberCandidate) => {
+    if (!selectedGroup) return;
+
+    setIsAddingMemberId(candidate.user_id);
+    setAddMemberError("");
+
+    try {
+      await addStudyGroupMember({
+        groupId: selectedGroup.id,
+        userId: candidate.user_id,
+      });
+
+      const updatedGroup = {
+        ...selectedGroup,
+        member_count: Math.min(
+          selectedGroup.max_members,
+          selectedGroup.member_count + 1,
+        ),
+      };
+      setSelectedGroup(updatedGroup);
+      setGroups((current) =>
+        current.map((item) =>
+          item.id === updatedGroup.id ? updatedGroup : item,
+        ),
+      );
+      setMemberCandidates((current) =>
+        current.filter((item) => item.user_id !== candidate.user_id),
+      );
+      setAddMemberSearch("");
+      await loadGroupDetails(updatedGroup, { showLoading: false });
+      notify.success(`${candidate.full_name} was added to the group.`);
+    } catch (error: unknown) {
+      setAddMemberError(getNotifyMessage(error, "Failed to add member."));
+    } finally {
+      setIsAddingMemberId(null);
+    }
+  };
+
   const handleCreateSession = async () => {
     if (
       !selectedGroup ||
@@ -421,24 +557,9 @@ export function StudyGroupsPage() {
 
   const handleCreatePost = async () => {
     if (!selectedGroup || !user) return;
-    if (
-      !postTitle.trim() &&
-      !postContent.trim() &&
-      !resourceUrl.trim() &&
-      !postFile
-    ) {
-      return;
-    }
-    if (
-      postType === "resource" &&
-      resourceUrl.trim() &&
-      !/^https?:\/\//i.test(resourceUrl.trim())
-    ) {
-      setPostError("Enter a valid http or https resource link.");
-      return;
-    }
-    if (postFile && postFile.size > 20 * 1024 * 1024) {
-      setPostError("The attached file must be 20 MB or smaller.");
+
+    const trimmedContent = postContent.trim();
+    if (!trimmedContent && !postFile) {
       return;
     }
 
@@ -448,38 +569,48 @@ export function StudyGroupsPage() {
     try {
       await createStudyGroupPost({
         authorId: user.id,
-        content: postContent.trim(),
+        content: trimmedContent,
         file: postFile,
         groupId: selectedGroup.id,
-        postType,
-        resourceUrl:
-          postType === "resource" && resourceUrl.trim()
-            ? resourceUrl.trim()
-            : null,
-        title: postTitle.trim() || null,
+        postType: "discussion",
+        resourceUrl: null,
+        title: null,
       });
 
-      setPostTitle("");
       setPostContent("");
-      setResourceUrl("");
       setPostFile(null);
-      await loadGroupDetails(selectedGroup);
-      notify.success("Group post published.");
+      await loadGroupDetails(selectedGroup, { showLoading: false });
     } catch (error: unknown) {
       setPostError(
-        getNotifyMessage(error, "Failed to publish group post."),
+        getNotifyMessage(
+          error,
+          "Failed to send message.",
+        ),
       );
     } finally {
       setIsSavingPost(false);
     }
   };
 
+  const handlePostFileChange = (file: File | null) => {
+    if (file && file.size > CHAT_ATTACHMENT_MAX_BYTES) {
+      setPostError("Attachments must be 25 MB or smaller.");
+      return;
+    }
+
+    setPostError("");
+    setPostFile(file);
+  };
+
   const handleDeletePost = async (post: StudyGroupPost) => {
     if (!selectedGroup) return;
     if (
       !(await confirmAction({
-        title: "Delete group post?",
-        description: "This post will be permanently deleted.",
+        title: post.post_type === "resource" ? "Delete resource?" : "Delete message?",
+        description:
+          post.post_type === "resource"
+            ? "This shared resource will be permanently deleted."
+            : "This message will be permanently deleted.",
         confirmLabel: "Delete",
         destructive: true,
       }))
@@ -488,11 +619,20 @@ export function StudyGroupsPage() {
     try {
       await deleteStudyGroupPost(post);
     } catch (error) {
-      setDetailError(getNotifyMessage(error, "Failed to delete group post."));
+      setDetailError(
+        getNotifyMessage(
+          error,
+          post.post_type === "resource"
+            ? "Failed to delete resource."
+            : "Failed to delete message.",
+        ),
+      );
       return;
     }
-    await loadGroupDetails(selectedGroup);
-    notify.success("Group post deleted.");
+    await loadGroupDetails(selectedGroup, { showLoading: false });
+    notify.success(
+      post.post_type === "resource" ? "Resource deleted." : "Message deleted.",
+    );
   };
 
   if (meetingRoomGroup) {
@@ -550,6 +690,10 @@ export function StudyGroupsPage() {
       {selectedGroup && (
         <Suspense fallback={null}>
           <StudyGroupDetailsDialog
+            activeTab={activeDetailTab}
+            addMemberCandidates={memberCandidates}
+            addMemberError={addMemberError}
+            addMemberSearch={addMemberSearch}
             open={Boolean(selectedGroup)}
             selectedGroup={selectedGroup}
             members={members}
@@ -558,17 +702,25 @@ export function StudyGroupsPage() {
             userId={userId}
             detailError={detailError}
             isLoadingDetails={isLoadingDetails}
+            isLoadingMemberCandidates={isLoadingMemberCandidates}
             isGroupActionLoading={isGroupActionLoading}
-            postType={postType}
-            postTitle={postTitle}
+            isAddingMemberId={isAddingMemberId}
             postContent={postContent}
-            resourceUrl={resourceUrl}
             postFile={postFile}
             isSavingPost={isSavingPost}
             postError={postError}
             formatDateTime={formatDateTime}
             formatFileSize={formatFileSize}
-            onOpenChange={(open) => !open && setSelectedGroup(null)}
+            onAddMember={(candidate) => void handleAddMember(candidate)}
+            onAddMemberSearchChange={setAddMemberSearch}
+            onActiveTabChange={setActiveDetailTab}
+            onOpenChange={(open) => {
+              if (!open) {
+                setSelectedGroup(null);
+                resetAddMemberSearch();
+                resetPostComposer();
+              }
+            }}
             onJoinGroup={(group) => void handleJoinGroup(group)}
             onLeaveGroup={(group) => void handleLeaveGroup(group)}
             onDeleteGroup={(group) => void handleDeleteGroup(group)}
@@ -576,11 +728,8 @@ export function StudyGroupsPage() {
             onOpenSessionDialog={() => setIsSessionOpen(true)}
             onDeleteSession={(session) => void handleDeleteSession(session)}
             onToggleSessionAttendance={(session) => void toggleSessionAttendance(session)}
-            onPostTypeChange={setPostType}
-            onPostTitleChange={setPostTitle}
             onPostContentChange={setPostContent}
-            onResourceUrlChange={setResourceUrl}
-            onPostFileChange={setPostFile}
+            onPostFileChange={handlePostFileChange}
             onCreatePost={() => void handleCreatePost()}
             onDeletePost={(post) => void handleDeletePost(post)}
             onOpenMeetingRoom={openMeetingRoom}
