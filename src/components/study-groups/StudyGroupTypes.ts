@@ -1,3 +1,5 @@
+export const GENERAL_STUDY_GROUP_COURSE_ID = "general";
+
 export interface EnrolledCourse {
   id: string;
   code: string;
@@ -6,7 +8,7 @@ export interface EnrolledCourse {
 
 export interface StudyGroupSummary {
   id: string;
-  course_id: string;
+  course_id: string | null;
   name: string;
   description: string;
   max_members: number;
@@ -15,13 +17,14 @@ export interface StudyGroupSummary {
   creator_id: string;
   creator_name: string;
   creator_avatar_url: string | null;
-  course_code: string;
-  course_name: string;
+  course_code: string | null;
+  course_name: string | null;
   member_count: number;
   is_member: boolean;
   is_owner: boolean;
   next_session_start: string | null;
   next_session_title: string | null;
+  has_online_session: boolean;
 }
 
 export interface StudyGroupMember {

@@ -1152,7 +1152,7 @@ export type Database = {
       study_groups: Table<
         {
           id: string
-          course_id: string
+          course_id: string | null
           name: string
           description: string
           created_by: string
@@ -1161,7 +1161,7 @@ export type Database = {
           created_at: string
           updated_at: string
         },
-        "course_id" | "name" | "created_by",
+        "name" | "created_by",
         [
           {
             foreignKeyName: "study_groups_course_id_fkey"
@@ -1630,7 +1630,7 @@ export type Database = {
       }
       create_study_group: {
         Args: {
-          p_course_id: string
+          p_course_id: string | null
           p_name: string
           p_description?: string
           p_max_members?: number
@@ -1729,7 +1729,7 @@ export type Database = {
         }
         Returns: {
           id: string
-          course_id: string
+          course_id: string | null
           author_id: string
           author_name: string
           content: string
@@ -1837,8 +1837,8 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: {
           course_id: string
-          course_code: string
-          course_name: string
+          course_code: string | null
+          course_name: string | null
           student_average: number
           class_average: number
           percentile: number | null
@@ -1908,7 +1908,7 @@ export type Database = {
         }
         Returns: {
           id: string
-          course_id: string
+          course_id: string | null
           name: string
           description: string
           max_members: number
@@ -1917,13 +1917,14 @@ export type Database = {
           creator_id: string
           creator_name: string
           creator_avatar_url: string | null
-          course_code: string
-          course_name: string
+          course_code: string | null
+          course_name: string | null
           member_count: number
           is_member: boolean
           is_owner: boolean
           next_session_start: string | null
           next_session_title: string | null
+          has_online_session: boolean
         }[]
       }
       get_study_group_member_candidates: {

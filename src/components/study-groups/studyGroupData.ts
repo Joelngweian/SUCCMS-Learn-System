@@ -90,7 +90,7 @@ export async function createStudyGroup({
   maxMembers,
   name,
 }: {
-  courseId: string;
+  courseId: string | null;
   description: string;
   maxMembers: number;
   name: string;

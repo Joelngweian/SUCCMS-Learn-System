@@ -10,6 +10,7 @@ import type {
   StudyGroupSummary,
   StudySession,
 } from "./study-groups/StudyGroupTypes";
+import { GENERAL_STUDY_GROUP_COURSE_ID } from "./study-groups/StudyGroupTypes";
 import {
   addStudyGroupMember,
   createStudyGroup,
@@ -96,7 +97,7 @@ export function StudyGroupsPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const [newGroup, setNewGroup] = useState({
-    courseId: "",
+    courseId: GENERAL_STUDY_GROUP_COURSE_ID,
     name: "",
     description: "",
     maxMembers: 12,
@@ -275,7 +276,10 @@ export function StudyGroupsPage() {
     setCreateError("");
     try {
       await createStudyGroup({
-        courseId: newGroup.courseId,
+        courseId:
+          newGroup.courseId === GENERAL_STUDY_GROUP_COURSE_ID
+            ? null
+            : newGroup.courseId,
         description: newGroup.description.trim(),
         maxMembers: newGroup.maxMembers,
         name: newGroup.name.trim(),
@@ -283,7 +287,7 @@ export function StudyGroupsPage() {
 
       setIsCreateOpen(false);
       setNewGroup({
-        courseId: "",
+        courseId: GENERAL_STUDY_GROUP_COURSE_ID,
         name: "",
         description: "",
         maxMembers: 12,
@@ -461,11 +465,8 @@ export function StudyGroupsPage() {
       setSessionError("End time must be later than the start time.");
       return;
     }
-    if (
-      newSession.locationType === "online" &&
-      !/^https?:\/\//i.test(newSession.meetingUrl.trim())
-    ) {
-      setSessionError("Enter a valid http or https meeting link.");
+    if (newSession.locationType === "in_person" && !newSession.locationText.trim()) {
+      setSessionError("Enter a location for the in-person session.");
       return;
     }
 
@@ -484,10 +485,7 @@ export function StudyGroupsPage() {
           newSession.locationType === "in_person"
             ? newSession.locationText.trim()
             : null,
-        meetingUrl:
-          newSession.locationType === "online"
-            ? newSession.meetingUrl.trim()
-            : null,
+        meetingUrl: null,
         maxAttendees: newSession.maxAttendees
           ? Number(newSession.maxAttendees)
           : null,
@@ -504,6 +502,15 @@ export function StudyGroupsPage() {
         meetingUrl: "",
         maxAttendees: "",
       });
+      if (newSession.locationType === "online") {
+        const updatedGroup = { ...selectedGroup, has_online_session: true };
+        setSelectedGroup(updatedGroup);
+        setGroups((current) =>
+          current.map((group) =>
+            group.id === updatedGroup.id ? updatedGroup : group,
+          ),
+        );
+      }
       await loadGroupDetails(selectedGroup);
       notify.success("Study session scheduled.");
     } catch (error: unknown) {
@@ -550,6 +557,23 @@ export function StudyGroupsPage() {
     } catch (error) {
       setDetailError(getNotifyMessage(error, "Failed to delete study session."));
       return;
+    }
+    if (session.location_type === "online") {
+      const hasRemainingOnlineSession = sessions.some(
+        (currentSession) =>
+          currentSession.id !== session.id &&
+          currentSession.location_type === "online",
+      );
+      const updatedGroup = {
+        ...selectedGroup,
+        has_online_session: hasRemainingOnlineSession,
+      };
+      setSelectedGroup(updatedGroup);
+      setGroups((current) =>
+        current.map((group) =>
+          group.id === updatedGroup.id ? updatedGroup : group,
+        ),
+      );
     }
     await loadGroupDetails(selectedGroup);
     notify.success("Study session deleted.");

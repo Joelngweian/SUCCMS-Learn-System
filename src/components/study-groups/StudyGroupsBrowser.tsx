@@ -68,7 +68,7 @@ export function StudyGroupsBrowser({
             Study with classmates, share resources and schedule focused sessions.
           </p>
         </div>
-        <Button onClick={onCreate} disabled={courses.length === 0}>
+        <Button onClick={onCreate}>
           <Plus className="mr-2 h-4 w-4" />
           New Group
         </Button>
@@ -80,7 +80,7 @@ export function StudyGroupsBrowser({
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search groups or courses..."
+            placeholder="Search groups, courses, or General..."
             className="pl-9"
           />
         </div>
@@ -140,7 +140,7 @@ export function StudyGroupsBrowser({
               : "No study groups found"}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Create one for a course you are enrolled in.
+            Create a General group or one for a course you are enrolled in.
           </p>
         </div>
       )}

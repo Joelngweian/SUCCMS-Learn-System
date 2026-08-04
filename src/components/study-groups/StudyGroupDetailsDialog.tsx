@@ -188,6 +188,14 @@ export function StudyGroupDetailsDialog({
   );
   const canSubmitPost = Boolean(postContent.trim() || postFile);
   const canAddMembers = selectedGroup.member_count < selectedGroup.max_members;
+  const courseCode = selectedGroup.course_code || "General";
+  const courseName = selectedGroup.course_name || "Open to everyone";
+  const currentTime = Date.now();
+  const hasOnlineSession = sessions.some(
+    (session) =>
+      session.location_type === "online" &&
+      new Date(session.ends_at).getTime() >= currentTime,
+  );
   const shouldShowMemberCandidates =
     selectedGroup.is_owner && addMemberSearch.trim().length >= 2 && canAddMembers;
   const mentionQuery = getActiveMentionQuery(postContent);
@@ -229,7 +237,7 @@ export function StudyGroupDetailsDialog({
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-5xl">
         <DialogHeader className="pr-12">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">{selectedGroup.course_code}</Badge>
+            <Badge variant="outline">{courseCode}</Badge>
             {selectedGroup.is_owner && (
               <Badge className="bg-amber-100 text-amber-800">
                 <Crown className="mr-1 h-3 w-3" />
@@ -238,7 +246,7 @@ export function StudyGroupDetailsDialog({
             )}
           </div>
           <DialogTitle className="text-2xl">{selectedGroup.name}</DialogTitle>
-          <DialogDescription>{selectedGroup.course_name}</DialogDescription>
+          <DialogDescription>{courseName}</DialogDescription>
         </DialogHeader>
 
         {detailError && (
@@ -309,14 +317,16 @@ export function StudyGroupDetailsDialog({
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950/30"
-                    onClick={() => onOpenMeetingRoom(selectedGroup)}
-                  >
-                    <Video className="h-4 w-4" />
-                    Open Meeting Room
-                  </Button>
+                  {hasOnlineSession && (
+                    <Button
+                      variant="outline"
+                      className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950/30"
+                      onClick={() => onOpenMeetingRoom(selectedGroup)}
+                    >
+                      <Video className="h-4 w-4" />
+                      Open Meeting Room
+                    </Button>
+                  )}
                   {selectedGroup.is_owner && (
                     <Button onClick={onOpenSessionDialog}>
                       <Plus className="mr-2 h-4 w-4" />
@@ -734,7 +744,9 @@ export function StudyGroupDetailsDialog({
                     <div>
                       <h4 className="text-sm font-semibold">Add Member</h4>
                       <p className="text-xs text-muted-foreground">
-                        Search students enrolled in {selectedGroup.course_code}.
+                        {selectedGroup.course_id
+                          ? `Search students enrolled in ${courseCode}.`
+                          : "Search anyone in SUCCMS."}
                       </p>
                     </div>
                     <Badge variant="outline">

@@ -17,6 +17,9 @@ export function StudyGroupCard({
   onOpenRoom,
   formatDateTime,
 }: StudyGroupCardProps) {
+  const courseCode = group.course_code || "General";
+  const courseName = group.course_name || "Open to everyone";
+
   return (
     <Card
       className="cursor-pointer transition-shadow hover:shadow-md"
@@ -24,7 +27,7 @@ export function StudyGroupCard({
     >
       <CardHeader className="space-y-3 pb-3">
         <div className="flex items-start justify-between gap-3">
-          <Badge variant="outline">{group.course_code}</Badge>
+          <Badge variant="outline">{courseCode}</Badge>
           <Badge variant={group.is_member ? "default" : "secondary"}>
             {group.is_owner ? "Owner" : group.is_member ? "Joined" : "Open"}
           </Badge>
@@ -32,7 +35,7 @@ export function StudyGroupCard({
         <div>
           <CardTitle className="text-lg">{group.name}</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
-            {group.course_name}
+            {courseName}
           </p>
         </div>
       </CardHeader>
@@ -57,7 +60,7 @@ export function StudyGroupCard({
             </p>
           </div>
         )}
-        {group.is_member && (
+        {group.is_member && group.has_online_session && (
           <Button
             type="button"
             variant="outline"
@@ -68,7 +71,7 @@ export function StudyGroupCard({
             }}
           >
             <Video className="h-4 w-4" />
-            Open Room Preview
+            Open Meeting Room
           </Button>
         )}
       </CardContent>

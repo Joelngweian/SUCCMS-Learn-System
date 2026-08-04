@@ -24,6 +24,15 @@ import type {
   NewStudyGroup,
   NewStudySession,
 } from "./StudyGroupTypes";
+import { GENERAL_STUDY_GROUP_COURSE_ID } from "./StudyGroupTypes";
+
+const splitDateTimeValue = (value: string) => {
+  const [date = "", time = ""] = value.split("T");
+  return { date, time };
+};
+
+const combineDateTimeValue = (date: string, time: string) =>
+  date && time ? `${date}T${time}` : "";
 
 interface CreateStudyGroupDialogProps {
   open: boolean;
@@ -52,13 +61,13 @@ export function CreateStudyGroupDialog({
         <DialogHeader className="pr-12">
           <DialogTitle>Create Study Group</DialogTitle>
           <DialogDescription>
-            Group membership is limited to students enrolled in the selected
-            course.
+            Choose a course group for enrolled classmates, or General for
+            everyone.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>Course</Label>
+            <Label>Group Scope</Label>
             <Select
               value={value.courseId}
               onValueChange={(courseId) =>
@@ -66,9 +75,12 @@ export function CreateStudyGroupDialog({
               }
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select a course" />
+                <SelectValue placeholder="Select a scope" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={GENERAL_STUDY_GROUP_COURSE_ID}>
+                  General - Open to everyone
+                </SelectItem>
                 {courses.map((course) => (
                   <SelectItem key={course.id} value={course.id}>
                     {course.code} - {course.name}
@@ -156,6 +168,9 @@ export function StudySessionDialog({
   isSaving,
   onSubmit,
 }: StudySessionDialogProps) {
+  const startDateTime = splitDateTimeValue(value.startsAt);
+  const endDateTime = splitDateTimeValue(value.endsAt);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
@@ -181,29 +196,73 @@ export function StudySessionDialog({
           </div>
           <div className="space-y-2">
             <Label>Start</Label>
-            <Input
-              type="datetime-local"
-              value={value.startsAt}
-              onChange={(event) =>
-                onChange((current) => ({
-                  ...current,
-                  startsAt: event.target.value,
-                }))
-              }
-            />
+            <div className="grid grid-cols-[minmax(0,1fr)_128px] gap-2">
+              <Input
+                aria-label="Start date"
+                type="text"
+                inputMode="numeric"
+                placeholder="yyyy-mm-dd"
+                value={startDateTime.date}
+                onChange={(event) =>
+                  onChange((current) => ({
+                    ...current,
+                    startsAt: combineDateTimeValue(
+                      event.target.value,
+                      splitDateTimeValue(current.startsAt).time,
+                    ),
+                  }))
+                }
+              />
+              <Input
+                aria-label="Start time"
+                type="time"
+                value={startDateTime.time}
+                onChange={(event) =>
+                  onChange((current) => ({
+                    ...current,
+                    startsAt: combineDateTimeValue(
+                      splitDateTimeValue(current.startsAt).date,
+                      event.target.value,
+                    ),
+                  }))
+                }
+              />
+            </div>
           </div>
           <div className="space-y-2">
             <Label>End</Label>
-            <Input
-              type="datetime-local"
-              value={value.endsAt}
-              onChange={(event) =>
-                onChange((current) => ({
-                  ...current,
-                  endsAt: event.target.value,
-                }))
-              }
-            />
+            <div className="grid grid-cols-[minmax(0,1fr)_128px] gap-2">
+              <Input
+                aria-label="End date"
+                type="text"
+                inputMode="numeric"
+                placeholder="yyyy-mm-dd"
+                value={endDateTime.date}
+                onChange={(event) =>
+                  onChange((current) => ({
+                    ...current,
+                    endsAt: combineDateTimeValue(
+                      event.target.value,
+                      splitDateTimeValue(current.endsAt).time,
+                    ),
+                  }))
+                }
+              />
+              <Input
+                aria-label="End time"
+                type="time"
+                value={endDateTime.time}
+                onChange={(event) =>
+                  onChange((current) => ({
+                    ...current,
+                    endsAt: combineDateTimeValue(
+                      splitDateTimeValue(current.endsAt).date,
+                      event.target.value,
+                    ),
+                  }))
+                }
+              />
+            </div>
           </div>
           <div className="space-y-2">
             <Label>Location Type</Label>
@@ -222,46 +281,24 @@ export function StudySessionDialog({
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
+          {value.locationType === "in_person" && (
+            <div className="space-y-2">
             <Label>
-              {value.locationType === "online" ? "Meeting Link" : "Location"}
+              Location
             </Label>
             <Input
-              type={value.locationType === "online" ? "url" : "text"}
-              value={
-                value.locationType === "online"
-                  ? value.meetingUrl
-                  : value.locationText
-              }
-              onChange={(event) =>
-                onChange((current) =>
-                  current.locationType === "online"
-                    ? { ...current, meetingUrl: event.target.value }
-                    : { ...current, locationText: event.target.value }
-                )
-              }
-              placeholder={
-                value.locationType === "online"
-                  ? "https://teams.microsoft.com/..."
-                  : "Library Room 3"
-              }
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Attendee Limit (Optional)</Label>
-            <Input
-              type="number"
-              min={2}
-              max={100}
-              value={value.maxAttendees}
+              type="text"
+              value={value.locationText}
               onChange={(event) =>
                 onChange((current) => ({
                   ...current,
-                  maxAttendees: event.target.value,
+                  locationText: event.target.value,
                 }))
               }
+              placeholder="Library Room 3"
             />
-          </div>
+            </div>
+          )}
           <div className="space-y-2 md:col-span-2">
             <Label>Description</Label>
             <Textarea
@@ -286,9 +323,7 @@ export function StudySessionDialog({
               !value.title.trim() ||
               !value.startsAt ||
               !value.endsAt ||
-              (value.locationType === "online"
-                ? !value.meetingUrl.trim()
-                : !value.locationText.trim())
+              (value.locationType === "in_person" && !value.locationText.trim())
             }
             onClick={onSubmit}
           >

@@ -683,7 +683,9 @@ export function StudyGroupMeetingRoomPreview({
         ];
   const nextSession = sessions[0];
   const hostParticipant = participants[0];
-  const roomTitle = group.name || group.course_name;
+  const courseCode = group.course_code || "General";
+  const courseName = group.course_name || "Open to everyone";
+  const roomTitle = group.name || courseName;
   const galleryParticipants = participants.slice(0, 9);
   const galleryGridClass =
     galleryParticipants.length === 1
@@ -772,15 +774,15 @@ export function StudyGroupMeetingRoomPreview({
 
   if (!hasJoinedPreview) {
     return (
-      <div className="space-y-6">
-        <div className="rounded-2xl border bg-card p-5 shadow-sm">
+      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+        <div className="space-y-5">
           <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <Badge className="bg-blue-600 text-white hover:bg-blue-600">
-                  {group.course_code}
+                  {courseCode}
                 </Badge>
-                <Badge variant="outline">{group.course_name}</Badge>
+                <Badge variant="outline">{courseName}</Badge>
                 <Badge className="border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
                   Meeting setup
                 </Badge>
@@ -1103,10 +1105,10 @@ export function StudyGroupMeetingRoomPreview({
             <div className="flex flex-wrap items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-blue-300" />
               <Badge className="bg-blue-600 text-white hover:bg-blue-600">
-                {group.course_code}
+                {courseCode}
               </Badge>
               <Badge className="border-white/15 bg-white/10 text-white hover:bg-white/10">
-                {group.course_name}
+                {courseName}
               </Badge>
               <span className="text-xs text-white/55">
                 {nextSession
