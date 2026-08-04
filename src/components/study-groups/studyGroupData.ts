@@ -206,8 +206,6 @@ export async function createStudySession({
   groupId,
   locationText,
   locationType,
-  maxAttendees,
-  meetingUrl,
   startsAt,
   title,
 }: {
@@ -217,8 +215,6 @@ export async function createStudySession({
   groupId: string;
   locationText: string | null;
   locationType: string;
-  maxAttendees: number | null;
-  meetingUrl: string | null;
   startsAt: string;
   title: string;
 }) {
@@ -231,8 +227,8 @@ export async function createStudySession({
     ends_at: endsAt,
     location_type: locationType,
     location_text: locationText,
-    meeting_url: meetingUrl,
-    max_attendees: maxAttendees,
+    meeting_url: null,
+    max_attendees: null,
   });
 
   if (error) throw error;

@@ -97,6 +97,4 @@ export interface NewStudySession {
   endsAt: string;
   locationType: string;
   locationText: string;
-  meetingUrl: string;
-  maxAttendees: string;
 }

@@ -4,6 +4,7 @@ import { getNotifyMessage, notify } from "@/lib/notify";
 import { confirmAction } from "@/lib/confirm";
 import { StudyGroupsBrowser } from "./study-groups/StudyGroupsBrowser";
 import type {
+  NewStudySession,
   StudyGroupMember,
   StudyGroupMemberCandidate,
   StudyGroupPost,
@@ -119,15 +120,13 @@ export function StudyGroupsPage() {
   const [isSessionOpen, setIsSessionOpen] = useState(false);
   const [isSavingSession, setIsSavingSession] = useState(false);
   const [sessionError, setSessionError] = useState("");
-  const [newSession, setNewSession] = useState({
+  const [newSession, setNewSession] = useState<NewStudySession>({
     title: "",
     description: "",
     startsAt: "",
     endsAt: "",
     locationType: "in_person",
     locationText: "",
-    meetingUrl: "",
-    maxAttendees: "",
   });
 
   const [postContent, setPostContent] = useState("");
@@ -485,10 +484,6 @@ export function StudyGroupsPage() {
           newSession.locationType === "in_person"
             ? newSession.locationText.trim()
             : null,
-        meetingUrl: null,
-        maxAttendees: newSession.maxAttendees
-          ? Number(newSession.maxAttendees)
-          : null,
       });
 
       setIsSessionOpen(false);
@@ -499,8 +494,6 @@ export function StudyGroupsPage() {
         endsAt: "",
         locationType: "in_person",
         locationText: "",
-        meetingUrl: "",
-        maxAttendees: "",
       });
       if (newSession.locationType === "online") {
         const updatedGroup = { ...selectedGroup, has_online_session: true };

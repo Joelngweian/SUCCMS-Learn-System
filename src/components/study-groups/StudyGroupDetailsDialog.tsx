@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useRef } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -40,6 +40,10 @@ import type {
   StudyGroupSummary,
   StudySession,
 } from "./StudyGroupTypes";
+import {
+  getStudyGroupMentionSuggestions,
+  shouldShowOpenMeetingRoom,
+} from "./studyGroupUi";
 
 type StudyGroupDetailTab = "sessions" | "discussion" | "members";
 
@@ -53,11 +57,6 @@ const getInitials = (name: string) =>
 
 const escapeRegExp = (value: string) =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const getActiveMentionQuery = (value: string) => {
-  const match = value.match(/(^|\s)@([^\s@]*)$/);
-  return match ? match[2].toLowerCase() : null;
-};
 
 const isImageAttachment = (post: StudyGroupPost) =>
   Boolean(post.downloadUrl && post.attachment_type?.startsWith("image/"));
@@ -190,41 +189,13 @@ export function StudyGroupDetailsDialog({
   const canAddMembers = selectedGroup.member_count < selectedGroup.max_members;
   const courseCode = selectedGroup.course_code || "General";
   const courseName = selectedGroup.course_name || "Open to everyone";
-  const currentTime = Date.now();
-  const hasOnlineSession = sessions.some(
-    (session) =>
-      session.location_type === "online" &&
-      new Date(session.ends_at).getTime() >= currentTime,
-  );
+  const hasOnlineSession = shouldShowOpenMeetingRoom(sessions);
   const shouldShowMemberCandidates =
     selectedGroup.is_owner && addMemberSearch.trim().length >= 2 && canAddMembers;
-  const mentionQuery = getActiveMentionQuery(postContent);
-  const mentionSuggestions = useMemo(() => {
-    if (mentionQuery === null) return [];
-
-    const options = [
-      {
-        id: "everyone",
-        label: "everyone",
-        name: "Everyone",
-        avatar_url: null,
-        description: `${members.length} members`,
-      },
-      ...members.map((member) => ({
-        id: member.user_id,
-        label: member.profile.full_name,
-        name: member.profile.full_name,
-        avatar_url: member.profile.avatar_url,
-        description: member.role,
-      })),
-    ];
-
-    return options
-      .filter((option) =>
-        option.label.toLowerCase().includes(mentionQuery),
-      )
-      .slice(0, 6);
-  }, [members, mentionQuery]);
+  const mentionSuggestions = getStudyGroupMentionSuggestions(
+    postContent,
+    members,
+  );
 
   const insertMention = (label: string) => {
     onPostContentChange(
@@ -378,18 +349,9 @@ export function StudyGroupDetailsDialog({
                         </div>
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <span className="text-sm text-muted-foreground">
-                            {session.attendeeCount}
-                            {session.max_attendees ? `/${session.max_attendees}` : ""} attending
+                            {session.attendeeCount} attending
                           </span>
                           <div className="flex gap-2">
-                            {session.meeting_url && (
-                              <Button variant="outline" size="sm" asChild>
-                                <a href={session.meeting_url} target="_blank" rel="noreferrer">
-                                  <ExternalLink className="mr-2 h-4 w-4" />
-                                  Open Link
-                                </a>
-                              </Button>
-                            )}
                             <Button
                               variant={session.isGoing ? "outline" : "default"}
                               size="sm"
