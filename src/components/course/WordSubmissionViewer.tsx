@@ -29,7 +29,7 @@ type TextPoint = {
 
 type HighlightMatch = {
   annotation: AiGradingAnnotation;
-  annotationIndex: number;
+  annotationIndex: number | null;
   start: number;
   end: number;
   startPoint: TextPoint;
@@ -45,7 +45,7 @@ const annotationMeta: Record<
     badgeClassName: "border-red-200 bg-red-100 text-red-800",
   },
   correct: {
-    label: "Reviewed & Correct",
+    label: "AI Reviewed",
     badgeClassName: "border-sky-200 bg-sky-100 text-sky-800",
   },
   uncertain: {
@@ -103,6 +103,33 @@ const rangesOverlap = (
   matches: HighlightMatch[],
 ) =>
   matches.some(match => start < match.end && end > match.start);
+
+const sentencePattern = /[^.!?。！？]+[.!?。！？]+["')\]}]*|[^.!?。！？]+$/g;
+
+const getUnmatchedSentenceRanges = (
+  normalized: string,
+  matches: HighlightMatch[],
+) => {
+  const ranges: Array<{ start: number; end: number }> = [];
+
+  for (const match of normalized.matchAll(sentencePattern)) {
+    const rawStart = match.index ?? 0;
+    const rawText = match[0] || "";
+    const leadingSpaces = rawText.length - rawText.trimStart().length;
+    const trailingSpaces = rawText.length - rawText.trimEnd().length;
+    const start = rawStart + leadingSpaces;
+    const end = rawStart + rawText.length - trailingSpaces;
+
+    if (end <= start) continue;
+    const excerpt = normalized.slice(start, end);
+    if (excerpt.length < 2 || !/[\p{L}\p{N}]/u.test(excerpt)) continue;
+    if (rangesOverlap(start, end, matches)) continue;
+
+    ranges.push({ start, end });
+  }
+
+  return ranges;
+};
 
 const addAiHighlights = (
   html: string,
@@ -164,6 +191,30 @@ const addAiHighlights = (
       locatedIndexes.add(annotationIndex);
     });
 
+    getUnmatchedSentenceRanges(normalized, matches).forEach(sentenceRange => {
+      const startPoint = points[sentenceRange.start];
+      const finalPoint = points[sentenceRange.end - 1];
+      if (!startPoint || !finalPoint) return;
+
+      matches.push({
+        annotation: {
+          fileName: "Submission text",
+          page: null,
+          status: "correct",
+          excerpt: normalized.slice(sentenceRange.start, sentenceRange.end),
+          comment: "AI reviewed this sentence.",
+        },
+        annotationIndex: null,
+        start: sentenceRange.start,
+        end: sentenceRange.end,
+        startPoint,
+        endPoint: {
+          node: finalPoint.node,
+          offset: finalPoint.offset + 1,
+        },
+      });
+    });
+
     matches
       .sort((left, right) => right.start - left.start)
       .forEach(match => {
@@ -180,10 +231,12 @@ const addAiHighlights = (
         );
         mark.append(range.extractContents());
 
-        const number = parsed.createElement("sup");
-        number.className = "word-ai-highlight-number";
-        number.textContent = String(match.annotationIndex + 1);
-        mark.append(number);
+        if (match.annotationIndex !== null) {
+          const number = parsed.createElement("sup");
+          number.className = "word-ai-highlight-number";
+          number.textContent = String(match.annotationIndex + 1);
+          mark.append(number);
+        }
         range.insertNode(mark);
       });
   });
@@ -293,7 +346,8 @@ export function WordSubmissionViewer({
           </DialogTitle>
           <DialogDescription>
             AI highlights the original submission text. Red is incorrect, light
-            blue is reviewed and correct, and yellow needs lecturer review.
+            blue means AI reviewed the sentence, and yellow needs lecturer
+            review.
           </DialogDescription>
         </DialogHeader>
 

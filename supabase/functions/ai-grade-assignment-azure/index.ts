@@ -111,6 +111,106 @@ const cleanNumber = (value: unknown, minimum: number, maximum: number) => {
   return Math.min(maximum, Math.max(minimum, parsed));
 };
 
+type GradingStatus = "correct" | "incorrect" | "uncertain";
+
+type NormalizedGradingAnnotation = {
+  comment: string;
+  excerpt: string;
+  fileName: string;
+  page: number | null;
+  status: GradingStatus;
+};
+
+type SubmissionTextSource = {
+  fileName: string;
+  text: string;
+};
+
+const MAX_SENTENCE_ANNOTATIONS = 400;
+
+const normalizeExcerptKey = (value: string) =>
+  value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
+
+const splitReviewSentences = (value: string) => {
+  const seen = new Set<string>();
+  const sentences: string[] = [];
+  const lines = value
+    .replace(/\r/g, "")
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => /[\p{L}\p{N}]/u.test(line));
+
+  for (const line of lines) {
+    const parts =
+      line.match(/[^.!?。！？]+[.!?。！？]+["')\]}]*|[^.!?。！？]+$/g) || [line];
+
+    for (const rawPart of parts) {
+      const sentence = cleanText(rawPart.replace(/\s+/g, " "), "", 700);
+      const key = normalizeExcerptKey(sentence);
+      if (!sentence || key.length < 2 || seen.has(key)) continue;
+      if (!/[\p{L}\p{N}]/u.test(sentence)) continue;
+      seen.add(key);
+      sentences.push(sentence);
+      if (sentences.length >= MAX_SENTENCE_ANNOTATIONS) return sentences;
+    }
+  }
+
+  return sentences;
+};
+
+const expandAnnotationsToSubmissionSentences = (
+  aiAnnotations: NormalizedGradingAnnotation[],
+  textSources: SubmissionTextSource[],
+) => {
+  if (textSources.length === 0) return aiAnnotations;
+
+  const usedAnnotationIndexes = new Set<number>();
+  const sentenceAnnotations: NormalizedGradingAnnotation[] = [];
+
+  for (const source of textSources) {
+    const sentences = splitReviewSentences(source.text);
+    for (const sentence of sentences) {
+      const sentenceKey = normalizeExcerptKey(sentence);
+      const matchedIndex = aiAnnotations.findIndex((annotation, index) => {
+        if (usedAnnotationIndexes.has(index)) return false;
+        const annotationKey = normalizeExcerptKey(annotation.excerpt);
+        return (
+          annotationKey.length > 0 &&
+          (sentenceKey.includes(annotationKey) ||
+            annotationKey.includes(sentenceKey))
+        );
+      });
+      const matchedAnnotation =
+        matchedIndex >= 0 ? aiAnnotations[matchedIndex] : null;
+
+      if (matchedIndex >= 0) usedAnnotationIndexes.add(matchedIndex);
+
+      sentenceAnnotations.push({
+        fileName: source.fileName,
+        page: matchedAnnotation?.page ?? null,
+        status: matchedAnnotation?.status ?? "correct",
+        excerpt: sentence,
+        comment:
+          matchedAnnotation?.comment ||
+          "AI reviewed this sentence; no specific issue was flagged.",
+      });
+
+      if (sentenceAnnotations.length >= MAX_SENTENCE_ANNOTATIONS) {
+        return sentenceAnnotations;
+      }
+    }
+  }
+
+  const unmatchedAnnotations = aiAnnotations.filter(
+    (_, index) => !usedAnnotationIndexes.has(index),
+  );
+
+  return [...sentenceAnnotations, ...unmatchedAnnotations].slice(
+    0,
+    MAX_SENTENCE_ANNOTATIONS,
+  );
+};
+
 const getResponseText = (payload: any) => {
   if (typeof payload?.output_text === "string") {
     return payload.output_text.trim();
@@ -462,6 +562,7 @@ const loadFileParts = async (
   label: string,
   supabaseUrl: string,
   serviceClient: any,
+  extractedTextSources?: SubmissionTextSource[],
 ) => {
   const parts: Array<Record<string, unknown>> = [];
   let totalBytes = 0;
@@ -532,6 +633,12 @@ const loadFileParts = async (
       }
       const limitedText = extractedText.trim().slice(0, remainingChars);
       totalExtractedChars += limitedText.length;
+      if (limitedText) {
+        extractedTextSources?.push({
+          fileName: file.name,
+          text: limitedText,
+        });
+      }
       parts.push({
         type: "input_text",
         text: `${label}: ${file.name}\n${limitedText || "[No readable text found]"}`,
@@ -749,6 +856,9 @@ const gradeJob = async ({
 
   const submissionFiles = normalizeFiles(submission.files);
   const submissionText = cleanText(submission.submission_text, "", 40000);
+  const submissionTextSources: SubmissionTextSource[] = submissionText
+    ? [{ fileName: "Submission text", text: submissionText }]
+    : [];
   if (!submissionText && submissionFiles.length === 0) {
     throw new Error("This submission has no readable text or attached files.");
   }
@@ -786,13 +896,14 @@ const gradeJob = async ({
         "Keep each rubric criterion reason below 25 words.",
         "Keep every warning below 20 words and return no more than 4 warnings.",
         "Also create direct in-document review highlights using the annotations array.",
+        "For every readable sentence in the student's work that you can see, return one annotation.",
+        "Do not skip sentences that you reviewed, even when the sentence is correct or ordinary.",
         "Each annotation excerpt must be copied verbatim from one short, contiguous span of the student's work, not paraphrased and not taken from the rubric or instructions.",
         "Use status correct for work you reviewed and found supported by the rubric, incorrect for a definite error, and uncertain when lecturer judgement or clearer evidence is required.",
         "Use the exact student submission filename shown in the input. Use 'Submission text' when annotating typed submission text.",
         "Include a page number only when it is visible or can be identified confidently; otherwise omit page.",
         "Do not invent quotations, page numbers, calculations, or student claims.",
-        "Return 6 to 18 representative annotations when the submission contains enough readable content.",
-        "Keep every excerpt below 45 words and every annotation comment below 25 words.",
+        "Keep every annotation comment below 18 words. Use brief repeated comments when many sentences are simply reviewed.",
         "",
         `Assessment type: ${cleanText(assignment.assessment_type, "individual_assignment", 100)}`,
         `Assessment title: ${cleanText(assignment.title, "Assessment", 300)}`,
@@ -837,6 +948,7 @@ const gradeJob = async ({
       "Student submission file",
       supabaseUrl,
       serviceClient,
+      submissionTextSources,
     )),
   );
 
@@ -853,7 +965,7 @@ const gradeJob = async ({
                 "Return a shorter grading response.",
                 "Use at most 100 words for feedback and one short sentence per rubric criterion reason.",
                 "Keep one criteria entry for every rubric, guide, or answer scheme section even in this shorter response.",
-                "Return at most 10 annotations, with excerpts below 30 words and comments below 18 words.",
+                "Keep one annotation for every readable student sentence, but make annotation comments very short.",
                 "Return complete valid JSON only.",
               ].join("\n"),
             },
@@ -864,7 +976,7 @@ const gradeJob = async ({
       {
         model: deployment,
         input: [{ role: "user", content: attemptParts }],
-        max_output_tokens: attempt === 0 ? 8192 : 4096,
+        max_output_tokens: attempt === 0 ? 16384 : 8192,
         store: false,
         text: {
           format: {
@@ -919,13 +1031,13 @@ const gradeJob = async ({
   const normalizedSuggestedScore = criteria.length > 0
     ? cleanNumber(criteriaScoreTotal, 0, maxScore)
     : suggestedScore;
-  const annotations = Array.isArray(parsed?.annotations)
+  const aiAnnotations: NormalizedGradingAnnotation[] = Array.isArray(parsed?.annotations)
     ? parsed.annotations
-        .slice(0, 24)
+        .slice(0, MAX_SENTENCE_ANNOTATIONS)
         .map((annotation: any) => {
           const rawStatus = String(annotation?.status);
           const status = ["correct", "incorrect", "uncertain"].includes(rawStatus)
-            ? rawStatus
+            ? (rawStatus as GradingStatus)
             : "uncertain";
           const page = Number(annotation?.page);
           return {
@@ -938,6 +1050,10 @@ const gradeJob = async ({
         })
         .filter((annotation: { excerpt: string }) => annotation.excerpt)
     : [];
+  const annotations = expandAnnotationsToSubmissionSentences(
+    aiAnnotations,
+    submissionTextSources,
+  );
 
   return {
     suggestedScore: normalizedSuggestedScore,
