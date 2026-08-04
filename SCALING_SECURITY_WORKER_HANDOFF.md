@@ -111,19 +111,16 @@ The remote database was verified after the SQL was applied:
 - `ai-grading-request` is not deployed
 - No AI grading Worker Cron job exists
 
-The existing Gemini `ai-grade-assignment` version 5 remains deployed. A separate
-Azure-only replacement now exists locally at
-`supabase/functions/ai-grade-assignment-azure/index.ts`; it has not been
-deployed or connected to the request function.
-
-The Azure Worker is also guarded by `AZURE_OPENAI_WORKER_ENABLED=true`. Without
-that explicit Secret it returns a disabled response before dequeuing any job.
+The AI backend remains Gemini-based. The active grading worker source is
+`supabase/functions/ai-grade-assignment/index.ts`, and the request function
+continues to call `/functions/v1/ai-grade-assignment`.
 
 ## Worker Deployment Order
 
 1. Deploy `supabase/functions/ai-grading-request/index.ts` with JWT verification
    enabled.
-2. Keep the existing Gemini request target until Azure is approved and tested.
+2. Deploy `supabase/functions/ai-grade-assignment/index.ts` with the Gemini
+   secrets configured.
 3. Add a scheduled Worker invocation as a fail-safe. Request-time invocation is
    fast, but a Cron wake-up is still required if the request function or browser
    disappears after enqueueing.
@@ -135,27 +132,6 @@ that explicit Secret it returns a disabled response before dequeuing any job.
 6. Deploy the frontend and run one end-to-end grading test with a private PDF
    or Word submission, then
    verify success, retry, permanent failure, and unauthorized lecturer cases.
-
-## Azure OpenAI Worker Prepared but Disabled
-
-The separate Azure implementation uses the Azure OpenAI v1 Responses API and
-requires these Supabase Edge Function Secrets only when it is activated:
-
-- `AZURE_OPENAI_ENDPOINT`
-- `AZURE_OPENAI_API_KEY`
-- `AZURE_OPENAI_GRADING_DEPLOYMENT`
-- `AZURE_OPENAI_WORKER_ENABLED=true`
-
-The v1 API sends the Azure Deployment Name in `model` and does not require the
-older dated `AZURE_OPENAI_API_VERSION` query parameter. The Worker sends
-`store: false`, uses strict structured output, supports text, PDF, image,
-DOCX, PPTX, and XLSX input, and keeps the lecturer as the final grade
-decision-maker.
-
-When Azure access is available, first test the new function under the separate
-name `ai-grade-assignment-azure`. Only after the test passes should the URL in
-`ai-grading-request` and the fail-safe Cron target be changed from
-`ai-grade-assignment` to `ai-grade-assignment-azure`.
 
 ## Worker Verification SQL
 
@@ -188,7 +164,7 @@ where schemaname = 'public'
 - `npm.cmd run typecheck`
 - `npm.cmd run lint`
 - `npm.cmd run build`
-- `deno check` for `ai-grade-assignment-azure/index.ts`
+- `deno check` for `ai-grade-assignment/index.ts`
 - `git diff --check`
 - Remote verification of private assignment storage, Realtime publication
   removal, Presence jobs, Broadcast policy, migration history, and Edge
@@ -201,7 +177,7 @@ changes are reviewed.
 
 - Enable Supabase Auth leaked-password protection.
 - Configure and test the AI Worker Cron trigger.
-- Confirm Gemini or Azure model quotas, RPM, TPM, concurrency, and monthly cost
+- Confirm Gemini model quotas, RPM, TPM, concurrency, and monthly cost
   alerts.
 - Run realistic load tests before claiming support for 10,000 simultaneous
   users.
