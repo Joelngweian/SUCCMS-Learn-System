@@ -627,7 +627,11 @@ export function StudyGroupsPage() {
   };
 
   const handleDeletePost = async (post: StudyGroupPost) => {
-    if (!selectedGroup) return;
+    if (!selectedGroup || !userId) return;
+    if (post.author_id !== userId) {
+      setDetailError("You can only delete your own messages.");
+      return;
+    }
     if (
       !(await confirmAction({
         title: post.post_type === "resource" ? "Delete resource?" : "Delete message?",
@@ -641,7 +645,7 @@ export function StudyGroupsPage() {
     ) return;
 
     try {
-      await deleteStudyGroupPost(post);
+      await deleteStudyGroupPost(post, userId);
     } catch (error) {
       setDetailError(
         getNotifyMessage(

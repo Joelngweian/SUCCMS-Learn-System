@@ -313,11 +313,12 @@ export async function createStudyGroupPost({
   }
 }
 
-export async function deleteStudyGroupPost(post: StudyGroupPost) {
+export async function deleteStudyGroupPost(post: StudyGroupPost, userId: string) {
   const { error } = await supabase
     .from("study_group_posts")
     .delete()
-    .eq("id", post.id);
+    .eq("id", post.id)
+    .eq("author_id", userId);
   if (error) throw error;
 
   if (post.attachment_path) {

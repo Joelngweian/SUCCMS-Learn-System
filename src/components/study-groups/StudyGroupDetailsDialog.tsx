@@ -467,7 +467,7 @@ export function StudyGroupDetailsDialog({
                             >
                               <span>{isOwnPost ? "You" : post.author.full_name}</span>
                               <span>{formatDateTime(post.created_at)}</span>
-                              {(isOwnPost || selectedGroup.is_owner) && (
+                              {isOwnPost && (
                                 <Button
                                   type="button"
                                   variant="ghost"
