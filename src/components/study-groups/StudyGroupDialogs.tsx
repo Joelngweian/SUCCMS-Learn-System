@@ -1,5 +1,5 @@
-import type { Dispatch, SetStateAction } from "react";
-import { Loader2 } from "lucide-react";
+import { useRef, type Dispatch, type SetStateAction } from "react";
+import { CalendarDays, Loader2 } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -11,6 +11,7 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
+import { cn } from "../ui/utils";
 import {
   Select,
   SelectContent,
@@ -25,14 +26,72 @@ import type {
   NewStudySession,
 } from "./StudyGroupTypes";
 import { GENERAL_STUDY_GROUP_COURSE_ID } from "./StudyGroupTypes";
+import {
+  combineStudySessionDateTimeValue,
+  getStudySessionDateTimeParts,
+  hasCompleteStudySessionDateTimeValue,
+} from "./studySessionDateTime";
 
-const splitDateTimeValue = (value: string) => {
-  const [date = "", time = ""] = value.split("T");
-  return { date, time };
-};
+export const STUDY_SESSION_DATE_DISPLAY_PLACEHOLDER = "yyyy-mm-dd";
+export const STUDY_SESSION_NATIVE_DATE_INPUT_TYPE = "date";
 
-const combineDateTimeValue = (date: string, time: string) =>
-  date && time ? `${date}T${time}` : "";
+interface StudySessionDatePickerProps {
+  ariaLabel: string;
+  value: string;
+  onDateChange: (date: string) => void;
+}
+
+function StudySessionDatePicker({
+  ariaLabel,
+  value,
+  onDateChange,
+}: StudySessionDatePickerProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const openPicker = () => {
+    const input = inputRef.current;
+    if (!input) return;
+
+    input.focus();
+    if (typeof input.showPicker === "function") {
+      try {
+        input.showPicker();
+        return;
+      } catch {
+        // Some browsers block showPicker outside supported trusted interactions.
+      }
+    }
+    input.click();
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        onClick={openPicker}
+        className={cn(
+          "border-input flex h-9 w-full min-w-0 items-center justify-between rounded-md border bg-input-background px-3 py-1 text-left text-base transition-[color,box-shadow] outline-none md:text-sm",
+          "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
+        )}
+      >
+        <span className={value ? "text-foreground" : "text-muted-foreground"}>
+          {value || STUDY_SESSION_DATE_DISPLAY_PLACEHOLDER}
+        </span>
+        <CalendarDays className="h-4 w-4 text-muted-foreground" />
+      </button>
+      <input
+        ref={inputRef}
+        aria-hidden="true"
+        tabIndex={-1}
+        type={STUDY_SESSION_NATIVE_DATE_INPUT_TYPE}
+        value={value}
+        onChange={(event) => onDateChange(event.target.value)}
+        className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
+      />
+    </div>
+  );
+}
 
 interface CreateStudyGroupDialogProps {
   open: boolean;
@@ -168,8 +227,8 @@ export function StudySessionDialog({
   isSaving,
   onSubmit,
 }: StudySessionDialogProps) {
-  const startDateTime = splitDateTimeValue(value.startsAt);
-  const endDateTime = splitDateTimeValue(value.endsAt);
+  const startDateTime = getStudySessionDateTimeParts(value.startsAt);
+  const endDateTime = getStudySessionDateTimeParts(value.endsAt);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -197,18 +256,15 @@ export function StudySessionDialog({
           <div className="space-y-2">
             <Label>Start</Label>
             <div className="grid grid-cols-[minmax(0,1fr)_128px] gap-2">
-              <Input
-                aria-label="Start date"
-                type="text"
-                inputMode="numeric"
-                placeholder="yyyy-mm-dd"
+              <StudySessionDatePicker
+                ariaLabel="Start date"
                 value={startDateTime.date}
-                onChange={(event) =>
+                onDateChange={(date) =>
                   onChange((current) => ({
                     ...current,
-                    startsAt: combineDateTimeValue(
-                      event.target.value,
-                      splitDateTimeValue(current.startsAt).time,
+                    startsAt: combineStudySessionDateTimeValue(
+                      date,
+                      getStudySessionDateTimeParts(current.startsAt).time,
                     ),
                   }))
                 }
@@ -220,8 +276,8 @@ export function StudySessionDialog({
                 onChange={(event) =>
                   onChange((current) => ({
                     ...current,
-                    startsAt: combineDateTimeValue(
-                      splitDateTimeValue(current.startsAt).date,
+                    startsAt: combineStudySessionDateTimeValue(
+                      getStudySessionDateTimeParts(current.startsAt).date,
                       event.target.value,
                     ),
                   }))
@@ -232,18 +288,15 @@ export function StudySessionDialog({
           <div className="space-y-2">
             <Label>End</Label>
             <div className="grid grid-cols-[minmax(0,1fr)_128px] gap-2">
-              <Input
-                aria-label="End date"
-                type="text"
-                inputMode="numeric"
-                placeholder="yyyy-mm-dd"
+              <StudySessionDatePicker
+                ariaLabel="End date"
                 value={endDateTime.date}
-                onChange={(event) =>
+                onDateChange={(date) =>
                   onChange((current) => ({
                     ...current,
-                    endsAt: combineDateTimeValue(
-                      event.target.value,
-                      splitDateTimeValue(current.endsAt).time,
+                    endsAt: combineStudySessionDateTimeValue(
+                      date,
+                      getStudySessionDateTimeParts(current.endsAt).time,
                     ),
                   }))
                 }
@@ -255,8 +308,8 @@ export function StudySessionDialog({
                 onChange={(event) =>
                   onChange((current) => ({
                     ...current,
-                    endsAt: combineDateTimeValue(
-                      splitDateTimeValue(current.endsAt).date,
+                    endsAt: combineStudySessionDateTimeValue(
+                      getStudySessionDateTimeParts(current.endsAt).date,
                       event.target.value,
                     ),
                   }))
@@ -321,8 +374,8 @@ export function StudySessionDialog({
             disabled={
               isSaving ||
               !value.title.trim() ||
-              !value.startsAt ||
-              !value.endsAt ||
+              !hasCompleteStudySessionDateTimeValue(value.startsAt) ||
+              !hasCompleteStudySessionDateTimeValue(value.endsAt) ||
               (value.locationType === "in_person" && !value.locationText.trim())
             }
             onClick={onSubmit}

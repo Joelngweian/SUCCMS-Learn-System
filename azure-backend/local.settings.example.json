@@ -1,0 +1,24 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "DATABASE_URL": "postgresql://user:password@host:5432/succms?sslmode=require",
+    "DATABASE_SSL_REJECT_UNAUTHORIZED": "false",
+    "AUTH_JWKS_URL": "",
+    "AUTH_AUDIENCE": "succms-api",
+    "AUTH_ISSUER": "https://succms-api.local/",
+    "AUTH_JWT_SECRET": "replace-with-at-least-32-random-characters",
+    "AUTH_BOOTSTRAP_KEY": "replace-with-a-temporary-bootstrap-key",
+    "AZURE_STORAGE_ACCOUNT_NAME": "succmsstorage",
+    "AZURE_STORAGE_ACCOUNT_KEY": "replace-with-local-dev-key-only",
+    "AZURE_STORAGE_CONTAINER": "succms-files",
+    "AZURE_SIGNALR_CONNECTION_STRING": "Endpoint=https://example.service.signalr.net;AccessKey=replace;Version=1.0;",
+    "AZURE_SIGNALR_HUB": "succms",
+    "EMAIL_FROM": "no-reply@example.com",
+    "EMAIL_FROM_NAME": "SUCCMS Learn",
+    "SENDGRID_API_KEY": "",
+    "GEMINI_API_KEY": "replace-with-local-dev-key-only",
+    "GEMINI_MODEL": "gemini-2.5-flash"
+  }
+}

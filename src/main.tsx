@@ -10,6 +10,7 @@ import { ThemeProvider } from '@/components/ThemeProvider'
 import { OnlinePresenceProvider } from '@/hooks/useOnlinePresence'
 import { Toaster } from '@/components/ui/sonner'
 import { GlobalConfirmDialog } from '@/components/GlobalConfirmDialog'
+import { StudentProgrammeSetupDialog } from '@/components/StudentProgrammeSetupDialog'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -18,6 +19,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <AuthProvider>
           <OnlinePresenceProvider>
             <App />
+            <StudentProgrammeSetupDialog />
             <GlobalConfirmDialog />
             <Toaster position="top-right" richColors closeButton />
           </OnlinePresenceProvider>

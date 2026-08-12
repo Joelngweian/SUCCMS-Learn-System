@@ -8,6 +8,13 @@ import { Alert, AlertDescription } from "./ui/alert";
 import { Tabs, TabsList, TabsContent, TabsTrigger } from "./ui/tabs";
 import { ArrowRight, Loader2, AlertCircle, BookOpen } from "lucide-react";
 
+type SignupVerificationResult = {
+  requiresEmailVerification?: boolean;
+  email?: string;
+  emailDelivered?: boolean;
+  verificationUrl?: string;
+};
+
 export function Login() {
   const { signIn, signUp } = useAuth();
   
@@ -15,6 +22,7 @@ export function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>("");
   const [info, setInfo] = useState<string>("");
+  const [verificationUrl, setVerificationUrl] = useState<string>("");
 
   // Sign In State
   const [loginEmail, setLoginEmail] = useState('');
@@ -31,6 +39,7 @@ export function Login() {
     setIsLoading(true);
     setError("");
     setInfo("");
+    setVerificationUrl("");
     
     const { error: signInError } = await signIn(loginEmail, loginPassword);
     
@@ -45,10 +54,11 @@ export function Login() {
     setIsLoading(true);
     setError("");
     setInfo("");
+    setVerificationUrl("");
 
 
-    if (signupPassword.length < 6) {
-      setError("Password must be at least 6 characters.");
+    if (signupPassword.length < 8) {
+      setError("Password must be at least 8 characters.");
       setIsLoading(false);
       return;
     }
@@ -59,7 +69,7 @@ export function Login() {
       return;
     }
 
-    const { error: signUpError } = await signUp(
+    const { data: signUpData, error: signUpError } = await signUp(
       signupEmail, 
       signupPassword, 
       signupUsername, 
@@ -70,7 +80,14 @@ export function Login() {
       setError(signUpError.message);
       setIsLoading(false);
     } else {
-      setInfo("Account created! Please check your email to verify your account before signing in.");
+      const signupResult = signUpData as SignupVerificationResult | null;
+      const verificationLink = signupResult?.verificationUrl;
+      setVerificationUrl(verificationLink || "");
+      setInfo(
+        verificationLink
+          ? "Account created. Confirm your email with the testing link below before signing in."
+          : "Account created. Please check your email to confirm your account before signing in."
+      );
       setAuthMode('signin');
       setLoginEmail(signupEmail);
       setIsLoading(false);
@@ -132,7 +149,19 @@ export function Login() {
             {info && (
               <Alert className="mb-4 bg-green-50 text-green-900 border-green-200">
                 <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{info}</AlertDescription>
+                <AlertDescription className="space-y-2">
+                  <p>{info}</p>
+                  {verificationUrl && (
+                    <a
+                      href={verificationUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block break-all text-blue-700 underline"
+                    >
+                      Open email verification link
+                    </a>
+                  )}
+                </AlertDescription>
               </Alert>
             )}
 

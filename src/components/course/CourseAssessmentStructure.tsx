@@ -73,8 +73,14 @@ const createClientId = () =>
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random()}`;
 
-const formatNumber = (value: number) =>
-  Number.isInteger(value) ? value.toString() : value.toFixed(2);
+const formatNumber = (value: number | string) => {
+  const numericValue =
+    typeof value === "number" ? value : Number.parseFloat(String(value));
+  if (!Number.isFinite(numericValue)) return "0";
+  return Number.isInteger(numericValue)
+    ? numericValue.toString()
+    : numericValue.toFixed(2);
+};
 
 const getTotalWeight = (values: CourseAssessmentValues) =>
   values.reduce((total, item) => total + item.weightPercentage, 0);

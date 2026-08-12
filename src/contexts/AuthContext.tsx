@@ -1,14 +1,36 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Session, User } from '@supabase/supabase-js';
+import React, { createContext, useCallback, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase.ts';
 import { getBroadcastNewRecord, subscribeToPrivateBroadcast } from '@/lib/realtime';
+import { azureAuth, AzureAuthSession, AzureAuthUser, isAzureAuthEnabled } from '@/lib/azureApi';
 
 const AUTH_PROFILE_SELECT =
   'id, full_name, username, role, faculty, programme, avatar_url, cover_url, bio, is_active';
 
-type PublicSignupRole = 'student' | 'lecturer' | 'staff' | 'admin';
+type AuthUser = {
+  id: string;
+  email?: string;
+  aud?: string;
+  role?: string;
+  created_at?: string;
+  updated_at?: string;
+  last_sign_in_at?: string | null;
+  app_metadata?: Record<string, unknown>;
+  user_metadata?: Record<string, unknown>;
+};
+
+type AuthSession = {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  expires_at?: number;
+  refresh_token: string;
+  user: AuthUser;
+};
+
+type PublicSignupRole = 'student';
 
 const SUC_EMAIL_DOMAIN = '@sc.edu.my';
+const AUTH_PROVIDER_IS_AZURE = isAzureAuthEnabled();
 
 const resolveSignupRoleFromEmail = (email: string): PublicSignupRole | null => {
   const normalizedEmail = email.trim().toLowerCase();
@@ -19,8 +41,6 @@ const resolveSignupRoleFromEmail = (email: string): PublicSignupRole | null => {
 
   const emailPrefix = normalizedEmail.slice(0, -SUC_EMAIL_DOMAIN.length);
 
-  if (emailPrefix.startsWith('st')) return 'staff';
-  if (emailPrefix.startsWith('lc')) return 'lecturer';
   if (
     emailPrefix.startsWith('d') ||
     emailPrefix.startsWith('b') ||
@@ -39,11 +59,11 @@ export type UserProfile = {
   username?: string | null;
   email: string;
   role: 'student' | 'lecturer' | 'staff' | 'admin';
-  faculty?: string;   
-  programme?: string; 
-  avatar_url?: string; // <--- Added this
-  cover_url?: string;  // <--- Added this
-  bio?: string;        // <--- Added this
+  faculty?: string | null;
+  programme?: string | null;
+  avatar_url?: string | null;
+  cover_url?: string | null;
+  bio?: string | null;
   is_active?: boolean;
 };
 
@@ -61,9 +81,9 @@ type EditableUserProfile = Partial<
 >;
 
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
   profile: UserProfile | null;
-  session: Session | null;
+  session: AuthSession | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<AuthActionResult>;
   signUp: (
@@ -111,15 +131,53 @@ const getLoginClientInfo = () => {
   return { browser, device };
 };
 
+const toSupabaseCompatibleUser = (azureUser: AzureAuthUser): AuthUser =>
+  ({
+    id: azureUser.id,
+    email: azureUser.email,
+    aud: 'authenticated',
+    role: 'authenticated',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    app_metadata: {},
+    user_metadata: {
+      full_name: azureUser.fullName,
+    },
+  });
+
+const toSupabaseCompatibleSession = (azureSession: AzureAuthSession): AuthSession =>
+  ({
+    access_token: azureSession.accessToken,
+    token_type: azureSession.tokenType,
+    expires_in: azureSession.expiresInSeconds,
+    expires_at: Math.floor(azureSession.expiresAt / 1000),
+    refresh_token: '',
+    user: toSupabaseCompatibleUser(azureSession.user),
+  });
+
+const toUserProfile = (azureUser: AzureAuthUser): UserProfile => ({
+  id: azureUser.id,
+  full_name: azureUser.fullName || azureUser.email,
+  username: null,
+  email: azureUser.email,
+  role: azureUser.role,
+  faculty: azureUser.faculty ?? null,
+  programme: azureUser.programme ?? null,
+  avatar_url: undefined,
+  cover_url: undefined,
+  bio: undefined,
+  is_active: true,
+});
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const userId = user?.id;
 
   // Load User Data
-  const loadUserAndProfile = async (session: Session) => {
+  const loadUserAndProfile = useCallback(async (session: AuthSession) => {
     if (!session?.user) {
       setProfile(null);
       setUser(null);
@@ -147,9 +205,42 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } else {
       console.error("Profile load error:", error);
     }
-  };
+  }, []);
+
+  const loadAzureUserAndProfile = useCallback(async (azureSession: AzureAuthSession) => {
+    const compatibleSession = toSupabaseCompatibleSession(azureSession);
+    setSession(compatibleSession);
+    setUser(compatibleSession.user);
+    setProfile(toUserProfile(azureSession.user));
+    await loadUserAndProfile(compatibleSession);
+  }, [loadUserAndProfile]);
 
   useEffect(() => {
+    if (AUTH_PROVIDER_IS_AZURE) {
+      const restoreSession = async () => {
+        try {
+          const storedSession = azureAuth.loadSession();
+          if (!storedSession) return;
+
+          const user = await azureAuth.me(storedSession.accessToken);
+          const nextSession = { ...storedSession, user };
+          azureAuth.saveSession(nextSession);
+          await loadAzureUserAndProfile(nextSession);
+        } catch (error) {
+          console.warn('Failed to restore Azure auth session:', error);
+          azureAuth.clearSession();
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      void restoreSession();
+      return;
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) loadUserAndProfile(session);
@@ -167,7 +258,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [loadAzureUserAndProfile, loadUserAndProfile]);
 
   useEffect(() => {
     if (!userId) return;
@@ -189,6 +280,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // --- Auth Functions ---
 
   const signIn = async (email: string, password: string) => {
+    if (AUTH_PROVIDER_IS_AZURE) {
+      try {
+        const azureSession = await azureAuth.login(email.trim().toLowerCase(), password);
+        azureAuth.saveSession(azureSession);
+        await loadAzureUserAndProfile(azureSession);
+        return { data: azureSession, error: null };
+      } catch (error) {
+        return {
+          data: null,
+          error: {
+            message: error instanceof Error ? error.message : 'Unable to sign in.',
+          },
+        };
+      }
+    }
+
     const result = await supabase.auth.signInWithPassword({ email, password });
     if (result.error || !result.data.user) return result;
 
@@ -262,7 +369,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           data: null,
           error: {
             message:
-              "We could not identify your account type from this SUC email. AARO staff emails must start with ST, lecturer emails with LC, and student emails with D, B, or P.",
+              "Only student SUC emails starting with D, B, or P can register.",
           },
         };
       }
@@ -310,6 +417,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
     setProfile(null);
     setSession(null);
+    if (AUTH_PROVIDER_IS_AZURE) {
+      azureAuth.clearSession();
+      return;
+    }
     await supabase.auth.signOut();
   };
 
@@ -340,6 +451,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const refreshProfile = async () => {
+    if (AUTH_PROVIDER_IS_AZURE) {
+      const storedSession = azureAuth.loadSession();
+      if (!storedSession) return;
+
+      const azureUser = await azureAuth.me(storedSession.accessToken);
+      const nextSession = { ...storedSession, user: azureUser };
+      azureAuth.saveSession(nextSession);
+      await loadAzureUserAndProfile(nextSession);
+      return;
+    }
+
     if (session) await loadUserAndProfile(session);
   };
 

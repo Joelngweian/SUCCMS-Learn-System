@@ -228,7 +228,10 @@ export function CoursePage({ courseId, onBack }: CoursePageProps) {
               />
             )}
             {activeTab === "people" && (
-              <CoursePeopleSection courseId={courseId} />
+              <CoursePeopleSection
+                courseId={courseId}
+                courseOwnerId={course.owner_id}
+              />
             )}
           </Suspense>
         </CourseTabErrorBoundary>

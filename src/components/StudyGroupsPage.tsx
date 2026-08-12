@@ -28,6 +28,7 @@ import {
   setStudySessionAttendance,
 } from "./study-groups/studyGroupData";
 import { useStudyGroupsBrowserState } from "./study-groups/useStudyGroupsBrowserState";
+import { hasCompleteStudySessionDateTimeValue } from "./study-groups/studySessionDateTime";
 
 const CreateStudyGroupDialog = lazy(() =>
   import("./study-groups/StudyGroupDialogs").then(module => ({
@@ -451,8 +452,8 @@ export function StudyGroupsPage() {
     if (
       !selectedGroup ||
       !newSession.title.trim() ||
-      !newSession.startsAt ||
-      !newSession.endsAt ||
+      !hasCompleteStudySessionDateTimeValue(newSession.startsAt) ||
+      !hasCompleteStudySessionDateTimeValue(newSession.endsAt) ||
       !user
     ) {
       return;

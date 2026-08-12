@@ -1,7 +1,26 @@
-import type { RealtimeChannel } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase";
+import {
+  HubConnectionBuilder,
+  HubConnectionState,
+  HttpTransportType,
+  LogLevel,
+  type HubConnection,
+} from "@microsoft/signalr";
+import { azureApiFetch, azureAuth } from "@/lib/azureApi";
 
 type BroadcastHandler = (payload: unknown) => void;
+type AzureRealtimeMessage = {
+  event?: string;
+  payload?: unknown;
+  topic?: string;
+};
+type AzureSubscription = {
+  event: string;
+  handler: BroadcastHandler;
+  topic: string;
+};
+const azureSubscriptions = new Set<AzureSubscription>();
+let azureConnection: HubConnection | null = null;
+let azureConnectionPromise: Promise<HubConnection> | null = null;
 
 export function subscribeToPrivateBroadcast({
   event = "*",
@@ -12,26 +31,96 @@ export function subscribeToPrivateBroadcast({
   onMessage: BroadcastHandler;
   topic: string;
 }) {
-  let channel: RealtimeChannel | null = null;
-  let disposed = false;
+  return subscribeToAzureBroadcast({ event, onMessage, topic });
+}
 
-  void supabase.realtime
-    .setAuth()
-    .then(() => {
-      if (disposed) return;
-      channel = supabase
-        .channel(topic, { config: { private: true } })
-        .on("broadcast", { event }, onMessage)
-        .subscribe();
-    })
-    .catch((error) => {
-      console.warn(`Realtime subscription failed for ${topic}:`, error);
-    });
+export async function broadcastToPrivateTopic({
+  event = "UPDATE",
+  payload,
+  topic,
+}: {
+  event?: string;
+  payload?: unknown;
+  topic: string;
+}) {
+  return azureApiFetch<{ sent: boolean }>("/api/signalr/broadcast", {
+    method: "POST",
+    body: JSON.stringify({ event, payload, topic }),
+  });
+}
+
+function subscribeToAzureBroadcast({
+  event,
+  onMessage,
+  topic,
+}: {
+  event: string;
+  onMessage: BroadcastHandler;
+  topic: string;
+}) {
+  const subscription = {
+    event,
+    handler: onMessage,
+    topic,
+  };
+  azureSubscriptions.add(subscription);
+
+  void getAzureRealtimeConnection().catch((error) => {
+    console.warn(`Azure realtime subscription failed for ${topic}:`, error);
+  });
 
   return () => {
-    disposed = true;
-    if (channel) void supabase.removeChannel(channel);
+    azureSubscriptions.delete(subscription);
   };
+}
+
+async function getAzureRealtimeConnection() {
+  if (azureConnection?.state === HubConnectionState.Connected) {
+    return azureConnection;
+  }
+  if (azureConnectionPromise) return azureConnectionPromise;
+
+  azureConnectionPromise = startAzureRealtimeConnection();
+  try {
+    azureConnection = await azureConnectionPromise;
+    return azureConnection;
+  } finally {
+    azureConnectionPromise = null;
+  }
+}
+
+async function startAzureRealtimeConnection() {
+  const apiUrl = import.meta.env.VITE_AZURE_API_URL?.replace(/\/+$/, "");
+  if (!apiUrl) throw new Error("Azure API URL is not configured.");
+
+  const connection = new HubConnectionBuilder()
+    .withUrl(`${apiUrl}/api/signalr`, {
+      accessTokenFactory: () => azureAuth.loadSession()?.accessToken || "",
+      transport: HttpTransportType.WebSockets,
+      withCredentials: false,
+    })
+    .withAutomaticReconnect()
+    .configureLogging(LogLevel.Warning)
+    .build();
+
+  connection.on("broadcast", (message: AzureRealtimeMessage) => {
+    if (!message?.topic) return;
+    azureSubscriptions.forEach(subscription => {
+      if (subscription.topic !== message.topic) return;
+      if (subscription.event !== "*" && subscription.event !== message.event) return;
+      subscription.handler({
+        event: message.event,
+        payload: message.payload,
+      });
+    });
+  });
+
+  connection.onclose(() => {
+    azureConnection = null;
+  });
+
+  await connection.start();
+  return connection;
 }
 
 export function getBroadcastNewRecord<T>(message: unknown): T | null {

@@ -16,6 +16,7 @@ import type { CoursePerson } from "./coursePageTypes";
 
 type CourseMemberRow =
   Database["public"]["Functions"]["get_course_members"]["Returns"][number];
+type UserProfileRow = Database["public"]["Tables"]["user_profiles"]["Row"];
 
 const mapCourseMemberToPerson = (member: CourseMemberRow): CoursePerson => ({
   id: member.id,
@@ -34,10 +35,49 @@ const mapCourseMemberToPerson = (member: CourseMemberRow): CoursePerson => ({
   programme: member.programme,
 });
 
-export function useCoursePeople(courseId: string) {
+const mapUserProfileToPerson = (profile: UserProfileRow): CoursePerson => ({
+  id: profile.id,
+  email: profile.email,
+  full_name: profile.full_name,
+  username: profile.username,
+  role: profile.role,
+  program_or_department: profile.program_or_department,
+  avatar_url: profile.avatar_url,
+  bio: profile.bio,
+  created_at: profile.created_at,
+  updated_at: profile.updated_at,
+  is_active: profile.is_active,
+  cover_url: profile.cover_url,
+  faculty: profile.faculty,
+  programme: profile.programme,
+});
+
+const USER_PROFILE_SELECT =
+  "id, email, full_name, username, role, program_or_department, avatar_url, bio, created_at, updated_at, is_active, cover_url, faculty, programme";
+
+export function useCoursePeople(courseId: string, ownerUserId?: string | null) {
   const [people, setPeople] = useState<CoursePerson[]>([]);
   const [availableStudents, setAvailableStudents] = useState<CoursePerson[]>([]);
   const [addStudentSearchQuery, setAddStudentSearchQuery] = useState("");
+
+  const addOwnerFallback = useCallback(async (members: CoursePerson[]) => {
+    if (!ownerUserId || members.some(person => person.id === ownerUserId)) {
+      return members;
+    }
+
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .select(USER_PROFILE_SELECT)
+      .eq("id", ownerUserId)
+      .maybeSingle();
+
+    if (error || !data) {
+      if (error) console.warn("Course owner profile fallback failed:", error);
+      return members;
+    }
+
+    return [mapUserProfileToPerson(data), ...members];
+  }, [ownerUserId]);
 
   const fetchPeople = useCallback(async () => {
     try {
@@ -46,11 +86,12 @@ export function useCoursePeople(courseId: string) {
       });
 
       if (error) throw error;
-      setPeople((data || []).map(mapCourseMemberToPerson));
+      const members = (data || []).map(mapCourseMemberToPerson);
+      setPeople(await addOwnerFallback(members));
     } catch (error) {
       console.error("Error fetching people:", error);
     }
-  }, [courseId]);
+  }, [addOwnerFallback, courseId]);
 
   const fetchAvailableStudents = useCallback(async () => {
     try {
@@ -58,9 +99,7 @@ export function useCoursePeople(courseId: string) {
       const { studentIds: enrolledIds } = await getCourseMemberIds(courseId);
       let query = supabase
         .from("user_profiles")
-        .select(
-          "id, full_name, username, role, program_or_department, avatar_url, bio, created_at, updated_at, is_active, cover_url, faculty, programme",
-        )
+        .select(USER_PROFILE_SELECT)
         .eq("role", "student");
 
       if (enrolledIds.length > 0) {

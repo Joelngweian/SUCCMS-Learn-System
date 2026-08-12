@@ -7,6 +7,7 @@ import {
 } from "react";
 import { notify } from "@/lib/notify";
 import { supabase } from "@/lib/supabase";
+import { normalizeStoragePathForBucket } from "@/lib/storagePath";
 import type { Story, StoryUser } from "./storyTypes";
 import {
   getStoryNetworkUserIds,
@@ -30,12 +31,7 @@ const getStoredViewedIds = () => {
 };
 
 const getStoryStoragePath = (publicUrl: string) => {
-  const marker = "/storage/v1/object/public/stories/";
-  const markerIndex = publicUrl.indexOf(marker);
-  if (markerIndex < 0) return null;
-  return decodeURIComponent(
-    publicUrl.slice(markerIndex + marker.length).split("?")[0],
-  );
+  return normalizeStoragePathForBucket(publicUrl, "stories");
 };
 
 export function useStoriesData({

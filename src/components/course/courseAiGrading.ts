@@ -4,6 +4,7 @@ import {
   type RubricGradeItem,
 } from "./coursePageTypes";
 import { getErrorMessage } from "./courseStorage";
+import { azureApiFetch, isAzureAuthEnabled } from "@/lib/azureApi";
 
 export type AiGradeResponse = {
   error?: string;
@@ -28,6 +29,7 @@ export type AiGradeResponse = {
 
 export type AiGradeRequestResponse = {
   error?: string;
+  error_message?: string | null;
   jobId?: string;
   status?: "queued" | "processing" | "completed" | "failed";
 };
@@ -37,9 +39,32 @@ export type AiGradingJobBroadcastRow = {
   status?: AiGradeRequestResponse["status"];
 };
 
+export type AiGradingJobStatusResponse = {
+  id: string;
+  status: AiGradeRequestResponse["status"];
+  result?: AiGradeResponse | null;
+  error_message?: string | null;
+};
+
 export const AI_GRADING_POLL_TIMEOUT_MS = 10 * 60 * 1000;
 export const AI_GRADING_WORKER_RETRY_MS = 60 * 1000;
 export const AI_GRADING_FALLBACK_POLL_MS = 20 * 1000;
+
+export const shouldUseAzureAiGrading = isAzureAuthEnabled;
+
+export const requestAzureAiGrading = (
+  assignmentId: string,
+  studentId: string,
+) =>
+  azureApiFetch<AiGradeRequestResponse>("/api/ai/grading-requests", {
+    method: "POST",
+    body: JSON.stringify({ assignmentId, studentId }),
+  });
+
+export const getAzureAiGradingJob = (jobId: string) =>
+  azureApiFetch<AiGradingJobStatusResponse>(
+    `/api/ai/grading-jobs/${encodeURIComponent(jobId)}`,
+  );
 
 export const clampWholeScore = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, Math.round(value)));

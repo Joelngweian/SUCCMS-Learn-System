@@ -149,8 +149,14 @@ export function CourseManagement() {
 
   const getCourseCode = (course: NormalizedCourseOffering) =>
     course.course_code || course.code || "N/A";
-  const formatAssessmentPercent = (value: number) =>
-    Number.isInteger(value) ? value.toString() : value.toFixed(1);
+  const formatAssessmentPercent = (value: number | string | null | undefined) => {
+    const numericValue =
+      typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+    if (!Number.isFinite(numericValue)) return "0";
+    return Number.isInteger(numericValue)
+      ? numericValue.toString()
+      : numericValue.toFixed(1);
+  };
 
   const CompactAssessmentSummary = ({
     structure,

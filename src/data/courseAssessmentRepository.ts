@@ -81,6 +81,12 @@ export const cloneAssessmentValues = (
 const normalizeIds = (ids: string[]) =>
   [...new Set(ids.filter(Boolean))].sort();
 
+const toNumber = (value: unknown, fallback = 0) => {
+  const numericValue =
+    typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+  return Number.isFinite(numericValue) ? numericValue : fallback;
+};
+
 export const assessmentRowsToValues = (
   rows: CourseAssessmentItem[],
 ): CourseAssessmentValues =>
@@ -91,8 +97,8 @@ export const assessmentRowsToValues = (
       clientId: row.id,
       itemType: row.item_type as AssessmentItemType,
       title: row.title,
-      maxMarks: row.max_marks,
-      weightPercentage: row.weight_percentage,
+      maxMarks: toNumber(row.max_marks),
+      weightPercentage: toNumber(row.weight_percentage),
     }));
 
 const toRpcItems = (values: CourseAssessmentValues): Json =>

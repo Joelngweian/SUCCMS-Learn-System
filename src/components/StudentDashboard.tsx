@@ -100,7 +100,7 @@ const buildHourlyAttendanceRows = (
 
   const hourlyRows = sessions
     .filter((session) =>
-      COMPLETED_ATTENDANCE_SESSION_STATUSES.has(session.status.toLowerCase())
+      COMPLETED_ATTENDANCE_SESSION_STATUSES.has(String(session.status || "").toLowerCase())
     )
     .sort((a, b) => {
       const dateOrder = b.class_date.localeCompare(a.class_date);

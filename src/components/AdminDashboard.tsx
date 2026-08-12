@@ -7,6 +7,7 @@ import {
 } from "react";
 import { supabase } from "@/lib/supabase";
 import { subscribeToPrivateBroadcast } from "@/lib/realtime";
+import { normalizeStoragePathForBucket } from "@/lib/storagePath";
 import type { Json } from "@/lib/database.types";
 import { useAuth } from "@/contexts/AuthContext";
 import { notify } from "@/lib/notify";
@@ -351,12 +352,7 @@ export function AdminDashboard() {
   };
 
   const getStoryStoragePath = (imageUrl: string | null) => {
-    if (!imageUrl) return null;
-    const marker = "/storage/v1/object/public/stories/";
-    const markerIndex = imageUrl.indexOf(marker);
-    return markerIndex >= 0
-      ? decodeURIComponent(imageUrl.slice(markerIndex + marker.length))
-      : null;
+    return normalizeStoragePathForBucket(imageUrl, "stories");
   };
 
   const handleRemoveStory = async (report: ReportedItem) => {

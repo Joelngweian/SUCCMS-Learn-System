@@ -13,10 +13,19 @@ coverage/
 # Local editor and tool state
 .idea/
 .docx_qa/
+.codegraph/
+.codex_tmp/
 supabase/.temp/
 
 # Runtime logs
 *.log
+
+# Local generated artifacts and backups
+outputs/
+*.dump
+azure-backend/.deploy-package-*/
+azure-backend/.codex-last-azure-package.txt
+azure-backend/*.zip
 
 # Local code-change history
 admin_announcements_history.txt
@@ -27,4 +36,3 @@ coursepage_history.txt
 body.txt
 extracted_text.txt
 temp.txt
-

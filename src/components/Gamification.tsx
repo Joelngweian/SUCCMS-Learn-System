@@ -116,7 +116,7 @@ const receivesAttendanceCredit = (record: AttendanceProgressRecord) => {
 };
 
 const isCompletedAttendanceSession = (session: AttendanceProgressSession) =>
-  COMPLETED_ATTENDANCE_SESSION_STATUSES.has(session.status.toLowerCase());
+  COMPLETED_ATTENDANCE_SESSION_STATUSES.has(String(session.status || "").toLowerCase());
 
 const calculateAttendanceProgress = (
   attendanceRows: AttendanceProgressRecord[],
@@ -171,8 +171,12 @@ const calculateStreak = (dates: string[]) => {
   return streak;
 };
 
-const formatPercentage = (value: number | null) =>
-  value == null ? "--" : `${value.toFixed(0)}%`;
+const formatPercentage = (value: number | string | null) => {
+  if (value == null) return "--";
+  const numericValue =
+    typeof value === "number" ? value : Number.parseFloat(String(value));
+  return Number.isFinite(numericValue) ? `${numericValue.toFixed(0)}%` : "--";
+};
 
 export function Gamification() {
   const { user, profile } = useAuth();

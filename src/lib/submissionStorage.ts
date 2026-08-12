@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { azureApiFetch, isAzureAuthEnabled } from "@/lib/azureApi";
 
 export const ASSIGNMENT_SUBMISSIONS_BUCKET = "assignment-submissions";
 
@@ -23,6 +24,17 @@ export async function resolveSubmissionFileUrl(
 ) {
   if (file.url) return file.url;
   if (/^https?:\/\//i.test(file.path)) return file.path;
+
+  if (isAzureAuthEnabled()) {
+    const data = await azureApiFetch<{ url: string }>(
+      "/api/storage/read-url",
+      {
+        method: "POST",
+        body: JSON.stringify({ path: file.path, expiresInSeconds: 300 }),
+      },
+    );
+    return data.url;
+  }
 
   const bucket = file.bucket || ASSIGNMENT_SUBMISSIONS_BUCKET;
   const { data, error } = await supabase.storage

@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { isAzureAuthEnabled } from "@/lib/azureApi";
 import { supabase } from "@/lib/supabase";
 
 export interface OnlineUser {
@@ -65,6 +66,12 @@ export function OnlinePresenceProvider({ children }: { children: ReactNode }) {
     if (!userId) {
       setOnlineUsers([]);
       setOnlineCount(0);
+      return;
+    }
+
+    if (isAzureAuthEnabled()) {
+      setOnlineUsers([]);
+      setOnlineCount(1);
       return;
     }
 

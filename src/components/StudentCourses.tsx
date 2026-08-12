@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext.tsx";
 import { subscribeToPrivateBroadcast } from "@/lib/realtime";
-import { PROGRAMMES } from "@/lib/programmes";
 import {
   type NormalizedCourseOffering,
 } from "@/lib/courseOfferings";
@@ -88,14 +87,13 @@ const getErrorMessage = (error: unknown, fallback: string) => {
 };
 
 export function StudentCourses() {
-  const { profile, updateProfile } = useAuth();
+  const { profile } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
   // Data State
   const [enrolledCourses, setEnrolledCourses] = useState<Course[]>([]);
   const [availableCourses, setAvailableCourses] = useState<Course[]>([]);
-  const [programmeOptions, setProgrammeOptions] = useState<{faculty: string, programme: string}[]>([]);
   
   // UI State
   const [isLoading, setIsLoading] = useState(true);
@@ -120,15 +118,6 @@ export function StudentCourses() {
   const [isEnrolling, setIsEnrolling] = useState(false);
   const [studyPlanMessage, setStudyPlanMessage] = useState<string | null>(null);
 
-  // Profile Setup State
-  const [showProfileSetup, setShowProfileSetup] = useState(false);
-  const [selectedLevel, setSelectedLevel] = useState<string | null>(null);
-  const [programmeSearch, setProgrammeSearch] = useState("");
-  const [modalCurrentPage, setModalCurrentPage] = useState(1);
-  const [selectedProgrammeObj, setSelectedProgrammeObj] = useState<{faculty: string, programme: string} | null>(null);
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
-  const [profileSetupError, setProfileSetupError] = useState("");
-
   const profileId = profile?.id;
   const profileEmail = profile?.email;
   const profileRole = profile?.role;
@@ -152,14 +141,6 @@ export function StudentCourses() {
   }, [searchTerm]);
 
   // --- 2. Data Fetching ---
-
-  const fetchProgrammeOptions = () => {
-    const options = PROGRAMMES.map(p => ({
-      faculty: p.level,
-      programme: p.name
-    }));
-    setProgrammeOptions(options);
-  };
 
   const fetchData = useCallback(async () => {
     if (!profileId) return;
@@ -314,11 +295,10 @@ export function StudentCourses() {
   useEffect(() => {
     if (!profileId) return;
     if (!profileFaculty || !profileProgramme) {
-      setShowProfileSetup(true);
-      fetchProgrammeOptions();
-    } else {
-      void fetchData();
+      setIsLoading(false);
+      return;
     }
+    void fetchData();
   }, [fetchData, profileFaculty, profileId, profileProgramme]);
 
   useEffect(() => {
@@ -350,25 +330,6 @@ export function StudentCourses() {
   }, [fetchData, profileId, profileRole]);
 
   // --- 3. Actions ---
-
-  const handleProfileSave = async () => {
-    if (!selectedProgrammeObj) return;
-    setIsSavingProfile(true);
-    setProfileSetupError("");
-    
-    const { error } = await updateProfile({
-      faculty: selectedProgrammeObj.faculty,
-      programme: selectedProgrammeObj.programme
-    });
-
-    if (!error) {
-      setShowProfileSetup(false);
-      fetchData();
-    } else {
-      setProfileSetupError(getErrorMessage(error, "Failed to save programme selection."));
-    }
-    setIsSavingProfile(false);
-  };
 
   const handleEnrollClick = (course: Course) => {
     setEnrollmentError("");
@@ -421,8 +382,14 @@ export function StudentCourses() {
     return course.instructors.map((instructor) => instructor.full_name).join(", ");
   };
   const hasAssignedLecturer = (course: Course) => Boolean(course.instructors?.length);
-  const formatAssessmentPercent = (value: number) =>
-    Number.isInteger(value) ? value.toString() : value.toFixed(1);
+  const formatAssessmentPercent = (value: number | string) => {
+    const numericValue =
+      typeof value === "number" ? value : Number.parseFloat(String(value));
+    if (!Number.isFinite(numericValue)) return "0";
+    return Number.isInteger(numericValue)
+      ? numericValue.toString()
+      : numericValue.toFixed(1);
+  };
 
   const CompactAssessmentSummary = ({
     structure,
@@ -477,10 +444,6 @@ export function StudentCourses() {
   const paginatedCourses = filteredAvailableCourses.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE,
-  );
-
-  const filteredProgrammes = programmeOptions.filter(p => 
-    p.programme.toLowerCase().includes(programmeSearch.toLowerCase())
   );
 
   // --- 4. Render Logic ---
@@ -740,136 +703,6 @@ export function StudentCourses() {
                 : null
             }
           />
-        </DialogContent>
-      </Dialog>
-
-      {/* --- DIALOG: PROFILE SETUP --- */}
-      <Dialog open={showProfileSetup} onOpenChange={() => {}}>
-        <DialogContent className="max-w-md" hideCloseButton onInteractOutside={(event) => event.preventDefault()}>
-          <DialogHeader>
-            <DialogTitle>Welcome! Select your Programme</DialogTitle>
-            <DialogDescription>
-              Please search and select your current study programme to continue.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-2">
-            {!selectedLevel ? (
-                // STEP 1: Select Level
-                <div className="space-y-2">
-                    <p className="text-sm font-medium mb-3">1. Select Level of Study</p>
-                    <div className="grid grid-cols-1 gap-2">
-                        {Array.from(new Set(programmeOptions.map(p => p.faculty || "Other"))).map(level => (
-                            <button
-                                key={level}
-                                onClick={() => setSelectedLevel(level)}
-                                className="w-full text-left px-4 py-3 text-sm rounded-md border bg-card hover:bg-accent transition-colors flex justify-between items-center"
-                            >
-                                <span>{level}</span>
-                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            ) : (
-                // STEP 2: Select Programme
-                <div className="space-y-3">
-                    <div className="flex items-center gap-2 mb-2">
-                        <Button variant="ghost" size="sm" onClick={() => { setSelectedLevel(null); setSelectedProgrammeObj(null); setProgrammeSearch(""); setModalCurrentPage(1); }} className="h-8 px-2">
-                            <ChevronLeft className="h-4 w-4 mr-1" /> Back
-                        </Button>
-                        <span className="text-sm font-medium truncate">{selectedLevel}</span>
-                    </div>
-                    
-                    <div className="relative">
-                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                        <Input 
-                            placeholder="Search programmes..." 
-                            className="pl-8"
-                            value={programmeSearch}
-                            onChange={(e) => {
-                                setProgrammeSearch(e.target.value);
-                                setModalCurrentPage(1);
-                            }}
-                        />
-                    </div>
-                    
-                    <div className="border rounded-md p-2 bg-muted/10 min-h-[280px] flex flex-col">
-                        {(() => {
-                            const levelProgrammes = filteredProgrammes.filter(p => p.faculty === selectedLevel);
-                            const totalModalPages = Math.ceil(levelProgrammes.length / 5);
-                            const paginatedLevelProgrammes = levelProgrammes.slice((modalCurrentPage - 1) * 5, modalCurrentPage * 5);
-
-                            if (levelProgrammes.length === 0) {
-                                return (
-                                    <div className="h-full flex-1 flex items-center justify-center text-muted-foreground text-sm">
-                                        No programmes found.
-                                    </div>
-                                );
-                            }
-
-                            return (
-                                <>
-                                    <div className="space-y-1 flex-1">
-                                        {paginatedLevelProgrammes.map((opt, idx) => (
-                                            <button
-                                                key={idx}
-                                                onClick={() => setSelectedProgrammeObj(opt)}
-                                                className={`w-full text-left px-3 py-3 text-sm rounded-md transition-colors border ${
-                                                    selectedProgrammeObj?.programme === opt.programme 
-                                                    ? 'bg-primary text-primary-foreground border-primary' 
-                                                    : 'bg-card hover:bg-accent border-transparent'
-                                                }`}
-                                            >
-                                                {opt.programme}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    
-                                    {totalModalPages > 1 && (
-                                        <div className="flex items-center justify-between pt-4 mt-auto border-t">
-                                            <Button 
-                                                variant="outline" 
-                                                size="sm" 
-                                                onClick={() => setModalCurrentPage(p => Math.max(1, p - 1))}
-                                                disabled={modalCurrentPage === 1}
-                                                className="h-8"
-                                            >
-                                                <ChevronLeft className="h-4 w-4" /> Prev
-                                            </Button>
-                                            <span className="text-xs text-muted-foreground">
-                                                {modalCurrentPage} / {totalModalPages}
-                                            </span>
-                                            <Button 
-                                                variant="outline" 
-                                                size="sm" 
-                                                onClick={() => setModalCurrentPage(p => Math.min(totalModalPages, p + 1))}
-                                                disabled={modalCurrentPage === totalModalPages}
-                                                className="h-8"
-                                            >
-                                                Next <ChevronRight className="h-4 w-4" />
-                                            </Button>
-                                        </div>
-                                    )}
-                                </>
-                            );
-                        })()}
-                    </div>
-                </div>
-            )}
-            {profileSetupError && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{profileSetupError}</AlertDescription>
-              </Alert>
-            )}
-          </div>
-          <DialogFooter>
-            <Button onClick={handleProfileSave} disabled={!selectedProgrammeObj || isSavingProfile}>
-              {isSavingProfile && <Loader2 className="animate-spin mr-2 h-4 w-4" />}
-              Confirm Selection
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 

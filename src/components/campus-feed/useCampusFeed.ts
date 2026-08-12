@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { confirmAction } from "@/lib/confirm";
+import type { Database } from "@/lib/database.types";
 import { getNotifyMessage, notify } from "@/lib/notify";
 import { subscribeToPrivateBroadcast } from "@/lib/realtime";
 import { supabase } from "@/lib/supabase";
@@ -15,14 +16,12 @@ import {
   normalizeCampusPostAttachments,
   type CampusPost,
   type CampusPostAttachment,
+  type CampusPostReaction,
   type SelectedCampusMedia,
 } from "./campusFeedTypes";
 import {
   CAMPUS_POST_PAGE_SIZE,
-  normalizeCampusPost,
   signCampusPostMedia,
-  type CampusPostCursor,
-  type CampusPostPageRow,
 } from "./campusFeedData";
 import {
   MAX_CAMPUS_POST_MEDIA_FILES,
@@ -33,6 +32,28 @@ import {
   uploadCampusPostMedia,
 } from "./campusFeedStorage";
 import { useCampusComments } from "./useCampusComments";
+
+type CampusPostRow = Database["public"]["Tables"]["campus_posts"]["Row"];
+type CampusPostReactionRow =
+  Database["public"]["Tables"]["campus_post_reactions"]["Row"];
+type CampusPostCommentRow =
+  Database["public"]["Tables"]["campus_post_comments"]["Row"];
+type CampusAuthorRow = Pick<
+  Database["public"]["Tables"]["user_profiles"]["Row"],
+  "avatar_url" | "full_name" | "id" | "is_active" | "role"
+>;
+
+const campusReactionValues = new Set<string>([
+  "like",
+  "love",
+  "celebrate",
+  "support",
+]);
+
+const toCampusReaction = (value: unknown): CampusPostReaction | null =>
+  typeof value === "string" && campusReactionValues.has(value)
+    ? value as CampusPostReaction
+    : null;
 
 export function useCampusFeed() {
   const { profile, user } = useAuth();
@@ -49,7 +70,7 @@ export function useCampusFeed() {
   const [composerError, setComposerError] = useState("");
   const [hasMore, setHasMore] = useState(false);
   const [newPostsAvailable, setNewPostsAvailable] = useState(false);
-  const nextCursorRef = useRef<CampusPostCursor | null>(null);
+  const nextOffsetRef = useRef(0);
   const previewUrlsRef = useRef(new Set<string>());
   const {
     addComment,
@@ -68,10 +89,7 @@ export function useCampusFeed() {
     setSelectedMedia([]);
   }, []);
 
-  const fetchPosts = useCallback(async (
-    cursor: CampusPostCursor | null = null,
-    append = false,
-  ) => {
+  const fetchPosts = useCallback(async (append = false) => {
     if (append) {
       setIsLoadingMore(true);
     } else {
@@ -80,24 +98,113 @@ export function useCampusFeed() {
     }
 
     try {
-      const { data, error } = await supabase.rpc("get_campus_posts_page", {
-        p_before_created_at: cursor?.createdAt || null,
-        p_before_id: cursor?.id || null,
-        p_limit: CAMPUS_POST_PAGE_SIZE + 1,
-      });
+      const from = append ? nextOffsetRef.current : 0;
+      const to = from + CAMPUS_POST_PAGE_SIZE - 1;
+      const { data, error, count } = await supabase
+        .from("campus_posts")
+        .select("id, author_id, content, attachments, created_at, updated_at", {
+          count: "exact",
+        })
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to);
       if (error) throw error;
 
-      const rows = (data || []) as CampusPostPageRow[];
-      const pageRows = rows.slice(0, CAMPUS_POST_PAGE_SIZE);
-      const page = await signCampusPostMedia(
-        pageRows.map(normalizeCampusPost),
-      );
-      const lastRow = pageRows.at(-1);
+      const rows = (data || []) as CampusPostRow[];
+      const postIds = rows.map(row => row.id);
+      const authorIds = Array.from(new Set(rows.map(row => row.author_id)));
 
-      nextCursorRef.current = lastRow
-        ? { createdAt: lastRow.created_at, id: lastRow.id }
-        : null;
-      setHasMore(rows.length > CAMPUS_POST_PAGE_SIZE);
+      const [
+        authorResult,
+        reactionResult,
+        commentResult,
+      ] = await Promise.all([
+        authorIds.length > 0
+          ? supabase
+              .from("user_profiles")
+              .select("id, full_name, avatar_url, role, is_active")
+              .in("id", authorIds)
+          : Promise.resolve({ data: [], error: null }),
+        postIds.length > 0
+          ? supabase
+              .from("campus_post_reactions")
+              .select("post_id, user_id, reaction")
+              .in("post_id", postIds)
+          : Promise.resolve({ data: [], error: null }),
+        postIds.length > 0
+          ? supabase
+              .from("campus_post_comments")
+              .select("post_id")
+              .in("post_id", postIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (authorResult.error) throw authorResult.error;
+      if (reactionResult.error) throw reactionResult.error;
+      if (commentResult.error) throw commentResult.error;
+
+      const authorsById = new Map(
+        ((authorResult.data || []) as CampusAuthorRow[]).map(author => [
+          author.id,
+          author,
+        ]),
+      );
+      const reactions = (reactionResult.data || []) as CampusPostReactionRow[];
+      const comments = (commentResult.data || []) as Pick<
+        CampusPostCommentRow,
+        "post_id"
+      >[];
+      const reactionCountByPostId = new Map<string, number>();
+      const commentCountByPostId = new Map<string, number>();
+      const viewerReactionByPostId = new Map<string, CampusPostReaction>();
+
+      reactions.forEach(reaction => {
+        reactionCountByPostId.set(
+          reaction.post_id,
+          (reactionCountByPostId.get(reaction.post_id) || 0) + 1,
+        );
+        if (reaction.user_id === userId) {
+          const viewerReaction = toCampusReaction(reaction.reaction);
+          if (viewerReaction) {
+            viewerReactionByPostId.set(reaction.post_id, viewerReaction);
+          }
+        }
+      });
+      comments.forEach(comment => {
+        commentCountByPostId.set(
+          comment.post_id,
+          (commentCountByPostId.get(comment.post_id) || 0) + 1,
+        );
+      });
+
+      const page = await signCampusPostMedia(
+        rows
+          .map(row => {
+            const author = authorsById.get(row.author_id);
+            if (author?.is_active === false) return null;
+
+            return {
+              id: row.id,
+              authorId: row.author_id,
+              authorName: author?.full_name || "Campus member",
+              authorAvatarUrl: author?.avatar_url || null,
+              authorRole: author?.role || "student",
+              content: row.content,
+              attachments: normalizeCampusPostAttachments(row.attachments),
+              createdAt: row.created_at,
+              updatedAt: row.updated_at,
+              reactionCount: reactionCountByPostId.get(row.id) || 0,
+              commentCount: commentCountByPostId.get(row.id) || 0,
+              viewerReaction: viewerReactionByPostId.get(row.id) || null,
+            } satisfies CampusPost;
+          })
+          .filter((post): post is CampusPost => post !== null),
+      );
+
+      const loadedCount = from + rows.length;
+      nextOffsetRef.current = loadedCount;
+      setHasMore(typeof count === "number"
+        ? loadedCount < count
+        : rows.length === CAMPUS_POST_PAGE_SIZE);
       setPosts(current => {
         if (!append) return page;
         const existingIds = new Set(current.map(post => post.id));
@@ -118,7 +225,7 @@ export function useCampusFeed() {
       setIsLoading(false);
       setIsLoadingMore(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     void fetchPosts();
@@ -165,14 +272,14 @@ export function useCampusFeed() {
   }, [userId]);
 
   const refreshPosts = useCallback(async () => {
-    nextCursorRef.current = null;
+    nextOffsetRef.current = 0;
     setNewPostsAvailable(false);
     await fetchPosts();
   }, [fetchPosts]);
 
   const loadMorePosts = useCallback(async () => {
-    if (!hasMore || isLoadingMore || !nextCursorRef.current) return;
-    await fetchPosts(nextCursorRef.current, true);
+    if (!hasMore || isLoadingMore) return;
+    await fetchPosts(true);
   }, [fetchPosts, hasMore, isLoadingMore]);
 
   const addSelectedMedia = (files: File[]) => {

@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import type { Database } from "@/lib/database.types";
+import { normalizeStoragePathForBucket } from "@/lib/storagePath";
 
 export const COURSE_OFFERING_SELECT = "id, course_id, academic_term_id, owner_id, section_code, enrollment_key, max_capacity, status, created_at, updated_at, courses(id, code, name, description, lecturer_id, credits, max_students, created_at, updated_at, course_code, chinese_name, faculty, programme, course_type, credit_hours, max_capacity, enrollment_key, status), academic_terms(id, code, name, starts_at, ends_at, status, created_at, updated_at)";
 
@@ -108,16 +109,7 @@ export function normalizeCourseOffering(
 }
 
 function extractStoragePath(value: unknown, bucket: string) {
-  if (typeof value !== "string" || !value) return null;
-
-  const marker = `/storage/v1/object/public/${bucket}/`;
-  const markerIndex = value.indexOf(marker);
-  if (markerIndex >= 0) {
-    return decodeURIComponent(value.slice(markerIndex + marker.length).split("?")[0]);
-  }
-
-  if (/^https?:\/\//i.test(value)) return null;
-  return value.replace(/^\/+/, "");
+  return normalizeStoragePathForBucket(value, bucket);
 }
 
 function collectAttachmentPaths(

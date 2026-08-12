@@ -277,7 +277,8 @@ export const UserProfile = () => {
   const getDisplayUrl = (url: string | null) => {
     if (!url) return undefined;
     if (url.startsWith("blob:")) return url;
-    return `${url}?t=${imageHash}`;
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}t=${imageHash}`;
   };
 
   if (isLoading) {

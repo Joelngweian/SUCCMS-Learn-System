@@ -10,6 +10,8 @@ import {
 import { supabase } from "@/lib/supabase";
 import { confirmAction } from "@/lib/confirm";
 import { notify } from "@/lib/notify";
+import { azureApiFetch, isAzureAuthEnabled } from "@/lib/azureApi";
+import { uploadFileToAzureBlob } from "@/lib/azureStorage";
 import {
   ASSIGNMENT_SUBMISSIONS_BUCKET,
   removeSubmissionFiles,
@@ -37,9 +39,12 @@ import {
   AI_GRADING_WORKER_RETRY_MS,
   clampWholeScore,
   createRubricGrades,
+  getAzureAiGradingJob,
   getFunctionErrorMessage,
   getRubricGradeTotal,
   normalizeAiGradeDetails,
+  requestAzureAiGrading,
+  shouldUseAzureAiGrading,
   type AiGradeRequestResponse,
   type AiGradeResponse,
   type AiGradingJobBroadcastRow,
@@ -56,10 +61,12 @@ import {
 } from "./courseUploadFormats";
 import type { AssessmentDraft } from "@/lib/assessmentTypes";
 import { usesAiMarkingGuideFile } from "@/lib/assessmentTypes";
-import type { Json } from "@/lib/database.types";
+import type { Database, Json } from "@/lib/database.types";
 
 const COURSE_CONTENT_BUCKET = "course_content";
 const MAX_ASSIGNMENT_FILE_SIZE = 8 * 1024 * 1024;
+type AssignmentRow = Database["public"]["Tables"]["assignments"]["Row"];
+type SubmissionRow = Database["public"]["Tables"]["assignment_submissions"]["Row"];
 
 const emptyAssignmentDraft: AssessmentDraft = {
   assessment_type: "",
@@ -110,7 +117,35 @@ export function useCourseAssignments({
   >([]);
   const assignmentDraftPathsRef = useRef(new Set<string>());
 
+  const loadAzureCourseSubmissions = useCallback(async () => {
+    const data = await azureApiFetch<SubmissionRow[]>(
+      `/api/course/${courseId}/submissions`,
+    );
+    return data.map(normalizeCourseSubmission);
+  }, [courseId]);
+
   const fetchAssignments = useCallback(async () => {
+    if (isAzureAuthEnabled()) {
+      try {
+        const [data, submissions] = await Promise.all([
+          azureApiFetch<AssignmentRow[]>(
+          `/api/course/${courseId}/assignments`,
+          ),
+          loadAzureCourseSubmissions(),
+        ]);
+        setAssignments(data.map(normalizeCourseAssignment));
+        if (isLecturer) {
+          setAllSubmissions(submissions);
+        } else {
+          setMySubmissions(submissions);
+        }
+      } catch (error) {
+        console.error("Failed to load assignments:", error);
+        return;
+      }
+      return;
+    }
+
     const { data, error } = await supabase
       .from("assignments")
       .select(ASSIGNMENT_SELECT)
@@ -134,10 +169,22 @@ export function useCourseAssignments({
       }
       setMySubmissions((submissions || []).map(normalizeCourseSubmission));
     }
-  }, [courseId, isLecturer, userId]);
+  }, [courseId, isLecturer, loadAzureCourseSubmissions, userId]);
 
   const fetchSubmissionsForAssignment = useCallback(
     async (assignmentId: string) => {
+      if (isAzureAuthEnabled()) {
+        try {
+          const submissions = await loadAzureCourseSubmissions();
+          setAllSubmissions(
+            submissions.filter(item => item.assignment_id === assignmentId),
+          );
+        } catch (error) {
+          console.error("Failed to load assignment submissions:", error);
+        }
+        return;
+      }
+
       const { data, error } = await supabase
         .from("assignment_submissions")
         .select(SUBMISSION_SELECT)
@@ -148,7 +195,7 @@ export function useCourseAssignments({
       }
       setAllSubmissions((data || []).map(normalizeCourseSubmission));
     },
-    [],
+    [loadAzureCourseSubmissions],
   );
 
   useEffect(() => {
@@ -164,6 +211,16 @@ export function useCourseAssignments({
       return;
     }
     if (!userId) return;
+
+    if (isAzureAuthEnabled()) {
+      const submission = mySubmissions.find(
+        item => item.assignment_id === selectedAssignment.id,
+      );
+      if (submission) {
+        setSubmissionFiles(submission.files || []);
+      }
+      return;
+    }
 
     let active = true;
     void supabase
@@ -190,6 +247,7 @@ export function useCourseAssignments({
   }, [
     fetchSubmissionsForAssignment,
     isLecturer,
+    mySubmissions,
     selectedAssignment,
     userId,
   ]);
@@ -214,6 +272,8 @@ export function useCourseAssignments({
     }
 
     if (!selectedAssignment) return;
+    if (isAzureAuthEnabled()) return;
+
     let active = true;
     void supabase
       .from("ai_grading_jobs")
@@ -288,46 +348,69 @@ export function useCourseAssignments({
     const usesMarkingGuide = usesAiMarkingGuideFile(newAssign.assessment_type);
     const rubricFiles = usesMarkingGuide ? [] : newRubricFiles;
     const markingGuideFiles = usesMarkingGuide ? newMarkingGuideFiles : [];
-
-    const { data: createdAssignment, error } = await supabase
-      .from("assignments")
-      .insert({
-        course_id: courseId,
-        assessment_type: newAssign.assessment_type,
-        title: newAssign.title.trim(),
-        description: newAssign.description,
-        rubric:
-          rubricFiles.length > 0 ? JSON.stringify(rubricFiles) : null,
-        max_score: newAssign.points ? parseInt(newAssign.points, 10) : null,
-        due_date: new Date(newAssign.due_date).toISOString(),
-        attachments: newAssignFiles,
-        created_by: userId,
-      })
-      .select("id")
-      .single();
-
-    if (error) {
-      console.error("Error creating assignment:", error);
-      notify.error(error, "Failed to create assessment.");
-      return;
-    }
-
+    const assignmentPayload = {
+      course_id: courseId,
+      assessment_type: newAssign.assessment_type,
+      title: newAssign.title.trim(),
+      description: newAssign.description,
+      rubric: rubricFiles.length > 0 ? JSON.stringify(rubricFiles) : null,
+      max_score: newAssign.points ? parseInt(newAssign.points, 10) : null,
+      due_date: new Date(newAssign.due_date).toISOString(),
+      attachments: newAssignFiles,
+      created_by: userId,
+    };
     const markingGuide = markingGuideFiles.length > 0
       ? JSON.stringify(markingGuideFiles)
       : newAssign.marking_guide.trim();
-    if (markingGuide && createdAssignment?.id) {
-      const { error: guideError } = await supabase
-        .from("assignment_marking_guides")
-        .upsert({
-          assignment_id: createdAssignment.id,
-          marking_guide: markingGuide,
-          updated_by: userId,
-          updated_at: new Date().toISOString(),
-        });
 
-      if (guideError) {
-        console.error("Error saving marking guide:", guideError);
-        notify.error(guideError, "Assessment created, but marking guide was not saved.");
+    if (isAzureAuthEnabled()) {
+      try {
+        await azureApiFetch<{ id: string }>("/api/course/assignments", {
+          method: "POST",
+          body: JSON.stringify({
+            courseId: assignmentPayload.course_id,
+            assessmentType: assignmentPayload.assessment_type,
+            title: assignmentPayload.title,
+            description: assignmentPayload.description,
+            rubric: assignmentPayload.rubric,
+            maxScore: assignmentPayload.max_score,
+            dueDate: assignmentPayload.due_date,
+            attachments: assignmentPayload.attachments,
+            markingGuide,
+          }),
+        });
+      } catch (error) {
+        console.error("Error creating assignment:", error);
+        notify.error(error, "Failed to create assessment.");
+        return;
+      }
+    } else {
+      const { data: createdAssignment, error } = await supabase
+        .from("assignments")
+        .insert(assignmentPayload)
+        .select("id")
+        .single();
+
+      if (error) {
+        console.error("Error creating assignment:", error);
+        notify.error(error, "Failed to create assessment.");
+        return;
+      }
+
+      if (markingGuide && createdAssignment?.id) {
+        const { error: guideError } = await supabase
+          .from("assignment_marking_guides")
+          .upsert({
+            assignment_id: createdAssignment.id,
+            marking_guide: markingGuide,
+            updated_by: userId,
+            updated_at: new Date().toISOString(),
+          });
+
+        if (guideError) {
+          console.error("Error saving marking guide:", guideError);
+          notify.error(guideError, "Assessment created, but marking guide was not saved.");
+        }
       }
     }
 
@@ -421,6 +504,28 @@ export function useCourseAssignments({
     const existing = mySubmissions.find(
       item => item.assignment_id === selectedAssignment.id,
     );
+    if (isAzureAuthEnabled()) {
+      try {
+        const savedSubmission = await azureApiFetch<SubmissionRow>(
+          `/api/assignments/${selectedAssignment.id}/submission`,
+          {
+            method: "POST",
+            body: JSON.stringify({ files: submissionFiles }),
+          },
+        );
+        const submission = normalizeCourseSubmission(savedSubmission);
+        setMySubmissions(current => [
+          ...current.filter(
+            item => item.assignment_id !== selectedAssignment.id,
+          ),
+          submission,
+        ]);
+      } catch (error) {
+        notify.error(error, "Failed to turn in assignment.");
+      }
+      return;
+    }
+
     const result = existing
       ? await supabase
           .from("assignment_submissions")
@@ -457,6 +562,25 @@ export function useCourseAssignments({
         item.assignment_id === selectedAssignment.id
         && item.student_id === userId,
     );
+    if (isAzureAuthEnabled()) {
+      try {
+        await azureApiFetch<{ deleted: boolean }>(
+          `/api/assignments/${selectedAssignment.id}/submission`,
+          { method: "DELETE" },
+        );
+      } catch (error) {
+        notify.error(error, "Failed to undo submission.");
+        return;
+      }
+      setMySubmissions(current =>
+        current.filter(
+          item => item.assignment_id !== selectedAssignment.id,
+        ),
+      );
+      setSubmissionFiles([]);
+      return;
+    }
+
     const { error } = await supabase
       .from("assignment_submissions")
       .delete()
@@ -497,6 +621,34 @@ export function useCourseAssignments({
     const existingSubmission = allSubmissions.find(
       item => item.student_id === gradingStudentId,
     );
+    if (isAzureAuthEnabled()) {
+      if (!existingSubmission) {
+        notify.warning("This student has not submitted the assignment yet.");
+        return;
+      }
+
+      try {
+        await azureApiFetch<SubmissionRow>(
+          `/api/assignment-submissions/${existingSubmission.id}/grade`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              grade: Math.round(numericGrade),
+              feedback: currentFeedback,
+              rubricGrades,
+            }),
+          },
+        );
+      } catch (error) {
+        notify.error(error, "Failed to save grade.");
+        return;
+      }
+
+      notify.success("Grade saved.");
+      await fetchSubmissionsForAssignment(selectedAssignment.id);
+      return;
+    }
+
     const gradeData = {
       grade: Math.round(numericGrade),
       feedback: currentFeedback,
@@ -537,28 +689,44 @@ export function useCourseAssignments({
     setAiGradeDetails(null);
     setIsAiGrading(true);
     try {
-      const { data: requestData, error: requestError } =
-        await supabase.functions.invoke<AiGradeRequestResponse>(
-          "ai-grading-request",
-          {
-            body: {
-              assignmentId: selectedAssignment.id,
-              studentId: gradingStudentId,
-            },
-          },
-        );
+      const useAzureAiGrading = shouldUseAzureAiGrading();
+      let requestData: AiGradeRequestResponse | null = null;
 
-      if (requestError) {
-        throw new Error(
-          await getFunctionErrorMessage(
-            requestError,
-            "The AI grading service could not be reached.",
-          ),
+      if (useAzureAiGrading) {
+        requestData = await requestAzureAiGrading(
+          selectedAssignment.id,
+          gradingStudentId,
         );
+      } else {
+        const { data, error: requestError } =
+          await supabase.functions.invoke<AiGradeRequestResponse>(
+            "ai-grading-request",
+            {
+              body: {
+                assignmentId: selectedAssignment.id,
+                studentId: gradingStudentId,
+              },
+            },
+          );
+
+        if (requestError) {
+          throw new Error(
+            await getFunctionErrorMessage(
+              requestError,
+              "The AI grading service could not be reached.",
+            ),
+          );
+        }
+        requestData = data;
       }
       if (requestData?.error) throw new Error(requestData.error);
       if (!requestData?.jobId) {
         throw new Error("The AI grading service did not return a job ID.");
+      }
+      if (requestData.status === "failed") {
+        throw new Error(
+          requestData.error_message || "AI grading failed. Please try again.",
+        );
       }
 
       notify.info("AI grading started. You can continue using the course page.");
@@ -594,23 +762,29 @@ export function useCourseAssignments({
           signalTimer = window.setTimeout(finish, milliseconds);
         });
       };
-      const stopAiGradingBroadcast = subscribeToPrivateBroadcast({
-        topic: `user:${userId}:ai-grading`,
-        onMessage: message => {
-          const row = getBroadcastNewRecord<AiGradingJobBroadcastRow>(message);
-          if (row?.id === requestData.jobId) signalJobCheck();
-        },
-      });
+      const stopAiGradingBroadcast = useAzureAiGrading
+        ? () => undefined
+        : subscribeToPrivateBroadcast({
+            topic: `user:${userId}:ai-grading`,
+            onMessage: message => {
+              const row = getBroadcastNewRecord<AiGradingJobBroadcastRow>(message);
+              if (row?.id === requestData.jobId) signalJobCheck();
+            },
+          });
 
       try {
         while (Date.now() - pollingStartedAt < AI_GRADING_POLL_TIMEOUT_MS) {
-          const { data: job, error: jobError } = await supabase
-            .from("ai_grading_jobs")
-            .select("status, result, error_message")
-            .eq("id", requestData.jobId)
-            .maybeSingle();
-
-          if (jobError) throw jobError;
+          const job = useAzureAiGrading
+            ? await getAzureAiGradingJob(requestData.jobId)
+            : await supabase
+                .from("ai_grading_jobs")
+                .select("status, result, error_message")
+                .eq("id", requestData.jobId)
+                .maybeSingle()
+                .then(({ data, error }) => {
+                  if (error) throw error;
+                  return data;
+                });
 
           if (job?.status === "completed") {
             data = job.result as unknown as AiGradeResponse;
@@ -628,15 +802,19 @@ export function useCourseAssignments({
           // message while an active worker still owns it.
           const now = Date.now();
           if (now >= nextWorkerRetryAt) {
-            void supabase.functions.invoke<AiGradeRequestResponse>(
-              "ai-grading-request",
-              {
-                body: {
-                  assignmentId: selectedAssignment.id,
-                  studentId: gradingStudentId,
+            if (useAzureAiGrading) {
+              void requestAzureAiGrading(selectedAssignment.id, gradingStudentId);
+            } else {
+              void supabase.functions.invoke<AiGradeRequestResponse>(
+                "ai-grading-request",
+                {
+                  body: {
+                    assignmentId: selectedAssignment.id,
+                    studentId: gradingStudentId,
+                  },
                 },
-              },
-            );
+              );
+            }
             nextWorkerRetryAt = now + AI_GRADING_WORKER_RETRY_MS;
           }
 
@@ -731,6 +909,16 @@ export function useCourseAssignments({
 
     try {
       for (const file of files) {
+        if (isAzureAuthEnabled()) {
+          const domain = bucket === ASSIGNMENT_SUBMISSIONS_BUCKET
+            ? "assignment-submissions"
+            : "course-content";
+          const uploadedFile = await uploadFileToAzureBlob(domain, file);
+          uploadedPaths.push(uploadedFile.path);
+          uploadedFiles.push(uploadedFile);
+          continue;
+        }
+
         const filePath = getFilePath(file);
         const { error } = await supabase.storage
           .from(bucket)
@@ -748,7 +936,7 @@ export function useCourseAssignments({
       }
       return uploadedFiles;
     } catch (error) {
-      if (uploadedPaths.length > 0) {
+      if (uploadedPaths.length > 0 && !isAzureAuthEnabled()) {
         await supabase.storage.from(bucket).remove(uploadedPaths);
       }
       notify.error(error, "Failed to upload file.");

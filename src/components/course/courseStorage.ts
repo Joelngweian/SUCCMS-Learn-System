@@ -1,4 +1,6 @@
 import { supabase } from "@/lib/supabase";
+import { isAzureAuthEnabled } from "@/lib/azureApi";
+import { normalizeStoragePathForBucket } from "@/lib/storagePath";
 import type { CoursePostFile } from "./coursePageTypes";
 
 export const getErrorMessage = (error: unknown, fallback: string) => {
@@ -11,17 +13,7 @@ export const getErrorMessage = (error: unknown, fallback: string) => {
 };
 
 export const getCourseContentStoragePath = (file: CoursePostFile) => {
-  const value = typeof file.path === "string" ? file.path : "";
-  if (!value) return null;
-  if (!value.startsWith("http")) return value;
-
-  const marker = "/storage/v1/object/public/course_content/";
-  const markerIndex = value.indexOf(marker);
-  if (markerIndex < 0) return null;
-
-  return decodeURIComponent(
-    value.slice(markerIndex + marker.length).split("?")[0],
-  );
+  return normalizeStoragePathForBucket(file.path, "course_content");
 };
 
 export const removeCourseContentPaths = async (
@@ -31,6 +23,7 @@ export const removeCourseContentPaths = async (
     new Set(paths.filter((path): path is string => Boolean(path))),
   );
   if (uniquePaths.length === 0) return null;
+  if (isAzureAuthEnabled()) return null;
 
   const { error } = await supabase.storage
     .from("course_content")

@@ -1,9 +1,26 @@
 import {
+  AzureCommunicationTokenCredential,
+  type CommunicationIdentifierKind,
+} from "@azure/communication-common";
+import {
+  CallClient,
+  LocalVideoStream,
+  VideoStreamRenderer,
+  type Call,
+  type CallAgent,
+  type DeviceManager,
+  type RemoteParticipant,
+  type RemoteVideoStream,
+  type VideoDeviceInfo,
+  type VideoStreamRendererView,
+} from "@azure/communication-calling";
+import {
   type ButtonHTMLAttributes,
   forwardRef,
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -49,6 +66,12 @@ import {
 } from "../ui/sheet";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  broadcastToPrivateTopic,
+  subscribeToPrivateBroadcast,
+} from "@/lib/realtime";
+import { getAcsMeetingRoomAccess } from "@/lib/acs";
 import type {
   StudyGroupMember,
   StudyGroupSummary,
@@ -80,6 +103,41 @@ const formatSessionTime = (value: string) =>
     minute: "2-digit",
   });
 
+const formatChatTime = (value: string) =>
+  new Date(value).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+const getRoomBroadcastPayload = (
+  message: unknown,
+): RoomBroadcastPayload | null => {
+  if (!message || typeof message !== "object") return null;
+
+  const envelopePayload = (message as { payload?: unknown }).payload;
+  const payload =
+    envelopePayload && typeof envelopePayload === "object"
+      ? envelopePayload
+      : message;
+
+  if (!payload || typeof payload !== "object" || !("type" in payload)) {
+    return null;
+  }
+
+  const type = (payload as { type?: unknown }).type;
+  if (
+    type !== "join" &&
+    type !== "status" &&
+    type !== "leave" &&
+    type !== "chat" &&
+    type !== "reaction"
+  ) {
+    return null;
+  }
+
+  return payload as RoomBroadcastPayload;
+};
+
 type AudioMode = "computer" | "room" | "none";
 
 type ActiveRoomPanel = "chat" | "people" | null;
@@ -98,6 +156,55 @@ const meetingReactions = [
 type MediaDeviceOption = {
   id: string;
   label: string;
+};
+
+type RoomParticipantState = {
+  userId: string;
+  name: string;
+  avatarUrl: string | null;
+  role: string;
+  cameraOn: boolean;
+  micOn: boolean;
+  handRaised: boolean;
+  screenSharing: boolean;
+  joinedAt: string;
+  lastSeenAt: number;
+};
+
+type RoomParticipant = StudyGroupMember & {
+  cameraOn: boolean;
+  micOn: boolean;
+  handRaised: boolean;
+  screenSharing: boolean;
+  isCurrentUser: boolean;
+};
+
+type RoomChatMessage = {
+  id: string;
+  authorId: string | null;
+  author: string;
+  message: string;
+  createdAt: string;
+};
+
+type RoomBroadcastPayload =
+  | { type: "join" | "status"; participant: RoomParticipantState }
+  | { type: "leave"; userId: string }
+  | { type: "chat"; message: RoomChatMessage }
+  | {
+      type: "reaction";
+      userId: string;
+      author: string;
+      reaction: string;
+      createdAt: string;
+    };
+
+type AcsRemoteMediaTile = {
+  id: string;
+  participantId: string;
+  displayName: string;
+  kind: "Video" | "ScreenSharing";
+  target: HTMLElement;
 };
 
 const defaultMicrophoneDevices: MediaDeviceOption[] = [
@@ -139,6 +246,17 @@ type BrowserWindowWithAudioContext = Window &
   typeof globalThis & {
     webkitAudioContext?: typeof AudioContext;
   };
+
+const getCommunicationIdentifierKey = (
+  identifier: CommunicationIdentifierKind | undefined,
+) => {
+  if (!identifier) return "unknown";
+  if ("communicationUserId" in identifier) return identifier.communicationUserId;
+  if ("phoneNumber" in identifier) return identifier.phoneNumber;
+  if ("microsoftTeamsUserId" in identifier) return identifier.microsoftTeamsUserId;
+  if ("rawId" in identifier) return identifier.rawId;
+  return JSON.stringify(identifier);
+};
 
 type AudioLevelMeterProps = {
   activeBars: number;
@@ -340,6 +458,25 @@ const RoomToolbarButton = forwardRef<HTMLButtonElement, RoomToolbarButtonProps>(
 
 RoomToolbarButton.displayName = "RoomToolbarButton";
 
+type AcsMediaViewProps = {
+  target: HTMLElement;
+  className?: string;
+};
+
+function AcsMediaView({ target, className }: AcsMediaViewProps) {
+  const containerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node) return;
+      if (target.parentElement !== node) {
+        node.replaceChildren(target);
+      }
+    },
+    [target],
+  );
+
+  return <div ref={containerRef} className={className} />;
+}
+
 export function StudyGroupMeetingRoomPreview({
   group,
   members,
@@ -347,6 +484,7 @@ export function StudyGroupMeetingRoomPreview({
   isLoadingMembers,
   onBack,
 }: StudyGroupMeetingRoomPreviewProps) {
+  const { profile, user } = useAuth();
   const [hasJoinedPreview, setHasJoinedPreview] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [isMicOn, setIsMicOn] = useState(true);
@@ -372,20 +510,328 @@ export function StudyGroupMeetingRoomPreview({
   const [isSharingScreen, setIsSharingScreen] = useState(false);
   const [selectedReaction, setSelectedReaction] = useState<string | null>(null);
   const [roomChatMessage, setRoomChatMessage] = useState("");
-  const [roomChatMessages, setRoomChatMessages] = useState([
+  const [roomChatMessages, setRoomChatMessages] = useState<RoomChatMessage[]>([
     {
       id: "welcome",
+      authorId: null,
       author: "SUCCMS Room",
       message: "Meeting chat is ready.",
+      createdAt: new Date().toISOString(),
     },
   ]);
+  const [roomParticipantStates, setRoomParticipantStates] = useState<
+    Record<string, RoomParticipantState>
+  >({});
   const activeMicrophoneBarsRef = useRef(0);
+  const hasPublishedJoinRef = useRef(false);
   const cameraPreviewRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenPreviewRef = useRef<HTMLVideoElement | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
+  const localVideoContainerRef = useRef<HTMLDivElement | null>(null);
+  const callClientRef = useRef<CallClient | null>(null);
+  const callAgentRef = useRef<CallAgent | null>(null);
+  const deviceManagerRef = useRef<DeviceManager | null>(null);
+  const callRef = useRef<Call | null>(null);
+  const localVideoStreamRef = useRef<LocalVideoStream | null>(null);
+  const localVideoRendererRef = useRef<VideoStreamRenderer | null>(null);
+  const localVideoViewRef = useRef<VideoStreamRendererView | null>(null);
+  const remoteRenderersRef = useRef<
+    Record<string, { renderer: VideoStreamRenderer; view: VideoStreamRendererView }>
+  >({});
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [screenShareError, setScreenShareError] = useState<string | null>(null);
+  const [meetingRoomError, setMeetingRoomError] = useState<string | null>(null);
+  const [isJoiningRoom, setIsJoiningRoom] = useState(false);
+  const [remoteMediaTiles, setRemoteMediaTiles] = useState<AcsRemoteMediaTile[]>([]);
+  const roomTopic = `study-group:${group.id}:meeting-room`;
+  const currentUserId =
+    user?.id ||
+    profile?.id ||
+    members.find((member) => member.user_id === group.creator_id)?.user_id ||
+    group.creator_id;
+  const currentDisplayName =
+    profile?.full_name ||
+    members.find((member) => member.user_id === currentUserId)?.profile
+      .full_name ||
+    user?.email ||
+    group.creator_name ||
+    "You";
+  const currentAvatarUrl =
+    profile?.avatar_url ||
+    members.find((member) => member.user_id === currentUserId)?.profile
+      .avatar_url ||
+    group.creator_avatar_url ||
+    null;
+
+  const fallbackCreatorMember = useMemo<StudyGroupMember>(
+    () => ({
+      id: group.creator_id,
+      joined_at: group.created_at,
+      role: "owner",
+      user_id: group.creator_id,
+      profile: {
+        id: group.creator_id,
+        avatar_url: group.creator_avatar_url,
+        full_name: group.creator_name,
+      },
+    }),
+    [
+      group.created_at,
+      group.creator_avatar_url,
+      group.creator_id,
+      group.creator_name,
+    ],
+  );
+
+  const memberRoster = useMemo<StudyGroupMember[]>(() => {
+    const roster = members.length > 0 ? members : [fallbackCreatorMember];
+    const currentMember = roster.find(
+      (member) => member.user_id === currentUserId,
+    );
+
+    if (currentMember) {
+      return roster.map((member) =>
+        member.user_id === currentUserId
+          ? {
+              ...member,
+              profile: {
+                ...member.profile,
+                avatar_url: currentAvatarUrl,
+                full_name: currentDisplayName,
+              },
+            }
+          : member,
+      );
+    }
+
+    return [
+      {
+        id: `room-current-${currentUserId}`,
+        joined_at: new Date().toISOString(),
+        role: group.creator_id === currentUserId ? "owner" : "member",
+        user_id: currentUserId,
+        profile: {
+          id: currentUserId,
+          avatar_url: currentAvatarUrl,
+          full_name: currentDisplayName,
+        },
+      },
+      ...roster,
+    ];
+  }, [
+    currentAvatarUrl,
+    currentDisplayName,
+    currentUserId,
+    fallbackCreatorMember,
+    group.creator_id,
+    members,
+  ]);
+
+  const currentMember =
+    memberRoster.find((member) => member.user_id === currentUserId) ??
+    memberRoster[0] ??
+    fallbackCreatorMember;
+
+  const localParticipantState = useMemo<RoomParticipantState>(
+    () => ({
+      userId: currentUserId,
+      name: currentDisplayName,
+      avatarUrl: currentAvatarUrl,
+      role: currentMember.role,
+      cameraOn: isCameraOn,
+      micOn: isMicOn && audioMode !== "none",
+      handRaised: isHandRaised,
+      screenSharing: isSharingScreen,
+      joinedAt: currentMember.joined_at || group.created_at,
+      lastSeenAt: Date.now(),
+    }),
+    [
+      audioMode,
+      currentAvatarUrl,
+      currentDisplayName,
+      currentMember.joined_at,
+      currentMember.role,
+      currentUserId,
+      group.created_at,
+      isCameraOn,
+      isHandRaised,
+      isMicOn,
+      isSharingScreen,
+    ],
+  );
+
+  const participants = useMemo<RoomParticipant[]>(() => {
+    const states = hasJoinedPreview
+      ? Object.values(roomParticipantStates)
+      : memberRoster.map((member) => ({
+          userId: member.user_id,
+          name: member.profile.full_name,
+          avatarUrl: member.profile.avatar_url,
+          role: member.role,
+          cameraOn: false,
+          micOn: false,
+          handRaised: false,
+          screenSharing: false,
+          joinedAt: member.joined_at,
+          lastSeenAt: 0,
+        }));
+    const activeStates =
+      hasJoinedPreview && states.length === 0 ? [localParticipantState] : states;
+
+    return activeStates
+      .map((state) => {
+        const rosterMember = memberRoster.find(
+          (member) => member.user_id === state.userId,
+        );
+        const member =
+          rosterMember ??
+          ({
+            id: `room-${state.userId}`,
+            joined_at: state.joinedAt,
+            role: state.role,
+            user_id: state.userId,
+            profile: {
+              id: state.userId,
+              avatar_url: state.avatarUrl,
+              full_name: state.name,
+            },
+          } satisfies StudyGroupMember);
+
+        return {
+          ...member,
+          role: state.role,
+          profile: {
+            ...member.profile,
+            avatar_url: state.avatarUrl,
+            full_name: state.name,
+          },
+          cameraOn: state.cameraOn,
+          micOn: state.micOn,
+          handRaised: state.handRaised,
+          screenSharing: state.screenSharing,
+          isCurrentUser: state.userId === currentUserId,
+        };
+      })
+      .sort((left, right) => {
+        if (left.isCurrentUser !== right.isCurrentUser) {
+          return left.isCurrentUser ? -1 : 1;
+        }
+        if (left.user_id === group.creator_id) return -1;
+        if (right.user_id === group.creator_id) return 1;
+        return left.joined_at.localeCompare(right.joined_at);
+      });
+  }, [
+    currentUserId,
+    group.creator_id,
+    hasJoinedPreview,
+    localParticipantState,
+    memberRoster,
+    roomParticipantStates,
+  ]);
+
+  const publishRoomEvent = useCallback(
+    async (payload: RoomBroadcastPayload) => {
+      try {
+        await broadcastToPrivateTopic({
+          event: "MEETING_ROOM",
+          payload,
+          topic: roomTopic,
+        });
+      } catch (error) {
+        console.warn("Meeting room broadcast failed:", error);
+      }
+    },
+    [roomTopic],
+  );
+
+  useEffect(() => {
+    hasPublishedJoinRef.current = false;
+    setRoomParticipantStates({});
+    setRoomChatMessages([
+      {
+        id: "welcome",
+        authorId: null,
+        author: "SUCCMS Room",
+        message: "Meeting chat is ready.",
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  }, [group.id]);
+
+  useEffect(() => {
+    if (!hasJoinedPreview) return;
+
+    return subscribeToPrivateBroadcast({
+      event: "*",
+      topic: roomTopic,
+      onMessage: (message) => {
+        const payload = getRoomBroadcastPayload(message);
+        if (!payload) return;
+
+        if (payload.type === "chat") {
+          setRoomChatMessages((currentMessages) =>
+            currentMessages.some((item) => item.id === payload.message.id)
+              ? currentMessages
+              : [...currentMessages, payload.message],
+          );
+          return;
+        }
+
+        if (payload.type === "reaction") {
+          if (payload.userId !== currentUserId) {
+            setSelectedReaction(payload.reaction);
+          }
+          return;
+        }
+
+        if (payload.type === "leave") {
+          setRoomParticipantStates((currentStates) =>
+            Object.fromEntries(
+              Object.entries(currentStates).filter(
+                ([userId]) => userId !== payload.userId,
+              ),
+            ),
+          );
+          return;
+        }
+
+        setRoomParticipantStates((currentStates) => ({
+          ...currentStates,
+          [payload.participant.userId]: {
+            ...payload.participant,
+            lastSeenAt: Date.now(),
+          },
+        }));
+      },
+    });
+  }, [currentUserId, hasJoinedPreview, roomTopic]);
+
+  useEffect(() => {
+    if (!hasJoinedPreview) return;
+
+    const nextState = {
+      ...localParticipantState,
+      lastSeenAt: Date.now(),
+    };
+
+    setRoomParticipantStates((currentStates) => ({
+      ...currentStates,
+      [nextState.userId]: nextState,
+    }));
+
+    const type = hasPublishedJoinRef.current ? "status" : "join";
+    hasPublishedJoinRef.current = true;
+    void publishRoomEvent({ type, participant: nextState });
+  }, [hasJoinedPreview, localParticipantState, publishRoomEvent]);
+
+  useEffect(() => {
+    if (!hasJoinedPreview) return;
+
+    return () => {
+      void publishRoomEvent({ type: "leave", userId: currentUserId });
+    };
+  }, [currentUserId, hasJoinedPreview, publishRoomEvent]);
 
   const loadMediaDevices = useCallback(async (requestPermission = false) => {
     if (!navigator.mediaDevices?.enumerateDevices) {
@@ -594,6 +1040,11 @@ export function StudyGroupMeetingRoomPreview({
   useEffect(() => {
     let isCancelled = false;
 
+    if (hasJoinedPreview) {
+      stopCameraPreview();
+      return;
+    }
+
     if (!isCameraOn) {
       stopCameraPreview();
       setCameraError(null);
@@ -638,7 +1089,7 @@ export function StudyGroupMeetingRoomPreview({
     return () => {
       isCancelled = true;
     };
-  }, [isCameraOn, stopCameraPreview]);
+  }, [hasJoinedPreview, isCameraOn, stopCameraPreview]);
 
   useEffect(() => {
     if (isCameraOn && cameraPreviewRef.current && cameraStreamRef.current) {
@@ -665,27 +1116,301 @@ export function StudyGroupMeetingRoomPreview({
     };
   }, [stopCameraPreview]);
 
-  const participants =
-    members.length > 0
-      ? members
-      : [
-          {
-            id: group.creator_id,
-            joined_at: group.created_at,
-            role: "owner",
-            user_id: group.creator_id,
-            profile: {
-              id: group.creator_id,
-              avatar_url: group.creator_avatar_url,
-              full_name: group.creator_name,
-            },
-          },
-        ];
+  const disposeLocalVideoRenderer = useCallback(() => {
+    localVideoViewRef.current?.dispose();
+    localVideoRendererRef.current?.dispose();
+    localVideoViewRef.current = null;
+    localVideoRendererRef.current = null;
+    if (localVideoContainerRef.current) {
+      localVideoContainerRef.current.replaceChildren();
+    }
+  }, []);
+
+  const renderLocalVideoStream = useCallback(async () => {
+    const stream = localVideoStreamRef.current;
+    const container = localVideoContainerRef.current;
+    if (!stream || !container) return;
+
+    disposeLocalVideoRenderer();
+    const renderer = new VideoStreamRenderer(stream);
+    const view = await renderer.createView({ scalingMode: "Crop" });
+    localVideoRendererRef.current = renderer;
+    localVideoViewRef.current = view;
+    container.replaceChildren(view.target);
+  }, [disposeLocalVideoRenderer]);
+
+  const removeRemoteMediaTile = useCallback((tileId: string) => {
+    const renderer = remoteRenderersRef.current[tileId];
+    renderer?.view.dispose();
+    renderer?.renderer.dispose();
+    delete remoteRenderersRef.current[tileId];
+    setRemoteMediaTiles((tiles) => tiles.filter((tile) => tile.id !== tileId));
+  }, []);
+
+  const renderRemoteMediaStream = useCallback(
+    async (participant: RemoteParticipant, stream: RemoteVideoStream) => {
+      const participantId = getCommunicationIdentifierKey(participant.identifier);
+      const kind =
+        String(stream.mediaStreamType) === "ScreenSharing"
+          ? "ScreenSharing"
+          : "Video";
+      const tileId = `${participantId}-${stream.id}-${kind}`;
+
+      if (!stream.isAvailable) {
+        removeRemoteMediaTile(tileId);
+        return;
+      }
+
+      if (remoteRenderersRef.current[tileId]) {
+        return;
+      }
+
+      const renderer = new VideoStreamRenderer(stream);
+      const view = await renderer.createView({
+        scalingMode: kind === "ScreenSharing" ? "Fit" : "Crop",
+      });
+      remoteRenderersRef.current[tileId] = { renderer, view };
+      setRemoteMediaTiles((tiles) => [
+        ...tiles.filter((tile) => tile.id !== tileId),
+        {
+          id: tileId,
+          participantId,
+          displayName: participant.displayName || "Classmate",
+          kind,
+          target: view.target,
+        },
+      ]);
+    },
+    [removeRemoteMediaTile],
+  );
+
+  const subscribeToRemoteParticipant = useCallback(
+    (participant: RemoteParticipant) => {
+      participant.videoStreams.forEach((stream) => {
+        const updateStream = () => {
+          void renderRemoteMediaStream(participant, stream);
+        };
+        stream.on("isAvailableChanged", updateStream);
+        void renderRemoteMediaStream(participant, stream);
+      });
+
+      participant.on("videoStreamsUpdated", ({ added, removed }) => {
+        added.forEach((stream) => {
+          const updateStream = () => {
+            void renderRemoteMediaStream(participant, stream);
+          };
+          stream.on("isAvailableChanged", updateStream);
+          void renderRemoteMediaStream(participant, stream);
+        });
+        removed.forEach((stream) => {
+          const participantId = getCommunicationIdentifierKey(participant.identifier);
+          removeRemoteMediaTile(`${participantId}-${stream.id}-Video`);
+          removeRemoteMediaTile(`${participantId}-${stream.id}-ScreenSharing`);
+        });
+      });
+    },
+    [removeRemoteMediaTile, renderRemoteMediaStream],
+  );
+
+  const cleanupAcsCall = useCallback(() => {
+    Object.keys(remoteRenderersRef.current).forEach(removeRemoteMediaTile);
+    disposeLocalVideoRenderer();
+    localVideoStreamRef.current = null;
+    callRef.current?.hangUp({ forEveryone: false }).catch(() => undefined);
+    callRef.current = null;
+    callAgentRef.current?.dispose();
+    callAgentRef.current = null;
+    callClientRef.current?.dispose();
+    callClientRef.current = null;
+    deviceManagerRef.current = null;
+  }, [disposeLocalVideoRenderer, removeRemoteMediaTile]);
+
+  const getFirstCamera = useCallback(async () => {
+    const cameras = await deviceManagerRef.current?.getCameras();
+    return cameras?.[0] as VideoDeviceInfo | undefined;
+  }, []);
+
+  const handleToggleCamera = useCallback(async () => {
+    if (!hasJoinedPreview || !callRef.current) {
+      setIsCameraOn((value) => !value);
+      return;
+    }
+
+    setCameraError(null);
+    try {
+      if (isCameraOn) {
+        if (localVideoStreamRef.current) {
+          await callRef.current.stopVideo(localVideoStreamRef.current);
+        }
+        disposeLocalVideoRenderer();
+        localVideoStreamRef.current = null;
+        setIsCameraOn(false);
+        return;
+      }
+
+      const camera = await getFirstCamera();
+      if (!camera) {
+        setCameraError("No camera is available.");
+        return;
+      }
+
+      const localVideoStream = new LocalVideoStream(camera);
+      localVideoStreamRef.current = localVideoStream;
+      await callRef.current.startVideo(localVideoStream);
+      setIsCameraOn(true);
+      await renderLocalVideoStream();
+    } catch {
+      setCameraError("Camera could not be started.");
+      setIsCameraOn(false);
+    }
+  }, [
+    disposeLocalVideoRenderer,
+    getFirstCamera,
+    hasJoinedPreview,
+    isCameraOn,
+    renderLocalVideoStream,
+  ]);
+
+  const handleToggleMic = useCallback(async () => {
+    if (!hasJoinedPreview || !callRef.current) {
+      setIsMicOn((value) => !value);
+      return;
+    }
+
+    try {
+      if (isMicOn) {
+        await callRef.current.mute();
+        setIsMicOn(false);
+      } else {
+        await callRef.current.unmute();
+        setIsMicOn(true);
+      }
+    } catch {
+      setDeviceMessage("Microphone state could not be changed.");
+    }
+  }, [hasJoinedPreview, isMicOn]);
+
+  const handleJoinRoom = useCallback(async () => {
+    setMeetingRoomError(null);
+    setIsJoiningRoom(true);
+
+    try {
+      stopCameraPreview();
+      const roomAccess = await getAcsMeetingRoomAccess(group.id);
+      const callClient = new CallClient();
+      callClientRef.current = callClient;
+
+      const tokenCredential = new AzureCommunicationTokenCredential(
+        roomAccess.token,
+      );
+      const callAgent = await callClient.createCallAgent(tokenCredential, {
+        displayName: currentDisplayName,
+      });
+      const deviceManager = await callClient.getDeviceManager();
+      callAgentRef.current = callAgent;
+      deviceManagerRef.current = deviceManager;
+
+      await deviceManager.askDevicePermission({
+        audio: audioMode !== "none",
+        video: isCameraOn,
+      });
+
+      const camera = isCameraOn ? await getFirstCamera() : undefined;
+      const localVideoStream = camera ? new LocalVideoStream(camera) : null;
+      localVideoStreamRef.current = localVideoStream;
+
+      const call = callAgent.join(
+        { roomId: roomAccess.roomId },
+        {
+          audioOptions: { muted: !isMicOn || audioMode === "none" },
+          ...(localVideoStream
+            ? { videoOptions: { localVideoStreams: [localVideoStream] } }
+            : {}),
+        },
+      );
+
+      callRef.current = call;
+      setHasJoinedPreview(true);
+      setIsMicOn(!call.isMuted);
+
+      call.on("isMutedChanged", () => {
+        setIsMicOn(!call.isMuted);
+      });
+      call.on("isScreenSharingOnChanged", () => {
+        setIsSharingScreen(call.isScreenSharingOn);
+        if (call.isScreenSharingOn) {
+          setViewMode("focus");
+        }
+      });
+      call.on("remoteParticipantsUpdated", ({ added, removed }) => {
+        added.forEach(subscribeToRemoteParticipant);
+        removed.forEach((participant) => {
+          const participantId = getCommunicationIdentifierKey(participant.identifier);
+          setRemoteMediaTiles((tiles) => {
+            tiles
+              .filter((tile) => tile.participantId === participantId)
+              .forEach((tile) => {
+                const renderer = remoteRenderersRef.current[tile.id];
+                renderer?.view.dispose();
+                renderer?.renderer.dispose();
+                delete remoteRenderersRef.current[tile.id];
+              });
+            return tiles.filter((tile) => tile.participantId !== participantId);
+          });
+        });
+      });
+      call.remoteParticipants.forEach(subscribeToRemoteParticipant);
+
+      if (localVideoStream) {
+        await renderLocalVideoStream();
+      }
+    } catch (error) {
+      console.error("ACS meeting room join failed:", error);
+      cleanupAcsCall();
+      setHasJoinedPreview(false);
+      setMeetingRoomError(
+        error instanceof Error
+          ? error.message
+          : "Meeting room could not be joined.",
+      );
+    } finally {
+      setIsJoiningRoom(false);
+    }
+  }, [
+    audioMode,
+    cleanupAcsCall,
+    currentDisplayName,
+    getFirstCamera,
+    group.id,
+    isCameraOn,
+    isMicOn,
+    renderLocalVideoStream,
+    stopCameraPreview,
+    subscribeToRemoteParticipant,
+  ]);
+
   const nextSession = sessions[0];
-  const hostParticipant = participants[0];
+  const currentParticipant =
+    participants.find((participant) => participant.isCurrentUser) ??
+    participants[0];
   const courseCode = group.course_code || "General";
   const courseName = group.course_name || "Open to everyone";
   const roomTitle = group.name || courseName;
+  const groupMemberCount = Math.max(group.member_count || 0, memberRoster.length);
+  const raisedHandCount = participants.filter(
+    (participant) => participant.handRaised,
+  ).length;
+  const activeRemoteScreenShare = remoteMediaTiles.find(
+    (tile) => tile.kind === "ScreenSharing",
+  );
+  const remoteVideoTiles = remoteMediaTiles.filter(
+    (tile) => tile.kind === "Video",
+  );
+  const activeScreenShareParticipant =
+    participants.find((participant) => participant.screenSharing) ?? null;
+  const isShowingScreenShare = Boolean(
+    activeScreenShareParticipant || activeRemoteScreenShare,
+  );
   const galleryParticipants = participants.slice(0, 9);
   const galleryGridClass =
     galleryParticipants.length === 1
@@ -698,6 +1423,18 @@ export function StudyGroupMeetingRoomPreview({
     participants.length - sharingParticipants.length,
     0,
   );
+  const getRemoteVideoTileForMember = (member: RoomParticipant) =>
+    remoteVideoTiles.find(
+      (tile) =>
+        tile.displayName === member.profile.full_name ||
+        tile.participantId.includes(member.user_id),
+    );
+  const attachLocalVideoContainer = useCallback((node: HTMLDivElement | null) => {
+    localVideoContainerRef.current = node;
+    if (node && localVideoViewRef.current?.target) {
+      node.replaceChildren(localVideoViewRef.current.target);
+    }
+  }, []);
   const handleSendRoomMessage = () => {
     const trimmedMessage = roomChatMessage.trim();
 
@@ -705,15 +1442,20 @@ export function StudyGroupMeetingRoomPreview({
       return;
     }
 
+    const nextMessage: RoomChatMessage = {
+      id: `message-${currentUserId}-${Date.now()}`,
+      authorId: currentUserId,
+      author: currentParticipant?.profile.full_name || currentDisplayName,
+      message: trimmedMessage,
+      createdAt: new Date().toISOString(),
+    };
+
     setRoomChatMessages((currentMessages) => [
       ...currentMessages,
-      {
-        id: `message-${Date.now()}`,
-        author: hostParticipant.profile.full_name,
-        message: trimmedMessage,
-      },
+      nextMessage,
     ]);
     setRoomChatMessage("");
+    void publishRoomEvent({ type: "chat", message: nextMessage });
   };
   const handleToggleRaiseHand = () => {
     const nextIsRaised = !isHandRaised;
@@ -724,44 +1466,36 @@ export function StudyGroupMeetingRoomPreview({
       setActiveRoomPanel("people");
     }
   };
+  const handleSendReaction = (reaction: string) => {
+    setSelectedReaction(reaction);
+    void publishRoomEvent({
+      type: "reaction",
+      userId: currentUserId,
+      author: currentParticipant?.profile.full_name || currentDisplayName,
+      reaction,
+      createdAt: new Date().toISOString(),
+    });
+  };
   const handleToggleScreenShare = async () => {
     setScreenShareError(null);
 
     if (isSharingScreen) {
+      if (callRef.current?.isScreenSharingOn) {
+        await callRef.current.stopScreenSharing();
+      }
       stopScreenShare();
       return;
     }
 
-    const mediaDevices = navigator.mediaDevices as
-      | MediaDevicesWithDisplayMedia
-      | undefined;
-
-    if (!mediaDevices?.getDisplayMedia) {
-      setScreenShareError("Screen sharing is not supported in this browser.");
+    if (!callRef.current) {
+      setScreenShareError("Join the meeting room before sharing your screen.");
       return;
     }
 
     try {
-      const stream = await mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
-      });
-
-      screenStreamRef.current = stream;
+      await callRef.current.startScreenSharing();
       setIsSharingScreen(true);
       setViewMode("focus");
-
-      if (screenPreviewRef.current) {
-        screenPreviewRef.current.srcObject = stream;
-      }
-
-      stream.getVideoTracks()[0]?.addEventListener(
-        "ended",
-        () => {
-          stopScreenShare();
-        },
-        { once: true },
-      );
     } catch {
       setScreenShareError("Screen sharing was cancelled.");
     }
@@ -769,6 +1503,7 @@ export function StudyGroupMeetingRoomPreview({
   const handleLeaveRoom = () => {
     stopScreenShare();
     stopCameraPreview();
+    cleanupAcsCall();
     onBack();
   };
 
@@ -797,7 +1532,7 @@ export function StudyGroupMeetingRoomPreview({
             </div>
             <Button variant="outline" className="gap-2">
               <Users className="h-4 w-4" />
-              {participants.length}/{group.max_members} members
+              {groupMemberCount}/{group.max_members} members
             </Button>
           </div>
 
@@ -990,6 +1725,12 @@ export function StudyGroupMeetingRoomPreview({
                   </p>
                 )}
 
+                {meetingRoomError && (
+                  <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+                    {meetingRoomError}
+                  </p>
+                )}
+
                 <div className="rounded-xl border bg-muted/30 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
@@ -1014,9 +1755,10 @@ export function StudyGroupMeetingRoomPreview({
                   </Button>
                   <Button
                     className="bg-blue-600 px-6 hover:bg-blue-700"
-                    onClick={() => setHasJoinedPreview(true)}
+                    disabled={isJoiningRoom}
+                    onClick={() => void handleJoinRoom()}
                   >
-                    Join room
+                    {isJoiningRoom ? "Joining..." : "Join room"}
                   </Button>
                 </div>
               </CardContent>
@@ -1145,9 +1887,9 @@ export function StudyGroupMeetingRoomPreview({
             >
               <span className="relative">
                 <Users className="h-5 w-5" />
-                {isHandRaised && (
+                {raisedHandCount > 0 && (
                   <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-bold text-slate-950">
-                    1
+                    {raisedHandCount}
                   </span>
                 )}
               </span>
@@ -1181,7 +1923,7 @@ export function StudyGroupMeetingRoomPreview({
                     type="button"
                     className="rounded-lg p-2 text-xl transition hover:bg-accent"
                     title={reaction}
-                    onClick={() => setSelectedReaction(reaction)}
+                    onClick={() => handleSendReaction(reaction)}
                   >
                     {reaction}
                   </button>
@@ -1223,7 +1965,7 @@ export function StudyGroupMeetingRoomPreview({
               className={`${toolbarButtonBase} ${
                 !isCameraOn ? toolbarButtonActive : ""
               }`}
-              onClick={() => setIsCameraOn((value) => !value)}
+              onClick={() => void handleToggleCamera()}
             >
               {isCameraOn ? (
                 <Camera className="h-5 w-5" />
@@ -1237,7 +1979,7 @@ export function StudyGroupMeetingRoomPreview({
               className={`${toolbarButtonBase} ${
                 !isMicOn ? toolbarButtonActive : ""
               }`}
-              onClick={() => setIsMicOn((value) => !value)}
+              onClick={() => void handleToggleMic()}
             >
               {isMicOn ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
               Mic
@@ -1274,7 +2016,7 @@ export function StudyGroupMeetingRoomPreview({
         >
           <main
             className={`relative flex min-h-0 overflow-hidden bg-[#1f1f1f] ${
-              isSharingScreen
+              isShowingScreenShare
                 ? "items-stretch justify-stretch p-3 sm:p-4 lg:p-5"
                 : "items-center justify-center p-6"
             }`}
@@ -1291,45 +2033,70 @@ export function StudyGroupMeetingRoomPreview({
               </div>
             )}
 
-            {isSharingScreen ? (
+            {isShowingScreenShare ? (
               <div className="grid h-full w-full min-h-0 grid-cols-[minmax(0,1fr)_104px] grid-rows-[minmax(0,1fr)_72px] gap-3">
                 <div className="relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black shadow-2xl">
-                  <video
-                    ref={screenPreviewRef}
-                    autoPlay
-                    muted
-                    playsInline
-                    className="h-full w-full object-contain"
-                  />
+                  {activeRemoteScreenShare ? (
+                    <AcsMediaView
+                      target={activeRemoteScreenShare.target}
+                      className="h-full w-full [&>video]:h-full [&>video]:w-full [&>video]:object-contain"
+                    />
+                  ) : activeScreenShareParticipant?.isCurrentUser ? (
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-[#111] text-center">
+                      <ScreenShare className="h-12 w-12 text-blue-300" />
+                      <div>
+                        <p className="text-lg font-semibold text-white">
+                          You are sharing your screen
+                        </p>
+                        <p className="text-sm text-white/55">
+                          Other members can see your shared screen here.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-[#111] text-center">
+                      <ScreenShare className="h-12 w-12 text-white/45" />
+                      <div>
+                        <p className="text-lg font-semibold text-white">
+                          {activeScreenShareParticipant?.profile.full_name ||
+                            "A participant"}{" "}
+                          is presenting
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   <div className="absolute left-4 top-4 rounded-xl bg-black/60 px-3 py-2 text-left shadow-lg backdrop-blur">
                     <p className="text-sm font-semibold text-white">
-                      You are presenting
+                      {activeRemoteScreenShare
+                        ? `${activeRemoteScreenShare.displayName} is presenting`
+                        : activeScreenShareParticipant?.isCurrentUser
+                        ? "You are presenting"
+                        : `${activeScreenShareParticipant?.profile.full_name || "Someone"} is presenting`}
                     </p>
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="absolute right-4 top-4 border-white/20 bg-black/60 text-white hover:bg-white/10 hover:text-white"
-                    onClick={stopScreenShare}
-                  >
-                    Stop sharing
-                  </Button>
+                  {activeScreenShareParticipant?.isCurrentUser && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="absolute right-4 top-4 border-white/20 bg-black/60 text-white hover:bg-white/10 hover:text-white"
+                      onClick={stopScreenShare}
+                    >
+                      Stop sharing
+                    </Button>
+                  )}
                 </div>
 
                 <div className="flex min-h-0 flex-col gap-2">
-                  {sharingParticipants.map((member, index) => (
+                  {sharingParticipants.map((member) => (
                     <div
                       key={member.id}
                       className="flex h-24 flex-col items-center justify-center rounded-xl border border-white/10 bg-white/5 px-2 text-center"
                     >
-                      {index === 0 && isCameraOn ? (
+                      {member.isCurrentUser && member.cameraOn ? (
                         <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg bg-black">
-                          <video
-                            ref={cameraPreviewRef}
-                            autoPlay
-                            muted
-                            playsInline
-                            className="h-full w-full object-cover"
+                          <div
+                            ref={attachLocalVideoContainer}
+                            className="h-full w-full [&>video]:h-full [&>video]:w-full [&>video]:object-cover"
                           />
                         </div>
                       ) : (
@@ -1341,7 +2108,7 @@ export function StudyGroupMeetingRoomPreview({
                         </Avatar>
                       )}
                       <p className="mt-2 w-full truncate text-xs font-medium text-white/90">
-                        {index === 0 ? "You" : member.profile.full_name}
+                        {member.isCurrentUser ? "You" : member.profile.full_name}
                       </p>
                     </div>
                   ))}
@@ -1363,35 +2130,43 @@ export function StudyGroupMeetingRoomPreview({
                   )}
                 </div>
                 <div className="flex items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/5 text-white/65">
-                  {isCameraOn ? (
+                  {currentParticipant?.cameraOn ? (
                     <Camera className="h-4 w-4" />
                   ) : (
                     <CameraOff className="h-4 w-4" />
                   )}
-                  {isMicOn ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+                  {currentParticipant?.micOn ? (
+                    <Mic className="h-4 w-4" />
+                  ) : (
+                    <MicOff className="h-4 w-4" />
+                  )}
                 </div>
               </div>
             ) : viewMode === "gallery" ? (
               <div className={`grid w-full gap-4 ${galleryGridClass}`}>
-                {galleryParticipants.map((member, index) => (
+                {galleryParticipants.map((member) => (
                   <div
                     key={member.id}
                     className={`flex min-h-[180px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 p-5 ${
-                      index === 0 ? "ring-2 ring-blue-400" : ""
+                      member.isCurrentUser ? "ring-2 ring-blue-400" : ""
                     }`}
                   >
-                    {index === 0 && isCameraOn ? (
-                      <div className="flex aspect-video w-full max-w-xs items-center justify-center overflow-hidden rounded-xl bg-black">
-                        <video
-                          ref={cameraPreviewRef}
-                          autoPlay
-                          muted
-                          playsInline
-                          className="h-full w-full object-cover"
-                        />
-                      </div>
-                    ) : (
-                      <Avatar className="h-20 w-20">
+                      {member.isCurrentUser && member.cameraOn ? (
+                        <div className="flex aspect-video w-full max-w-xs items-center justify-center overflow-hidden rounded-xl bg-black">
+                          <div
+                            ref={attachLocalVideoContainer}
+                            className="h-full w-full [&>video]:h-full [&>video]:w-full [&>video]:object-cover"
+                          />
+                        </div>
+                      ) : getRemoteVideoTileForMember(member) ? (
+                        <div className="flex aspect-video w-full max-w-xs items-center justify-center overflow-hidden rounded-xl bg-black">
+                          <AcsMediaView
+                            target={getRemoteVideoTileForMember(member)!.target}
+                            className="h-full w-full [&>video]:h-full [&>video]:w-full [&>video]:object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <Avatar className="h-20 w-20">
                         <AvatarImage src={member.profile.avatar_url || undefined} />
                         <AvatarFallback className="bg-blue-600 text-xl text-white">
                           {getInitials(member.profile.full_name)}
@@ -1399,11 +2174,11 @@ export function StudyGroupMeetingRoomPreview({
                       </Avatar>
                     )}
                     <p className="mt-3 max-w-full truncate text-sm font-semibold">
-                      {member.profile.full_name}
+                      {member.isCurrentUser ? "You" : member.profile.full_name}
                     </p>
                     <p className="text-xs text-white/55">
-                      {index === 0
-                        ? isCameraOn
+                      {member.user_id === group.creator_id
+                        ? member.cameraOn
                           ? "Host - camera on"
                           : "Host"
                         : member.role}
@@ -1413,21 +2188,20 @@ export function StudyGroupMeetingRoomPreview({
               </div>
             ) : (
               <div className="flex flex-col items-center text-center">
-                {isCameraOn ? (
+                {currentParticipant?.cameraOn ? (
                   <div className="flex aspect-video w-full max-w-3xl items-center justify-center overflow-hidden rounded-3xl border border-white/10 bg-black shadow-2xl">
-                    <video
-                      ref={cameraPreviewRef}
-                      autoPlay
-                      muted
-                      playsInline
-                      className="h-full w-full object-cover"
+                    <div
+                      ref={attachLocalVideoContainer}
+                      className="h-full w-full [&>video]:h-full [&>video]:w-full [&>video]:object-cover"
                     />
                   </div>
                 ) : (
                   <Avatar className="h-44 w-44 border-4 border-white/10">
-                    <AvatarImage src={hostParticipant?.profile.avatar_url || undefined} />
+                    <AvatarImage src={currentParticipant?.profile.avatar_url || undefined} />
                     <AvatarFallback className="bg-pink-200 text-6xl font-semibold text-pink-900">
-                      {getInitials(hostParticipant?.profile.full_name || group.name)}
+                      {getInitials(
+                        currentParticipant?.profile.full_name || group.name,
+                      )}
                     </AvatarFallback>
                   </Avatar>
                 )}
@@ -1438,12 +2212,12 @@ export function StudyGroupMeetingRoomPreview({
                   <Badge className="bg-white/10 text-white hover:bg-white/10">
                     {participants.length}/{group.max_members} people
                   </Badge>
-                  {isHandRaised && (
+                  {currentParticipant?.handRaised && (
                     <Badge className="bg-amber-400/20 text-amber-100 hover:bg-amber-400/20">
                       Hand raised
                     </Badge>
                   )}
-                  {!isMicOn && (
+                  {!currentParticipant?.micOn && (
                     <Badge className="bg-white/10 text-white hover:bg-white/10">
                       Mic muted
                     </Badge>
@@ -1460,7 +2234,7 @@ export function StudyGroupMeetingRoomPreview({
                   <div className="border-b border-white/10 px-4 py-4">
                     <h2 className="font-semibold">Meeting chat</h2>
                     <p className="text-xs text-white/55">
-                      Preview messages are local only.
+                      Synced through Azure realtime.
                     </p>
                   </div>
                   <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
@@ -1471,7 +2245,7 @@ export function StudyGroupMeetingRoomPreview({
                       >
                         <div className="flex items-center justify-between gap-2 text-xs text-white/50">
                           <span>{message.author}</span>
-                          <span>Now</span>
+                          <span>{formatChatTime(message.createdAt)}</span>
                         </div>
                         <p className="mt-1 text-white/90">{message.message}</p>
                       </div>
@@ -1509,7 +2283,7 @@ export function StudyGroupMeetingRoomPreview({
                         Loading group members...
                       </p>
                     )}
-                    {participants.map((member, index) => (
+                    {participants.map((member) => (
                       <div
                         key={member.id}
                         className="flex items-center gap-3 rounded-xl bg-white/6 p-3"
@@ -1522,31 +2296,44 @@ export function StudyGroupMeetingRoomPreview({
                         </Avatar>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">
-                            {member.profile.full_name}
+                            {member.isCurrentUser
+                              ? "You"
+                              : member.profile.full_name}
                           </p>
                           <p className="text-xs text-white/50">
-                            {index === 0
-                              ? "Host"
-                              : member.role === "owner"
-                                ? "Group owner"
-                                : "Member"}
+                            {member.isCurrentUser
+                              ? "Current user"
+                              : member.user_id === group.creator_id
+                                ? "Host"
+                                : member.role === "owner"
+                                  ? "Group owner"
+                                  : "Member"}
                           </p>
                         </div>
-                        {index === 0 ? (
-                          <div className="flex items-center gap-2">
-                            {isHandRaised && (
-                              <span
-                                className="inline-flex items-center gap-1 rounded-md bg-amber-400/15 px-2 py-1 text-xs font-semibold text-amber-200"
-                                title={`${member.profile.full_name} raised a hand`}
-                              >
-                                1 <span aria-hidden="true">👋</span>
-                              </span>
-                            )}
-                            <Volume2 className="h-4 w-4 text-blue-300" />
-                          </div>
-                        ) : (
-                          <Mic className="h-4 w-4 text-white/45" />
-                        )}
+                        <div className="flex items-center gap-2">
+                          {member.handRaised && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-md bg-amber-400/15 px-2 py-1 text-xs font-semibold text-amber-200"
+                              title={`${member.profile.full_name} raised a hand`}
+                            >
+                              <Hand className="h-3 w-3" />
+                              Raised
+                            </span>
+                          )}
+                          {member.screenSharing && (
+                            <ScreenShare className="h-4 w-4 text-blue-300" />
+                          )}
+                          {member.cameraOn ? (
+                            <Camera className="h-4 w-4 text-blue-300" />
+                          ) : (
+                            <CameraOff className="h-4 w-4 text-white/35" />
+                          )}
+                          {member.micOn ? (
+                            <Mic className="h-4 w-4 text-blue-300" />
+                          ) : (
+                            <MicOff className="h-4 w-4 text-white/35" />
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>

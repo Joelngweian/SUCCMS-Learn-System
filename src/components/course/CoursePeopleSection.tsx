@@ -6,11 +6,19 @@ import { AddStudentDialog } from "./CourseDialogs";
 import { CoursePeopleTab } from "./CoursePeopleTab";
 import { useCoursePeople } from "./useCoursePeople";
 
-export function CoursePeopleSection({ courseId }: { courseId: string }) {
+type CoursePeopleSectionProps = {
+  courseId: string;
+  courseOwnerId?: string | null;
+};
+
+export function CoursePeopleSection({
+  courseId,
+  courseOwnerId,
+}: CoursePeopleSectionProps) {
   const { profile } = useAuth();
   const navigate = useNavigate();
   const [showAddStudentDialog, setShowAddStudentDialog] = useState(false);
-  const people = useCoursePeople(courseId);
+  const people = useCoursePeople(courseId, courseOwnerId);
 
   const handleAddStudent = async (studentId: string) => {
     try {

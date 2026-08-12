@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useTheme } from "@/components/ThemeProvider";
-import { supabase } from "@/lib/supabase.ts"; // Added Supabase import
+import { supabase } from "@/lib/supabase.ts";
 import {
   loadThemePreference,
   saveThemePreference,

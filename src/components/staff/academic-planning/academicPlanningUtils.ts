@@ -115,9 +115,16 @@ export const isCalendarBackedAcademicTerm = (term?: AcademicTermOption | null) =
   && (term.ends_at || term.teaching_ends_at),
 );
 
+const dateOnlyFromValue = (value?: string | null) => {
+  if (!value) return null;
+  const dateOnlyMatch = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+  return dateOnlyMatch?.[1] || null;
+};
+
 export const formatDateLabel = (value?: string | null) => {
   if (!value) return "-";
-  const date = new Date(`${value}T00:00:00`);
+  const dateOnlyValue = dateOnlyFromValue(value);
+  const date = new Date(`${dateOnlyValue || value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString("en-GB", {
     day: "2-digit",
@@ -128,7 +135,8 @@ export const formatDateLabel = (value?: string | null) => {
 
 const parseAcademicTermDate = (value?: string | null) => {
   if (!value) return null;
-  const date = new Date(`${value}T00:00:00`);
+  const dateOnlyValue = dateOnlyFromValue(value);
+  const date = new Date(`${dateOnlyValue || value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return null;
   date.setHours(0, 0, 0, 0);
   return date;
