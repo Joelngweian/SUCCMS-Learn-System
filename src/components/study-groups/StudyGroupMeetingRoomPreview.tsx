@@ -784,6 +784,16 @@ export function StudyGroupMeetingRoomPreview({
   }, [latestChatNotice]);
 
   useEffect(() => {
+    if (!screenShareError) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setScreenShareError(null);
+    }, 4200);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [screenShareError]);
+
+  useEffect(() => {
     if (!hasJoinedPreview) return;
 
     return subscribeToPrivateBroadcast({
@@ -1068,6 +1078,17 @@ export function StudyGroupMeetingRoomPreview({
     setIsSharingScreen(false);
   }, []);
 
+  const stopAcsScreenShare = useCallback(async () => {
+    try {
+      if (callRef.current?.isScreenSharingOn) {
+        await callRef.current.stopScreenSharing();
+      }
+    } finally {
+      stopScreenShare();
+      setScreenShareError(null);
+    }
+  }, [stopScreenShare]);
+
   useEffect(() => {
     let isCancelled = false;
 
@@ -1132,7 +1153,7 @@ export function StudyGroupMeetingRoomPreview({
     if (isSharingScreen && screenPreviewRef.current && screenStreamRef.current) {
       screenPreviewRef.current.srcObject = screenStreamRef.current;
     }
-  }, [isSharingScreen, activeRoomPanel]);
+  }, [isSharingScreen, activeRoomPanel, viewMode]);
 
   useEffect(() => {
     const screenPreview = screenPreviewRef.current;
@@ -1474,11 +1495,14 @@ export function StudyGroupMeetingRoomPreview({
   const isShowingScreenShare = Boolean(
     activeScreenShareParticipant || activeRemoteScreenShare,
   );
+  const hasGalleryScreenShareTile = viewMode === "gallery" && isShowingScreenShare;
   const galleryParticipants = participants.slice(0, 9);
+  const galleryTileCount =
+    galleryParticipants.length + (hasGalleryScreenShareTile ? 1 : 0);
   const galleryGridClass =
-    galleryParticipants.length === 1
+    galleryTileCount === 1
       ? "max-w-md grid-cols-1"
-      : galleryParticipants.length === 2
+      : galleryTileCount === 2
         ? "max-w-3xl grid-cols-1 sm:grid-cols-2"
         : "max-w-5xl grid-cols-1 sm:grid-cols-2 xl:grid-cols-3";
   const sharingParticipants = participants.slice(0, 4);
@@ -1557,10 +1581,7 @@ export function StudyGroupMeetingRoomPreview({
     setScreenShareError(null);
 
     if (isSharingScreen) {
-      if (callRef.current?.isScreenSharingOn) {
-        await callRef.current.stopScreenSharing();
-      }
-      stopScreenShare();
+      await stopAcsScreenShare();
       return;
     }
 
@@ -1577,8 +1598,8 @@ export function StudyGroupMeetingRoomPreview({
       setScreenShareError("Screen sharing was cancelled.");
     }
   };
-  const handleLeaveRoom = () => {
-    stopScreenShare();
+  const handleLeaveRoom = async () => {
+    await stopAcsScreenShare();
     stopCameraPreview();
     cleanupAcsCall();
     onBack();
@@ -1916,6 +1937,7 @@ export function StudyGroupMeetingRoomPreview({
     "flex min-w-[58px] flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs text-white/85 transition hover:bg-white/10 hover:text-white";
   const toolbarButtonActive = "bg-white/15 text-white";
   const isScreenShareFocusView = isShowingScreenShare && viewMode === "focus";
+  const isGalleryLayoutView = viewMode === "gallery" || participants.length > 1;
 
   return (
     <div className="fixed inset-0 z-[100] bg-[#1f1f1f] text-white">
@@ -2084,7 +2106,7 @@ export function StudyGroupMeetingRoomPreview({
             <button
               type="button"
               className="flex min-w-[58px] flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs text-red-300 transition hover:bg-red-500/15 hover:text-red-200"
-              onClick={handleLeaveRoom}
+              onClick={() => void handleLeaveRoom()}
             >
               <PhoneOff className="h-5 w-5" />
               Leave
@@ -2180,7 +2202,7 @@ export function StudyGroupMeetingRoomPreview({
                       type="button"
                       variant="outline"
                       className="absolute right-4 top-4 border-white/20 bg-black/60 text-white hover:bg-white/10 hover:text-white"
-                      onClick={stopScreenShare}
+                      onClick={() => void stopAcsScreenShare()}
                     >
                       Stop sharing
                     </Button>
@@ -2238,8 +2260,39 @@ export function StudyGroupMeetingRoomPreview({
                   )}
                 </div>
               </div>
-            ) : viewMode === "gallery" ? (
+            ) : isGalleryLayoutView ? (
               <div className={`grid w-full gap-4 ${galleryGridClass}`}>
+                {hasGalleryScreenShareTile && (
+                  <div className="flex min-h-[180px] flex-col items-center justify-center rounded-2xl border border-blue-300/30 bg-blue-500/10 p-5 ring-2 ring-blue-400">
+                    <div className="relative flex aspect-video w-full max-w-xs items-center justify-center overflow-hidden rounded-xl bg-black">
+                      {activeRemoteScreenShare ? (
+                        <AcsMediaView
+                          target={activeRemoteScreenShare.target}
+                          className="h-full w-full [&>video]:h-full [&>video]:w-full [&>video]:object-contain"
+                        />
+                      ) : activeScreenShareParticipant?.isCurrentUser ? (
+                        <video
+                          ref={screenPreviewRef}
+                          className="h-full w-full object-contain"
+                          autoPlay
+                          muted
+                          playsInline
+                        />
+                      ) : (
+                        <ScreenShare className="h-10 w-10 text-white/50" />
+                      )}
+                      <div className="absolute left-2 top-2 rounded-md bg-black/65 px-2 py-1 text-[11px] font-semibold text-white">
+                        Sharing screen
+                      </div>
+                    </div>
+                    <p className="mt-3 max-w-full truncate text-sm font-semibold">
+                      {activeRemoteScreenShare?.displayName ||
+                        activeScreenShareParticipant?.profile.full_name ||
+                        "Screen share"}
+                    </p>
+                    <p className="text-xs text-blue-100">Presenting</p>
+                  </div>
+                )}
                 {galleryParticipants.map((member) => (
                   <div
                     key={member.id}
