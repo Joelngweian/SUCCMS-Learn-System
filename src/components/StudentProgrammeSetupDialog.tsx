@@ -34,7 +34,7 @@ const getErrorMessage = (error: unknown, fallback: string) => {
 };
 
 export function StudentProgrammeSetupDialog() {
-  const { profile, updateProfile } = useAuth();
+  const { profile, updateProfile, isLoading } = useAuth();
   const [selectedLevel, setSelectedLevel] = useState<string | null>(null);
   const [programmeSearch, setProgrammeSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -44,6 +44,7 @@ export function StudentProgrammeSetupDialog() {
   const [error, setError] = useState("");
 
   const shouldOpen =
+    !isLoading &&
     profile?.role === "student" &&
     (isMissingProgramme(profile.faculty) || isMissingProgramme(profile.programme));
 
