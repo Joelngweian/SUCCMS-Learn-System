@@ -525,11 +525,11 @@ async function assertStudyGroupMutationAllowed(
 async function getGroupIdFromSession(row: Record<string, unknown>) {
   const sessionId = getString(row, "session_id", "study_group_session_id");
   if (!sessionId) return undefined;
-  const result = await getPool().query<{ study_group_id: string }>(
-    `SELECT study_group_id FROM public.study_group_sessions WHERE id = $1`,
+  const result = await getPool().query<{ group_id: string }>(
+    `SELECT group_id FROM public.study_group_sessions WHERE id = $1`,
     [sessionId]
   );
-  return result.rows[0]?.study_group_id;
+  return result.rows[0]?.group_id;
 }
 
 async function isStudyGroupOwner(userId: string, groupId: string) {
@@ -622,7 +622,7 @@ async function hydrateRows(table: string, rows: Record<string, unknown>[], selec
   if (table === "course_offerings" && select.includes("course_instructors(")) {
     hydrated = await hydrateCourseOfferingInstructors(hydrated);
   }
-  if (select.includes("user_profiles(")) {
+  if (select.includes("user_profiles(") || select.includes("user_profiles!")) {
     hydrated = await hydrateUserProfiles(table, hydrated, select);
   }
   if (select.includes("forum_reactions(") || select.includes("forum_reply_reactions(")) {

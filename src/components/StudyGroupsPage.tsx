@@ -1,7 +1,11 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getNotifyMessage, notify } from "@/lib/notify";
 import { confirmAction } from "@/lib/confirm";
+import {
+  broadcastToPrivateTopic,
+  subscribeToPrivateBroadcast,
+} from "@/lib/realtime";
 import { StudyGroupsBrowser } from "./study-groups/StudyGroupsBrowser";
 import type {
   NewStudySession,
@@ -67,6 +71,25 @@ const formatFileSize = (value: number | null) => {
   if (!value) return "";
   if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const getStudyGroupDetailsTopic = (groupId: string) =>
+  `study-group:${groupId}:details`;
+
+const broadcastStudyGroupDetailsChange = async (
+  groupId: string,
+  event: string,
+  payload: Record<string, unknown> = {},
+) => {
+  try {
+    await broadcastToPrivateTopic({
+      event,
+      payload: { groupId, ...payload },
+      topic: getStudyGroupDetailsTopic(groupId),
+    });
+  } catch (error) {
+    console.warn("Study group realtime broadcast failed:", error);
+  }
 };
 
 type StudyGroupDetailTab = "sessions" | "discussion" | "members";
@@ -218,7 +241,7 @@ export function StudyGroupsPage() {
     setPostError("");
   };
 
-  const loadGroupDetails = async (
+  const loadGroupDetails = useCallback(async (
     group: StudyGroupSummary,
     options: { showLoading?: boolean } = {},
   ) => {
@@ -251,7 +274,19 @@ export function StudyGroupsPage() {
         setIsLoadingDetails(false);
       }
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (!selectedGroup?.is_member || !user) return;
+
+    return subscribeToPrivateBroadcast({
+      event: "*",
+      topic: getStudyGroupDetailsTopic(selectedGroup.id),
+      onMessage: () => {
+        void loadGroupDetails(selectedGroup, { showLoading: false });
+      },
+    });
+  }, [loadGroupDetails, selectedGroup, user]);
 
   const openGroup = (group: StudyGroupSummary) => {
     setActiveDetailTab("sessions");
@@ -319,6 +354,9 @@ export function StudyGroupsPage() {
         current.map((item) => (item.id === group.id ? updatedGroup : item))
       );
       await loadGroupDetails(updatedGroup);
+      await broadcastStudyGroupDetailsChange(group.id, "STUDY_GROUP_MEMBER_JOINED", {
+        userId: user?.id,
+      });
       notify.success(`Joined ${group.name}.`);
     } catch (error: unknown) {
       setDetailError(getNotifyMessage(error, "Failed to join study group."));
@@ -343,6 +381,9 @@ export function StudyGroupsPage() {
 
       setSelectedGroup(null);
       await refreshGroups();
+      await broadcastStudyGroupDetailsChange(group.id, "STUDY_GROUP_MEMBER_LEFT", {
+        userId: user?.id,
+      });
       notify.success(`Left ${group.name}.`);
     } catch (error: unknown) {
       setDetailError(getNotifyMessage(error, "Failed to leave study group."));
@@ -407,6 +448,9 @@ export function StudyGroupsPage() {
         ? { ...current, member_count: Math.max(1, current.member_count - 1) }
         : current
     );
+    void broadcastStudyGroupDetailsChange(selectedGroup.id, "STUDY_GROUP_MEMBER_REMOVED", {
+      userId: member.user_id,
+    });
     notify.success(`${member.profile.full_name} was removed from the group.`);
   };
 
@@ -440,6 +484,9 @@ export function StudyGroupsPage() {
       );
       setAddMemberSearch("");
       await loadGroupDetails(updatedGroup, { showLoading: false });
+      await broadcastStudyGroupDetailsChange(selectedGroup.id, "STUDY_GROUP_MEMBER_ADDED", {
+        userId: candidate.user_id,
+      });
       notify.success(`${candidate.full_name} was added to the group.`);
     } catch (error: unknown) {
       setAddMemberError(getNotifyMessage(error, "Failed to add member."));
@@ -506,6 +553,7 @@ export function StudyGroupsPage() {
         );
       }
       await loadGroupDetails(selectedGroup);
+      await broadcastStudyGroupDetailsChange(selectedGroup.id, "STUDY_GROUP_SESSION_CREATED");
       notify.success("Study session scheduled.");
     } catch (error: unknown) {
       setSessionError(
@@ -530,6 +578,10 @@ export function StudyGroupsPage() {
     }
 
     await loadGroupDetails(selectedGroup);
+    void broadcastStudyGroupDetailsChange(selectedGroup.id, "STUDY_GROUP_SESSION_ATTENDANCE_UPDATED", {
+      sessionId: session.id,
+      userId: user.id,
+    });
     notify.success(
       session.isGoing ? "Attendance cancelled." : "Attendance confirmed.",
     );
@@ -570,6 +622,9 @@ export function StudyGroupsPage() {
       );
     }
     await loadGroupDetails(selectedGroup);
+    void broadcastStudyGroupDetailsChange(selectedGroup.id, "STUDY_GROUP_SESSION_DELETED", {
+      sessionId: session.id,
+    });
     notify.success("Study session deleted.");
   };
 
@@ -598,6 +653,7 @@ export function StudyGroupsPage() {
       setPostContent("");
       setPostFile(null);
       await loadGroupDetails(selectedGroup, { showLoading: false });
+      await broadcastStudyGroupDetailsChange(selectedGroup.id, "STUDY_GROUP_POST_CREATED");
     } catch (error: unknown) {
       setPostError(
         getNotifyMessage(
@@ -652,6 +708,9 @@ export function StudyGroupsPage() {
       return;
     }
     await loadGroupDetails(selectedGroup, { showLoading: false });
+    void broadcastStudyGroupDetailsChange(selectedGroup.id, "STUDY_GROUP_POST_DELETED", {
+      postId: post.id,
+    });
     notify.success(
       post.post_type === "resource" ? "Resource deleted." : "Message deleted.",
     );

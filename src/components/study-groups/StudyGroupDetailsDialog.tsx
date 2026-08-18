@@ -186,7 +186,8 @@ export function StudyGroupDetailsDialog({
       new Date(first.created_at).getTime() - new Date(second.created_at).getTime(),
   );
   const canSubmitPost = Boolean(postContent.trim() || postFile);
-  const canAddMembers = selectedGroup.member_count < selectedGroup.max_members;
+  const displayedMemberCount = Math.max(members.length, selectedGroup.member_count);
+  const canAddMembers = displayedMemberCount < selectedGroup.max_members;
   const courseCode = selectedGroup.course_code || "General";
   const courseName = selectedGroup.course_name || "Open to everyone";
   const hasOnlineSession = shouldShowOpenMeetingRoom(sessions);
@@ -379,7 +380,7 @@ export function StudyGroupDetailsDialog({
                   <div>
                     <h3 className="font-semibold">Group Chat</h3>
                     <p className="text-sm text-muted-foreground">
-                      {members.length} members in this study group
+                      {displayedMemberCount} members in this study group
                     </p>
                   </div>
                 </div>
@@ -674,7 +675,7 @@ export function StudyGroupDetailsDialog({
                 <div>
                   <h3 className="font-semibold">Group Members</h3>
                   <p className="text-sm text-muted-foreground">
-                    {members.length}/{selectedGroup.max_members} members
+                    {displayedMemberCount}/{selectedGroup.max_members} members
                   </p>
                 </div>
                 {selectedGroup.is_owner ? (
@@ -712,7 +713,7 @@ export function StudyGroupDetailsDialog({
                       </p>
                     </div>
                     <Badge variant="outline">
-                      {selectedGroup.member_count}/{selectedGroup.max_members}
+                      {displayedMemberCount}/{selectedGroup.max_members}
                     </Badge>
                   </div>
                   <div className="relative">
