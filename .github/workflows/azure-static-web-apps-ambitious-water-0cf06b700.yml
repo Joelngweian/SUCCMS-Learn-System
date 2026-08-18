@@ -45,6 +45,8 @@ jobs:
           output_location: "build" # Built app content directory - optional
           github_id_token: ${{ steps.idtoken.outputs.result }}
         env:
+            VITE_AUTH_PROVIDER: azure
+            VITE_AZURE_API_URL: https://succms-api-eydmd5c0axdnezd2.southeastasia-01.azurewebsites.net
             VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
             VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           ###### End of Repository/Build Configurations ######
