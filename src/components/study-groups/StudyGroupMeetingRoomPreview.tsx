@@ -510,6 +510,9 @@ export function StudyGroupMeetingRoomPreview({
   const [isSharingScreen, setIsSharingScreen] = useState(false);
   const [selectedReaction, setSelectedReaction] = useState<string | null>(null);
   const [roomChatMessage, setRoomChatMessage] = useState("");
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [latestChatNotice, setLatestChatNotice] =
+    useState<RoomChatMessage | null>(null);
   const [roomChatMessages, setRoomChatMessages] = useState<RoomChatMessage[]>([
     {
       id: "welcome",
@@ -524,6 +527,7 @@ export function StudyGroupMeetingRoomPreview({
   >({});
   const activeMicrophoneBarsRef = useRef(0);
   const hasPublishedJoinRef = useRef(false);
+  const activeRoomPanelRef = useRef<ActiveRoomPanel>(activeRoomPanel);
   const cameraPreviewRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenPreviewRef = useRef<HTMLVideoElement | null>(null);
@@ -757,7 +761,27 @@ export function StudyGroupMeetingRoomPreview({
         createdAt: new Date().toISOString(),
       },
     ]);
+    setUnreadChatCount(0);
+    setLatestChatNotice(null);
   }, [group.id]);
+
+  useEffect(() => {
+    activeRoomPanelRef.current = activeRoomPanel;
+    if (activeRoomPanel === "chat") {
+      setUnreadChatCount(0);
+      setLatestChatNotice(null);
+    }
+  }, [activeRoomPanel]);
+
+  useEffect(() => {
+    if (!latestChatNotice) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setLatestChatNotice(null);
+    }, 4200);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [latestChatNotice]);
 
   useEffect(() => {
     if (!hasJoinedPreview) return;
@@ -775,6 +799,13 @@ export function StudyGroupMeetingRoomPreview({
               ? currentMessages
               : [...currentMessages, payload.message],
           );
+          if (
+            payload.message.authorId !== currentUserId &&
+            activeRoomPanelRef.current !== "chat"
+          ) {
+            setUnreadChatCount((count) => count + 1);
+            setLatestChatNotice(payload.message);
+          }
           return;
         }
 
@@ -1139,6 +1170,20 @@ export function StudyGroupMeetingRoomPreview({
     container.replaceChildren(view.target);
   }, [disposeLocalVideoRenderer]);
 
+  useEffect(() => {
+    if (
+      !hasJoinedPreview ||
+      !isCameraOn ||
+      !localVideoStreamRef.current ||
+      !localVideoContainerRef.current ||
+      localVideoViewRef.current
+    ) {
+      return;
+    }
+
+    void renderLocalVideoStream();
+  }, [hasJoinedPreview, isCameraOn, renderLocalVideoStream, viewMode]);
+
   const removeRemoteMediaTile = useCallback((tileId: string) => {
     const renderer = remoteRenderersRef.current[tileId];
     renderer?.view.dispose();
@@ -1400,11 +1445,29 @@ export function StudyGroupMeetingRoomPreview({
   const raisedHandCount = participants.filter(
     (participant) => participant.handRaised,
   ).length;
+  const isRemoteTileForParticipant = (
+    tile: AcsRemoteMediaTile,
+    participant: RoomParticipant,
+  ) =>
+    !participant.isCurrentUser &&
+    (tile.displayName === participant.profile.full_name ||
+      tile.participantId.includes(participant.user_id));
   const activeRemoteScreenShare = remoteMediaTiles.find(
-    (tile) => tile.kind === "ScreenSharing",
+    (tile) =>
+      tile.kind === "ScreenSharing" &&
+      participants.some(
+        (participant) =>
+          participant.screenSharing &&
+          isRemoteTileForParticipant(tile, participant),
+      ),
   );
   const remoteVideoTiles = remoteMediaTiles.filter(
-    (tile) => tile.kind === "Video",
+    (tile) =>
+      tile.kind === "Video" &&
+      participants.some(
+        (participant) =>
+          participant.cameraOn && isRemoteTileForParticipant(tile, participant),
+      ),
   );
   const activeScreenShareParticipant =
     participants.find((participant) => participant.screenSharing) ?? null;
@@ -1433,8 +1496,12 @@ export function StudyGroupMeetingRoomPreview({
     localVideoContainerRef.current = node;
     if (node && localVideoViewRef.current?.target) {
       node.replaceChildren(localVideoViewRef.current.target);
+      return;
     }
-  }, []);
+    if (node && localVideoStreamRef.current) {
+      void renderLocalVideoStream();
+    }
+  }, [renderLocalVideoStream]);
   const handleSendRoomMessage = () => {
     const trimmedMessage = roomChatMessage.trim();
 
@@ -1456,6 +1523,16 @@ export function StudyGroupMeetingRoomPreview({
     ]);
     setRoomChatMessage("");
     void publishRoomEvent({ type: "chat", message: nextMessage });
+  };
+  const handleToggleChatPanel = () => {
+    setActiveRoomPanel((panel) => {
+      const nextPanel = panel === "chat" ? null : "chat";
+      if (nextPanel === "chat") {
+        setUnreadChatCount(0);
+        setLatestChatNotice(null);
+      }
+      return nextPanel;
+    });
   };
   const handleToggleRaiseHand = () => {
     const nextIsRaised = !isHandRaised;
@@ -1838,6 +1915,7 @@ export function StudyGroupMeetingRoomPreview({
   const toolbarButtonBase =
     "flex min-w-[58px] flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs text-white/85 transition hover:bg-white/10 hover:text-white";
   const toolbarButtonActive = "bg-white/15 text-white";
+  const isScreenShareFocusView = isShowingScreenShare && viewMode === "focus";
 
   return (
     <div className="fixed inset-0 z-[100] bg-[#1f1f1f] text-white">
@@ -1867,11 +1945,16 @@ export function StudyGroupMeetingRoomPreview({
               className={`${toolbarButtonBase} ${
                 activeRoomPanel === "chat" ? toolbarButtonActive : ""
               }`}
-              onClick={() =>
-                setActiveRoomPanel((panel) => (panel === "chat" ? null : "chat"))
-              }
+              onClick={handleToggleChatPanel}
             >
-              <MessageCircle className="h-5 w-5" />
+              <span className="relative">
+                <MessageCircle className="h-5 w-5" />
+                {unreadChatCount > 0 && (
+                  <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-400 px-1 text-[10px] font-bold text-slate-950">
+                    {unreadChatCount > 9 ? "9+" : unreadChatCount}
+                  </span>
+                )}
+              </span>
               Chat
             </button>
             <button
@@ -2016,7 +2099,7 @@ export function StudyGroupMeetingRoomPreview({
         >
           <main
             className={`relative flex min-h-0 overflow-hidden bg-[#1f1f1f] ${
-              isShowingScreenShare
+              isScreenShareFocusView
                 ? "items-stretch justify-stretch p-3 sm:p-4 lg:p-5"
                 : "items-center justify-center p-6"
             }`}
@@ -2033,7 +2116,25 @@ export function StudyGroupMeetingRoomPreview({
               </div>
             )}
 
-            {isShowingScreenShare ? (
+            {latestChatNotice && activeRoomPanel !== "chat" && (
+              <button
+                type="button"
+                className="absolute left-1/2 top-6 z-20 flex max-w-sm -translate-x-1/2 items-start gap-3 rounded-xl border border-blue-300/30 bg-[#2f3b52]/95 px-4 py-3 text-left text-sm text-white shadow-xl backdrop-blur transition hover:bg-[#35445f]"
+                onClick={handleToggleChatPanel}
+              >
+                <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-blue-200" />
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-semibold text-blue-100">
+                    New message from {latestChatNotice.author}
+                  </span>
+                  <span className="mt-0.5 block truncate text-white/85">
+                    {latestChatNotice.message}
+                  </span>
+                </span>
+              </button>
+            )}
+
+            {isScreenShareFocusView ? (
               <div className="grid h-full w-full min-h-0 grid-cols-[minmax(0,1fr)_104px] grid-rows-[minmax(0,1fr)_72px] gap-3">
                 <div className="relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black shadow-2xl">
                   {activeRemoteScreenShare ? (
@@ -2099,6 +2200,13 @@ export function StudyGroupMeetingRoomPreview({
                             className="h-full w-full [&>video]:h-full [&>video]:w-full [&>video]:object-cover"
                           />
                         </div>
+                      ) : getRemoteVideoTileForMember(member) ? (
+                        <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg bg-black">
+                          <AcsMediaView
+                            target={getRemoteVideoTileForMember(member)!.target}
+                            className="h-full w-full [&>video]:h-full [&>video]:w-full [&>video]:object-cover"
+                          />
+                        </div>
                       ) : (
                         <Avatar className="h-10 w-10">
                           <AvatarImage src={member.profile.avatar_url || undefined} />
@@ -2114,7 +2222,7 @@ export function StudyGroupMeetingRoomPreview({
                   ))}
                 </div>
 
-                <div className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4">
+                <div className="col-span-2 flex min-w-0 items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-white">
                       {roomTitle}
@@ -2127,18 +2235,6 @@ export function StudyGroupMeetingRoomPreview({
                     <Badge className="bg-white/10 text-white hover:bg-white/10">
                       +{additionalSharingParticipantCount}
                     </Badge>
-                  )}
-                </div>
-                <div className="flex items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/5 text-white/65">
-                  {currentParticipant?.cameraOn ? (
-                    <Camera className="h-4 w-4" />
-                  ) : (
-                    <CameraOff className="h-4 w-4" />
-                  )}
-                  {currentParticipant?.micOn ? (
-                    <Mic className="h-4 w-4" />
-                  ) : (
-                    <MicOff className="h-4 w-4" />
                   )}
                 </div>
               </div>
